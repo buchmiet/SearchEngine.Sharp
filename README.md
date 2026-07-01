@@ -142,9 +142,11 @@ NuGet.org uses [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/
    - Provider: GitHub Actions
    - Owner: `buchmiet`
    - Repository: `SearchEngine.Sharp`
-   - Workflow: `.github/workflows/publish-nuget.yml`
-2. **GitHub** → repo Settings → Secrets → Actions → `NUGET_USER` = your nuget.org **profile name** (not email).
-3. Push a version tag, e.g. `git tag v0.5.0 && git push origin v0.5.0`.
+   - Workflow: `publish-nuget.yml`
+   - Environment: `production` (must match the workflow job `environment:`)
+2. **GitHub** → repo Settings → Environments → ensure `production` exists (created automatically on first run).
+3. **GitHub** → Secrets → Actions → `NUGET_USER` = nuget.org **profile username** (policy creator; see your profile URL, not display name).
+4. Push a version tag, e.g. `git tag v0.5.0 && git push origin v0.5.0`.
 
 The workflow builds, tests, packs, exchanges an OIDC token for a short-lived push key, then publishes.
 
