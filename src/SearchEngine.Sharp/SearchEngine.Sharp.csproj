@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>SearchEngine</RootNamespace>
+    <AssemblyName>SearchEngine.Sharp</AssemblyName>
+
+    <PackageId>SearchEngine.Sharp</PackageId>
+    <Version>0.5.0</Version>
+    <Authors>Lukasz Buchmiet</Authors>
+    <Description>In-memory inverted index search for .NET.</Description>
+    <PackageTags>search;inverted-index;full-text;substring;boolean-query;natural-sort</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/buchmiet/SearchEngine.Sharp</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/buchmiet/SearchEngine.Sharp</PackageProjectUrl>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SearchEngine.Sharp.Tests" />
+    <InternalsVisibleTo Include="SearchEngine.Sharp.Benchmarks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" Link="README.md" />
+  </ItemGroup>
+
+</Project>

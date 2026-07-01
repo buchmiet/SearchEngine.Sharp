@@ -1,0 +1,119 @@
+using Microsoft.Extensions.DependencyInjection;
+using SearchEngine.Snapshots;
+
+namespace SearchEngine.DependencyInjection;
+
+/// <summary>
+/// Extension methods for registering SearchEngine.Sharp services with DI.
+/// </summary>
+public static class ServiceCollectionExtensions
+{
+    /// <summary>
+    /// Registers SearchEngine.Sharp with recommended lifetimes:
+    /// IIndexSnapshotProvider and IIndexUpdater as singletons; ISearchEngine as scoped.
+    /// </summary>
+    public static IServiceCollection AddSearchEngine(this IServiceCollection services)
+    {
+        services.AddSingleton<IndexSnapshotProvider>();
+        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
+        services.AddSingleton<IIndexUpdater, IndexUpdater>();
+        services.AddScoped<ISearchEngine, SearchEngineSharp>();
+        return services;
+    }
+
+    /// <summary>
+    /// Same as AddSearchEngine, but registers ISearchEngine as transient.
+    /// </summary>
+    public static IServiceCollection AddSearchEngineTransient(this IServiceCollection services)
+    {
+        services.AddSingleton<IndexSnapshotProvider>();
+        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
+        services.AddSingleton<IIndexUpdater, IndexUpdater>();
+        services.AddTransient<ISearchEngine, SearchEngineSharp>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers services and publishes a pre-built initial snapshot.
+    /// </summary>
+    public static IServiceCollection AddSearchEngine(
+        this IServiceCollection services,
+        IDictionary<int, string> initialEntries)
+    {
+        // Pre-build snapshot
+        var snapshot = IndexSnapshotBuilder.Build(initialEntries);
+
+        // Register provider with initial snapshot
+        services.AddSingleton<IndexSnapshotProvider>(_ =>
+        {
+            var provider = new IndexSnapshotProvider();
+            provider.Publish(snapshot);
+            return provider;
+        });
+        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
+        services.AddSingleton<IIndexUpdater, IndexUpdater>();
+        services.AddScoped<ISearchEngine, SearchEngineSharp>();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers keyed services for multiple independent indexes.
+    /// Use [FromKeyedServices("key")] to inject.
+    /// </summary>
+    public static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key)
+    {
+        services.AddKeyedSingleton<IndexSnapshotProvider>(key);
+        services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
+            sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
+        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
+            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k)));
+        services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
+            new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers keyed services with a pre-built initial snapshot.
+    /// </summary>
+    public static IServiceCollection AddKeyedSearchEngine(
+        this IServiceCollection services,
+        string key,
+        IDictionary<int, string> initialEntries)
+    {
+        var snapshot = IndexSnapshotBuilder.Build(initialEntries);
+
+        services.AddKeyedSingleton<IndexSnapshotProvider>(key, (_, _) =>
+        {
+            var provider = new IndexSnapshotProvider();
+            provider.Publish(snapshot);
+            return provider;
+        });
+        services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
+            sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
+        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
+            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k)));
+        services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
+            new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers services and builds the initial snapshot from a factory delegate.
+    /// </summary>
+    public static IServiceCollection AddSearchEngine(
+        this IServiceCollection services,
+        Func<IServiceProvider, IndexSnapshot> snapshotFactory)
+    {
+        services.AddSingleton<IndexSnapshotProvider>(sp =>
+        {
+            var provider = new IndexSnapshotProvider();
+            var snapshot = snapshotFactory(sp);
+            provider.Publish(snapshot);
+            return provider;
+        });
+        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
+        services.AddSingleton<IIndexUpdater, IndexUpdater>();
+        services.AddScoped<ISearchEngine, SearchEngineSharp>();
+        return services;
+    }
+}
