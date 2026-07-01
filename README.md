@@ -108,6 +108,7 @@ updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 |------|------|
 | `ISearchEngine` | Query execution (`Find`, `CountMatches`) |
 | `IIndexUpdater` | Index mutations (rebuild, add, remove) |
+| `ProgressiveIndexIngestion` | Batched progressive ingestion during long scans |
 | `IIndexSnapshotProvider` | Current immutable snapshot |
 | `SearchEngineSharp` | Default `ISearchEngine` implementation |
 | `IndexSnapshotBuilder` | Build snapshot without DI |
@@ -121,6 +122,45 @@ updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 Each mutation rebuilds the full index from the in-memory entry dictionary. Batch methods (`AddOrUpdateEntries`, `RemoveEntries`) perform one rebuild per call. Async rebuild methods consume input outside the update lock.
 
 Queries read the current snapshot via `Volatile.Read`; updates publish a new snapshot with `Interlocked.Exchange`. Snapshots are immutable.
+
+## Live indexing during scans
+
+For large directory scans (100k+ files), do **not** call `AddEntry` per file — each call rebuilds the entire index and total work grows **O(N²)**.
+
+Use `ProgressiveIndexIngestion` instead. It buffers scan results and publishes batches through `AddOrUpdateEntries`:
+
+```csharp
+using SearchEngine.Ingestion;
+
+var ingestion = new ProgressiveIndexIngestion(updater);
+
+var result = await ingestion.IngestAsync(
+    ScanTokenizedPathsAsync(root, cancellationToken),
+    new IngestPublishOptions
+    {
+        Policy = IngestPublishPolicy.Adaptive, // default
+        FixedBatchSize = 2_000,
+        MaxStaleness = TimeSpan.FromSeconds(1),
+    },
+    onPublished: _ => RefreshResultList());
+
+// result.PublishCount, result.WorstCaseStaleness, result.TotalRebuildCpu
+```
+
+Defaults target **&lt; 1 s staleness** and ~50 progressive updates per 100k files on typical hardware. See [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) for measured policy comparison.
+
+**Demo:**
+
+```bash
+dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 100000 --scan-delay-ms 0
+```
+
+**Policy benchmark:**
+
+```bash
+dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy --ingestion-count 100000
+```
+
 
 ## Platform notes
 
@@ -156,6 +196,8 @@ The workflow builds, tests, packs, exchanges an OIDC token for a short-lived pus
 src/SearchEngine.Sharp/          Library
 tests/SearchEngine.Sharp.Tests/  xUnit tests
 benchmarks/SearchEngine.Sharp.Benchmarks/  Throughput console app
+demos/ProgressiveIngestion.Demo/           Progressive ingestion demo
+docs/ingestion-policy-report.md            Policy comparison measurements
 ```
 
 ## License
