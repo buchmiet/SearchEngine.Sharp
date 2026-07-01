@@ -2,7 +2,7 @@
 
 In-memory inverted index for .NET. Supports exact token match, substring (within-word) search, boolean expressions (AND / OR / NOT), and natural sort ordering of results.
 
-Target: .NET 10 (C# 14). NuGet package: `SearchEngine.Sharp` (from tag `v*`, starting at `v0.5.0`).
+Target: .NET 10 (C# 14). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
 
 ## Requirements
 
@@ -133,6 +133,20 @@ Runs on any .NET 10-supported OS and CPU architecture.
 - otherwise: scalar fallback
 
 Infix search in the library is single-threaded. A parallel variant exists only under `benchmarks/` for measurement.
+
+## Publishing (maintainers)
+
+NuGet.org uses [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), not long-lived API keys.
+
+1. **nuget.org** → Account → Trusted Publishing → add policy:
+   - Provider: GitHub Actions
+   - Owner: `buchmiet`
+   - Repository: `SearchEngine.Sharp`
+   - Workflow: `.github/workflows/publish-nuget.yml`
+2. **GitHub** → repo Settings → Secrets → Actions → `NUGET_USER` = your nuget.org **profile name** (not email).
+3. Push a version tag, e.g. `git tag v0.5.0 && git push origin v0.5.0`.
+
+The workflow builds, tests, packs, exchanges an OIDC token for a short-lived push key, then publishes.
 
 ## Project layout
 
