@@ -15,10 +15,21 @@ using SearchEngine.Snapshots;
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --parallel
 
+//   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy
+
 int warmup     = GetInt(args, "--warmup", 3);
 int iterations = GetInt(args, "--iterations", 10);
 int seed       = GetInt(args, "--seed", 1337);
 bool parallel  = args.Contains("--parallel");
+bool ingestionPolicy = args.Contains("--ingestion-policy");
+int ingestionCount = GetInt(args, "--ingestion-count", 100_000);
+int ingestionScanDelayMs = GetInt(args, "--ingestion-scan-delay-ms", 0);
+
+if (ingestionPolicy)
+{
+    IngestionPolicyBenchmark.Run(ingestionCount, seed, ingestionScanDelayMs);
+    return;
+}
 
 Console.WriteLine($"Runtime  : {RuntimeInformation.FrameworkDescription}");
 Console.WriteLine($"Arch     : {RuntimeInformation.ProcessArchitecture}");
