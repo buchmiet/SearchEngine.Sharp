@@ -48,15 +48,35 @@ With `SearchTokenization.FileMask`:
 - Boolean operators (`AND` / `OR` / `NOT`) still work; only **space** splits query terms
   (implicit AND between adjacent terms still applies).
 
+Worked examples, given an index of names `report-final.pdf`, `System`,
+`my-system-backup.zip`, `notes.txt` (queries with `WordMatchMethod.Exact`,
+`enableOperators: true`; encoded in `FileMaskTokenizationTests`):
+
+| Expression | Matches | Why |
+|---|---|---|
+| `system` | `System` | whole-name equality, case-insensitive |
+| `system*` | `System` | prefix glob on the whole name |
+| `*system*` | `System`, `my-system-backup.zip` | contains glob |
+| `*.pdf` | `report-final.pdf` | end-anchored: `.` is not a separator |
+| `*.pdf OR *.txt` | `report-final.pdf`, `notes.txt` | boolean OR over whole-name globs |
+| `* AND NOT *.zip` | all except `my-system-backup.zip` | `*` = all, minus suffix glob |
+| `port` (`Within`) | `report-final.pdf` | substring of the whole name |
+
 FileMask behavioral notes (by design — not bugs):
 
 1. **Parentheses are not query separators** in FileMask, so parenthesis grouping is
    unavailable. Unbalanced-paren degradation in the evaluator does not apply because `(`
-   and `)` are ordinary name characters, not separators.
+   and `)` are ordinary name characters, not separators — a literal `(` or `)` in a name
+   **can** be matched (`report(1).pdf` matches the mask `report(1).pdf`).
 2. A **space in a file name** cannot be typed literally in a mask expression — use `?`
    or `*` wildcards instead.
 3. `*.*` means "name contains a dot", not "match everything". Applications wanting DOS
    `*.*` behavior should rewrite `*.*` → `*` in the UI layer.
+4. With `enableOperators: true`, a file named exactly `and`, `or`, or `not` cannot be
+   searched by its bare name (the term parses as an operator). Query it with operators
+   disabled, or with a wildcard that keeps the term out of operator form (`and*` also
+   matches longer names, so prefer disabling operators). This collision exists in every
+   preset; it is simply more visible when whole names are single terms.
 
 Switching presets requires a full `RebuildFrom` from the application's file table; the
 preset is fixed per snapshot.

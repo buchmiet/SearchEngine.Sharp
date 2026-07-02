@@ -10,7 +10,7 @@ public sealed class SearchTokenization
 {
     private const string DefaultIndexSeparators = " .,;:/\\\r\n\t|-#[]{}()~£$€";
     private const string DefaultQuerySeparators = "| -./\n\r\\,#[]{}()~:;$£€";
-    private const string FileMaskQuerySeparators = " \r\n";
+    private const string FileMaskQuerySeparators = " \r\n"; // explicit CR/LF, not Environment.NewLine — query semantics must be identical on every OS
 
     /// <summary>
     /// Current default preset: token-level semantics (same as pre-0.5.3 behavior).

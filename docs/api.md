@@ -269,11 +269,18 @@ Low-level tokenization helpers used by the index builder.
 
 ```csharp
 static bool IsSeparator(char ch);
+static bool IsSeparator(char ch, SearchValues<char> separators);
 static List<string> GetWordsFromString(string text);          // unique, length-descending
+static List<string> GetWordsFromString(string text, SearchValues<char> separators);
 static string CreateNormalizedWord(ReadOnlySpan<char> source); // lowercase copy
 static char ToLowerInvariantFast(char ch);
 static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, ref TState state, UniqueWordAction<TState> action);
+static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, SearchValues<char> separators, ref TState state, UniqueWordAction<TState> action);
 ```
+
+Overloads without a separator set use the `SearchTokenization.Default` index separators.
+To use a preset's characters, create the set with
+`SearchValues.Create(tokenization.IndexSeparators)`.
 
 ## Namespace `SearchEngine.DependencyInjection`
 

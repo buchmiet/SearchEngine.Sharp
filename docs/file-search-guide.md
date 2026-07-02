@@ -35,20 +35,25 @@ carrying the same preset. Switching modes (e.g. token search ↔ classic file ma
 one `RebuildFrom` from your file table — you cannot mix presets in one snapshot.
 
 ```csharp
-// Token-level (default) — good for type-ahead on name parts
-var tokenUpdater = new IndexUpdater(provider, SearchTokenization.Default);
-
 // Classic file mask — whole-name semantics; *.pdf is end-anchored
-var maskUpdater = new IndexUpdater(provider, SearchTokenization.FileMask);
-var maskEngine = new SearchEngineSharp(provider);
+var provider = new IndexSnapshotProvider();
+var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
+var engine = new SearchEngineSharp(provider);
 
-maskUpdater.RebuildFrom(fileTable); // id → file name
-var pdfs = maskEngine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true);
-var system = maskEngine.Find("system", WordMatchMethod.Exact); // whole name only
+updater.RebuildFrom(fileTable); // id → file name
+var pdfs = engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true);
+var system = engine.Find("system", WordMatchMethod.Exact); // whole name only
 ```
 
 Typical mask UI: `WordMatchMethod.Exact`, `enableOperators: true` for `*.pdf OR *.txt`
 style input; `Within` for incremental substring search on the whole name.
+
+To switch presets at runtime, create a new `IndexUpdater` with the other preset over the
+same provider and call `RebuildFrom` — the published snapshot replaces the old one
+atomically. Do not keep two updaters with different presets active against one provider;
+whichever rebuilds last wins. For both modes side by side, register two independent
+provider/updater/engine sets (keyed DI: `AddKeyedSearchEngine("mask",
+SearchTokenization.FileMask)`).
 
 ## Data model
 
