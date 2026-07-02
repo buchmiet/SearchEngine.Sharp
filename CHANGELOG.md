@@ -11,6 +11,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Glob leaf matching: query tokens with `*` or `?` are auto-routed to whole-token glob matching inside boolean expressions.
 - Facet columns on `IndexedEntry` with post-query `FacetFilter` (range and bitmask predicates, AND-combined).
 - `ISearchEngine` overloads for `Find` and `CountMatches` with optional `FacetFilter`.
+- `SearchTokenization` presets (`Default`, `FileMask`, `Create`) stored per snapshot; `IndexUpdater` and `IndexSnapshotBuilder` overloads; DI `AddSearchEngine(SearchTokenization)`.
 - Documentation: query semantics reference (`docs/query-semantics.md`), file search guide (`docs/file-search-guide.md`), public API reference (`docs/api.md`).
 
 ## [0.5.1] - 2026-07-01

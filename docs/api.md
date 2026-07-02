@@ -29,14 +29,33 @@ int UniqueWordCount { get; }
   which case all documents passing the filter are returned.
 - A `filter` naming a facet that no indexed document carries throws `ArgumentException`.
 
+### `SearchTokenization`
+
+Configurable index-side and query-side separator sets. Stored in each `IndexSnapshot`;
+queries always use `snapshot.Tokenization.QuerySeparators`.
+
+```csharp
+static SearchTokenization Default { get; }   // token-level (legacy behavior)
+static SearchTokenization FileMask { get; }  // whole-name index; whitespace query split
+static SearchTokenization Create(string indexSeparators, string querySeparators);
+
+string IndexSeparators { get; }
+string QuerySeparators { get; }
+```
+
+See [query-semantics.md](query-semantics.md#tokenization-presets) for preset tables and
+FileMask behavioral notes.
+
 ### `IIndexUpdater`
 
 Index mutations. All operations are serialized and publish a new immutable snapshot on
 completion. Each mutation rebuilds the full index; prefer batch methods or
 `ProgressiveIndexIngestion` over per-entry calls. Default implementation:
-`IndexUpdater(IndexSnapshotProvider)`.
+`IndexUpdater(IndexSnapshotProvider, SearchTokenization? tokenization = null)`.
 
 ```csharp
+IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null);
+
 // Full rebuild
 void RebuildFrom(IDictionary<int, string> entries);
 void RebuildFrom(IDictionary<int, IndexedEntry> entries);
@@ -136,6 +155,7 @@ is the empty singleton.
 ```csharp
 int DocumentCount { get; }
 int UniqueWordCount { get; }
+SearchTokenization Tokenization { get; }
 ```
 
 ### `IndexSnapshotBuilder`
@@ -145,9 +165,13 @@ Builds a snapshot directly, without an updater — for pre-built initial snapsho
 
 ```csharp
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries);
+static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization);
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress);
+static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization, IProgress<float>? progress);
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries);
+static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization);
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress);
+static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization, IProgress<float>? progress);
 ```
 
 ## Namespace `SearchEngine.Ingestion`
@@ -257,11 +281,16 @@ static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, 
 
 ```csharp
 static IServiceCollection AddSearchEngine(this IServiceCollection services);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngineTransient(this IServiceCollection services);
+static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IndexSnapshot> snapshotFactory);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key);
+static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, SearchTokenization tokenization);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, IDictionary<int, string> initialEntries);
+static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, IDictionary<int, string> initialEntries, SearchTokenization tokenization);
 ```
 
 Lifetimes: `IIndexSnapshotProvider` and `IIndexUpdater` singletons; `ISearchEngine`

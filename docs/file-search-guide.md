@@ -22,6 +22,34 @@ var ingestion = new ProgressiveIndexIngestion(updater);
 One index per search scope. Queries (`engine`) and updates (`updater` / `ingestion`) are
 safe to run concurrently; queries always see a complete, immutable snapshot.
 
+## Search modes
+
+A **search mode** is the triple:
+
+1. **`SearchTokenization` preset** — how names split into index/query tokens
+2. **`WordMatchMethod`** — `Exact` (whole token) or `Within` (substring inside token/name)
+3. **`enableOperators`** — boolean `AND` / `OR` / `NOT`
+
+Configure the preset on `IndexUpdater` at construction; every rebuild publishes a snapshot
+carrying the same preset. Switching modes (e.g. token search ↔ classic file mask) requires
+one `RebuildFrom` from your file table — you cannot mix presets in one snapshot.
+
+```csharp
+// Token-level (default) — good for type-ahead on name parts
+var tokenUpdater = new IndexUpdater(provider, SearchTokenization.Default);
+
+// Classic file mask — whole-name semantics; *.pdf is end-anchored
+var maskUpdater = new IndexUpdater(provider, SearchTokenization.FileMask);
+var maskEngine = new SearchEngineSharp(provider);
+
+maskUpdater.RebuildFrom(fileTable); // id → file name
+var pdfs = maskEngine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true);
+var system = maskEngine.Find("system", WordMatchMethod.Exact); // whole name only
+```
+
+Typical mask UI: `WordMatchMethod.Exact`, `enableOperators: true` for `*.pdf OR *.txt`
+style input; `Within` for incremental substring search on the whole name.
+
 ## Data model
 
 | File property | Where it goes | Notes |
@@ -183,9 +211,21 @@ Notes on the choices:
 
 ### File extensions
 
-`*.txt` in a query splits on the `.` separator into `* AND txt`, which means "name
-contains the token `txt`" — usually good enough, but `notes.txt.bak` also matches.
-For anchored extension filtering, encode the extension as an integer-id facet:
+**Default preset:** `*.txt` in a query splits on the `.` separator into `* AND txt`,
+which means "name contains the token `txt`" — usually good enough, but `notes.txt.bak`
+also matches. For anchored extension filtering, encode the extension as an integer-id facet
+(see below) or switch to **FileMask** mode.
+
+**FileMask preset:** `*.pdf` is a single glob term anchored on the whole file name —
+end-anchored extension filtering works without an `ext` facet. Example:
+
+```csharp
+var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
+updater.RebuildFrom(fileTable);
+var pdfs = engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true);
+```
+
+**Default preset — ext facet workaround** (only when staying on token semantics):
 
 ```csharp
 // During the scan (ids start at 1 so 0 keeps meaning "none"):
@@ -228,8 +268,8 @@ load at these latencies.
 - Don't pass an empty filter to the filter overloads; call the filter-less overload to
   keep the exact-match fast path.
 - Keep all timestamp facets in UTC; mixing kinds shifts range boundaries.
-- `*.txt` has token semantics, not end-anchored semantics — see
-  [File extensions](#file-extensions).
+- `*.txt` has token semantics under **Default**, not end-anchored semantics — use
+  **FileMask** or an `ext` facet; see [File extensions](#file-extensions).
 - A literal `*` or `?` cannot be searched for; on the query side they are always
   wildcards.
 - Do not pre-process query strings with `NameTokenizer.TokenizeName` — it strips

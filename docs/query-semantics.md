@@ -6,16 +6,64 @@ where this document and the tests disagree, the tests win.
 
 ## Pipeline overview
 
-**Indexing:** `SearchText` → split on separators → lowercase → unique tokens per document
-→ inverted index (token → posting list of documents).
+**Indexing:** `SearchText` → split on the snapshot's **index-side** separators → lowercase
+→ unique tokens per document → inverted index (token → posting list of documents).
 
-**Querying:** expression → split on separators → each term resolves to a document set →
-sets combined with boolean algebra → optional facet filter intersected → results
-materialized in the requested sort order.
+**Querying:** expression → split on the snapshot's **query-side** separators → each term
+resolves to a document set → sets combined with boolean algebra → optional facet filter
+intersected → results materialized in the requested sort order.
 
-## Index-side tokenization
+Both separator sets are stored in each `IndexSnapshot` as a `SearchTokenization` preset
+so queries always match the index that built them.
 
-Separator characters (`SearchSeparators.IndexText`):
+## Tokenization presets
+
+`SearchTokenization` (namespace `SearchEngine`) carries the index-side and query-side
+separator character sets. Pass it to `IndexUpdater` and `IndexSnapshotBuilder`; queries
+read it from `snapshot.Tokenization`.
+
+| Preset | Index separators | Query separators | Use case |
+|---|---|---|---|
+| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except **no TAB** | token-level search (pre-0.5.3 behavior) |
+| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | whitespace only: space, CR, LF | classic file-manager masks on whole names |
+| `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
+
+Factory:
+
+```csharp
+var custom = SearchTokenization.Create(indexSeparators: "-", querySeparators: " ");
+```
+
+### FileMask semantics
+
+With `SearchTokenization.FileMask`:
+
+- A bare term such as `system` matches the **whole file name** (case-insensitive exact
+  token equality), not a substring inside a longer token. `my-system-backup.zip` does
+  **not** match `system`.
+- `*.pdf`, `system*`, and `*system*` are anchored globs on the whole name; `.` is **not**
+  a separator, so `*.pdf` means "name ends with `.pdf`".
+- `WordMatchMethod.Within` still matches substrings of the whole name (e.g. `port`
+  matches `report-final.pdf`).
+- Boolean operators (`AND` / `OR` / `NOT`) still work; only **space** splits query terms
+  (implicit AND between adjacent terms still applies).
+
+FileMask behavioral notes (by design — not bugs):
+
+1. **Parentheses are not query separators** in FileMask, so parenthesis grouping is
+   unavailable. Unbalanced-paren degradation in the evaluator does not apply because `(`
+   and `)` are ordinary name characters, not separators.
+2. A **space in a file name** cannot be typed literally in a mask expression — use `?`
+   or `*` wildcards instead.
+3. `*.*` means "name contains a dot", not "match everything". Applications wanting DOS
+   `*.*` behavior should rewrite `*.*` → `*` in the UI layer.
+
+Switching presets requires a full `RebuildFrom` from the application's file table; the
+preset is fixed per snapshot.
+
+## Index-side tokenization (Default preset)
+
+Separator characters (`SearchTokenization.Default.IndexSeparators`):
 
 ```
 space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
@@ -34,9 +82,9 @@ it keeps only letter/digit runs (so `_` also splits) and joins the result with `
 If you pre-process indexed text with it, do **not** run query strings through it — it
 strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidance.
 
-## Query parsing
+## Query parsing (Default preset)
 
-Separator characters (`SearchSeparators.QueryExpression`):
+Separator characters (`SearchTokenization.Default.QuerySeparators`):
 
 ```
 space . , ; : / \ CR LF | - # [ ] { } ( ) ~ £ $ €
