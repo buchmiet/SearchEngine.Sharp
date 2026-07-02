@@ -1,8 +1,18 @@
 # SearchEngine.Sharp
 
-In-memory inverted index for .NET. Supports exact token match, substring (within-word) search, boolean expressions (AND / OR / NOT), and natural sort ordering of results.
+In-memory inverted index for .NET. Supports exact token match, substring (within-word) search, glob patterns (`*`, `?`), boolean expressions (AND / OR / NOT), numeric facet filters (ranges and bitmasks over dates, sizes, flags), natural sort ordering, and progressive indexing during long scans.
 
 Target: .NET 10 (C# 14). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
+
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [docs/query-semantics.md](docs/query-semantics.md) | Exact rules: tokenization, match methods, boolean operators, globs, facet filters, edge cases |
+| [docs/file-search-guide.md](docs/file-search-guide.md) | End-to-end recipe: file search with live results, size/date/attribute criteria |
+| [docs/api.md](docs/api.md) | Full public API reference with signatures |
+| [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) | Measured publish-policy comparison for progressive ingestion |
+| [docs/glob-and-facets-report.md](docs/glob-and-facets-report.md) | Measured glob and facet filter throughput |
 
 ## Requirements
 
@@ -109,6 +119,8 @@ updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 Optional facet values attach numeric columns for post-query filtering:
 
 ```csharp
+using SearchEngine.Filters;
+
 updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 {
     [10] = new(
@@ -131,22 +143,26 @@ var allLarge = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.Snap
     FacetFilter.Range("size", 1_000_000, long.MaxValue));
 ```
 
-Missing facet values default to `0` in the snapshot column. Unknown facet names in a filter throw `ArgumentException`.
+Missing facet values default to `0` in the snapshot column. Unknown facet names in a filter throw `ArgumentException`. An empty expression with a non-empty filter matches all documents through the filter. Full rules: [docs/query-semantics.md](docs/query-semantics.md#facet-filters).
 
 ### Glob matching
 
-Query tokens containing `*` or `?` are matched as **glob patterns** against whole indexed tokens (anchored at both ends), regardless of `WordMatchMethod`:
+Query tokens containing `*` or `?` are matched as glob patterns against whole indexed tokens (anchored at both ends), regardless of `WordMatchMethod`:
 
 - `*` — zero or more characters
 - `?` — exactly one character
 
 Notes:
 
-- Indexed words never contain `*`/`?` (tokenization keeps letters and digits only).
+- There is no escape syntax: `*` and `?` in a query are always wildcards.
 - `[` and `]` are query separators and are not part of glob syntax.
-- A pattern spanning token boundaries (e.g. `ga-1*`) is split into multiple tokens joined by implicit AND.
+- A pattern spanning token boundaries (e.g. `ga-1*`) is split into multiple tokens joined by implicit AND; `*.txt` therefore means "has token `txt`", not "ends with `.txt`" — see [docs/file-search-guide.md](docs/file-search-guide.md#file-extensions) for anchored extension filtering.
+
+Full rules and worked examples: [docs/query-semantics.md](docs/query-semantics.md#glob-patterns).
 
 ## API summary
+
+Full signatures: [docs/api.md](docs/api.md).
 
 | Type | Role |
 |------|------|
@@ -251,6 +267,9 @@ src/SearchEngine.Sharp/          Library
 tests/SearchEngine.Sharp.Tests/  xUnit tests
 benchmarks/SearchEngine.Sharp.Benchmarks/  Throughput console app
 demos/ProgressiveIngestion.Demo/           Progressive ingestion demo
+docs/query-semantics.md                    Tokenization, operators, globs, facets — exact rules
+docs/file-search-guide.md                  File search recipe (live results, facet criteria)
+docs/api.md                                Public API reference
 docs/ingestion-policy-report.md            Policy comparison measurements
 docs/glob-and-facets-report.md             Glob and facet filter measurements
 ```
