@@ -23,9 +23,10 @@ namespace SearchEngine;
 /// Handles index rebuilding with serialized concurrent access.
 /// Maintains source data for convenient add/remove/refresh operations.
 /// </summary>
-public sealed class IndexUpdater(IndexSnapshotProvider provider) : IIndexUpdater
+public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null) : IIndexUpdater
 {
     private readonly IndexSnapshotProvider _provider = provider;
+    private readonly SearchTokenization _tokenization = tokenization ?? SearchTokenization.Default;
     private readonly Lock _rebuildGate = new();
     private readonly Dictionary<int, IndexedEntry> _entries = [];
 
@@ -213,7 +214,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider) : IIndexUpdater
 
     private void RebuildAndPublish(IProgress<float>? progress = null)
     {
-        var snapshot = IndexSnapshotBuilder.Build(_entries, progress);
+        var snapshot = IndexSnapshotBuilder.Build(_entries, _tokenization, progress);
         _provider.Publish(snapshot);
     }
 }

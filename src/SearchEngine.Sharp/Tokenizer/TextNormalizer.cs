@@ -8,17 +8,23 @@ public static class TextNormalizer
 {
     public delegate void UniqueWordAction<TState>(ref TState state, string word);
 
-    private static readonly SearchValues<char> SeparatorValues = SearchSeparators.IndexText;
+    private static readonly SearchValues<char> DefaultSeparatorValues = SearchSeparators.IndexText;
     private static readonly char[] AsciiLowercaseMap = BuildAsciiLowercaseMap();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsSeparator(char ch) => SeparatorValues.Contains(ch);
+    public static bool IsSeparator(char ch) => IsSeparator(ch, DefaultSeparatorValues);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsSeparator(char ch, SearchValues<char> separators) => separators.Contains(ch);
 
     public static List<string> GetWordsFromString(string text)
+        => GetWordsFromString(text, DefaultSeparatorValues);
+
+    public static List<string> GetWordsFromString(string text, SearchValues<char> separators)
     {
         var words = new List<string>();
         var uniqueWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        ForEachUniqueWord(text, uniqueWords, ref words, static (ref List<string> list, string word) => list.Add(word));
+        ForEachUniqueWord(text, uniqueWords, separators, ref words, static (ref List<string> list, string word) => list.Add(word));
 
         CollectionsMarshal.AsSpan(words).Sort(static (a, b) => b.Length.CompareTo(a.Length));
 
@@ -28,6 +34,14 @@ public static class TextNormalizer
     public static void ForEachUniqueWord<TState>(
         string text,
         HashSet<string> uniqueWords,
+        ref TState state,
+        UniqueWordAction<TState> action)
+        => ForEachUniqueWord(text, uniqueWords, DefaultSeparatorValues, ref state, action);
+
+    public static void ForEachUniqueWord<TState>(
+        string text,
+        HashSet<string> uniqueWords,
+        SearchValues<char> separators,
         ref TState state,
         UniqueWordAction<TState> action)
     {
@@ -42,7 +56,7 @@ public static class TextNormalizer
 
         for (int i = 0; i < span.Length; i++)
         {
-            if (SeparatorValues.Contains(span[i]))
+            if (separators.Contains(span[i]))
             {
                 EmitWordIfUnique(span, wordStart, i, uniqueWords, lookup, ref state, action);
                 wordStart = -1;
