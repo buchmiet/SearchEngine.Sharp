@@ -429,6 +429,9 @@ FodyWeavers.xsd
 
 **/.idea/
 
+# Local scratch / one-off verification (not part of the solution)
+scratch/
+
 # Rust workspace artifacts
 LayoutTracker/LayoutTracker.Server.Rust/**/target/
 LayoutTracker/LayoutTracker.Server.Rust/**/*.rs.bk

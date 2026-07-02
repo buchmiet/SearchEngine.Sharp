@@ -4,6 +4,10 @@ In-memory inverted index for .NET. Supports exact token match, substring (within
 
 Target: .NET 10 (C# 14). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
 
+**Tokenization presets:** `SearchTokenization.Default` (token-level search) and
+`SearchTokenization.FileMask` (whole-file-name classic masks — `*.pdf` is end-anchored).
+Pass to `IndexUpdater`; details in [docs/query-semantics.md](docs/query-semantics.md#tokenization-presets).
+
 ## Documentation
 
 | Document | Contents |
@@ -178,6 +182,7 @@ Full signatures: [docs/api.md](docs/api.md).
 | `SearchSortMode.NaturalSortAscending` | Sort by natural key derived from `SortText` |
 | `FacetValues` | Optional per-document facet bag (`long` values) |
 | `FacetFilter` | Post-query AND filter (range / bitmask) |
+| `SearchTokenization` | Index/query separator presets (`Default`, `FileMask`) |
 
 ## Index updates
 

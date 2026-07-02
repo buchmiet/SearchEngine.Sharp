@@ -35,7 +35,10 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (method == WordMatchMethod.Exact)
         {
             if (!enableOperators
-                && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord)
+                && QueryExpressionEvaluator.TryGetSingleWord(
+                    expression.AsSpan(),
+                    snapshot.Tokenization.QuerySeparatorValues,
+                    out var singleWord)
                 && !GlobMatcher.ContainsMetacharacters(singleWord!))
             {
                 return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
@@ -73,7 +76,10 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (method == WordMatchMethod.Exact
             && !enableOperators
             && sortMode == SearchSortMode.SnapshotOrder
-            && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord)
+            && QueryExpressionEvaluator.TryGetSingleWord(
+                expression.AsSpan(),
+                snapshot.Tokenization.QuerySeparatorValues,
+                out var singleWord)
             && !GlobMatcher.ContainsMetacharacters(singleWord!))
         {
             return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
@@ -188,7 +194,11 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         QueryContext queryContext,
         IndexSnapshot snapshot)
     {
-        if (!enableOperators && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord))
+        if (!enableOperators
+            && QueryExpressionEvaluator.TryGetSingleWord(
+                expression.AsSpan(),
+                snapshot.Tokenization.QuerySeparatorValues,
+                out var singleWord))
             return QueryMatcher.Match(singleWord!, method, queryContext, snapshot);
 
         return QueryExpressionEvaluator.Evaluate(expression, enableOperators, method, queryContext, snapshot);

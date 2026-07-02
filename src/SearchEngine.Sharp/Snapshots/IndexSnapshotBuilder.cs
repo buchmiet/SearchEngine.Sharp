@@ -43,32 +43,58 @@ public static class IndexSnapshotBuilder
     /// Builds an IndexSnapshot from string entries.
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries)
-    {
-        return Build(entries, progress: null);
-    }
+        => Build(entries, SearchTokenization.Default);
+
+    /// <summary>
+    /// Builds an IndexSnapshot from string entries with a tokenization preset.
+    /// </summary>
+    public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization)
+        => Build(entries, tokenization, progress: null);
 
     /// <summary>
     /// Builds an IndexSnapshot from string entries with progress reporting.
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress)
+        => Build(entries, SearchTokenization.Default, progress);
+
+    /// <summary>
+    /// Builds an IndexSnapshot from string entries with a tokenization preset and progress reporting.
+    /// </summary>
+    public static IndexSnapshot Build(
+        IEnumerable<KeyValuePair<int, string>> entries,
+        SearchTokenization tokenization,
+        IProgress<float>? progress)
     {
-        return BuildCore(entries, static text => text, static text => text, static _ => null, progress);
+        return BuildCore(entries, static text => text, static text => text, static _ => null, tokenization, progress);
     }
 
     /// <summary>
     /// Builds an IndexSnapshot from IndexedEntry entries.
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
-    {
-        return Build(entries, progress: null);
-    }
+        => Build(entries, SearchTokenization.Default);
+
+    /// <summary>
+    /// Builds an IndexSnapshot from IndexedEntry entries with a tokenization preset.
+    /// </summary>
+    public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization)
+        => Build(entries, tokenization, progress: null);
 
     /// <summary>
     /// Builds an IndexSnapshot from IndexedEntry entries with progress reporting.
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress)
+        => Build(entries, SearchTokenization.Default, progress);
+
+    /// <summary>
+    /// Builds an IndexSnapshot from IndexedEntry entries with a tokenization preset and progress reporting.
+    /// </summary>
+    public static IndexSnapshot Build(
+        IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
+        SearchTokenization tokenization,
+        IProgress<float>? progress)
     {
-        return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, static entry => entry.Facets, progress);
+        return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, static entry => entry.Facets, tokenization, progress);
     }
 
     private static IndexSnapshot BuildCore<TEntry>(
@@ -76,8 +102,10 @@ public static class IndexSnapshotBuilder
         Func<TEntry, string> getSearchText,
         Func<TEntry, string> getSortText,
         Func<TEntry, FacetValues?> getFacets,
+        SearchTokenization tokenization,
         IProgress<float>? progress)
     {
+        var indexSeparators = tokenization.IndexSeparatorValues;
         int entryCount = entries.TryGetNonEnumeratedCount(out int count) ? count : 0;
         var stringPool = new WordStringPool();
         var invertedIndex = entryCount > 0
@@ -111,7 +139,8 @@ public static class IndexSnapshotBuilder
 
             TextNormalizer.ForEachUniqueWord(
                 getSearchText(entry),
-                uniqueWords,     // reused across documents — cleared internally per call
+                uniqueWords,
+                indexSeparators,
                 ref buildState,
                 static (ref BuildWordState state, string word) =>
                 {
@@ -240,6 +269,7 @@ public static class IndexSnapshotBuilder
             sortTexts: [.. sortTexts],
             sortedPermutation: null,
             facetColumns: facetColumns,
+            tokenization: tokenization,
             documentCount: recordIdsArr.Length,
             uniqueWordCount: stringPool.Count
         );

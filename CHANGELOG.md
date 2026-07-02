@@ -10,6 +10,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `SearchTokenization` presets (`Default`, `FileMask`, `Create`) stored per snapshot; `IndexUpdater` and `IndexSnapshotBuilder` overloads; DI `AddSearchEngine(SearchTokenization)`.
+- `FileMask` preset: whole-name search semantics — bare terms match the entire name, `*.pdf` is end-anchored, query terms split on whitespace only.
+
+## [0.5.2] - 2026-07-01
+
+### Added
+
 - Glob leaf matching: query tokens with `*` or `?` are auto-routed to whole-token glob matching inside boolean expressions.
 - Facet columns on `IndexedEntry` with post-query `FacetFilter` (range and bitmask predicates, AND-combined).
 - `ISearchEngine` overloads for `Find` and `CountMatches` with optional `FacetFilter`.

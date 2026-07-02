@@ -9,12 +9,13 @@ namespace SearchEngine.Query;
 
 internal static class QueryExpressionEvaluator
 {
-    private static readonly SearchValues<char> Separators = SearchSeparators.QueryExpression;
-
     // Fast path: if the expression contains exactly one word (no operators, no multiple
     // tokens), skip the full tokenize → correct → evaluate pipeline and go straight to
     // QueryMatcher.Match. This is the common case for simple type-ahead search.
-    internal static bool TryGetSingleWord(ReadOnlySpan<char> expression, out string? word)
+    internal static bool TryGetSingleWord(
+        ReadOnlySpan<char> expression,
+        SearchValues<char> separators,
+        out string? word)
     {
         word = null;
 
@@ -23,7 +24,7 @@ internal static class QueryExpressionEvaluator
 
         for (int i = 0; i < expression.Length; i++)
         {
-            if (Separators.Contains(expression[i]))
+            if (separators.Contains(expression[i]))
             {
                 if (wordStart < 0)
                     continue;
@@ -60,7 +61,8 @@ internal static class QueryExpressionEvaluator
         QueryContext qc,
         IndexSnapshot snapshot)
     {
-        var tokens = Tokenize(expression.AsSpan(), enableOperators);
+        var separators = snapshot.Tokenization.QuerySeparatorValues;
+        var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
         if (tokens.Count == 0)
             return null;
 
@@ -71,7 +73,10 @@ internal static class QueryExpressionEvaluator
         return EvaluateTokens(tokens, method, qc, snapshot);
     }
 
-    private static List<QueryToken> Tokenize(ReadOnlySpan<char> expression, bool enableOperators)
+    private static List<QueryToken> Tokenize(
+        ReadOnlySpan<char> expression,
+        bool enableOperators,
+        SearchValues<char> separators)
     {
         var tokens = new List<QueryToken>();
         int wordStart = -1;
@@ -80,7 +85,7 @@ internal static class QueryExpressionEvaluator
         for (int i = 0; i < expression.Length; i++)
         {
             char ch = expression[i];
-            if (!Separators.Contains(ch))
+            if (!separators.Contains(ch))
             {
                 if (wordStart < 0)
                     wordStart = i;

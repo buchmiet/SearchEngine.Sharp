@@ -53,6 +53,7 @@ public sealed class IndexSnapshot
         sortTexts: [],
         sortedPermutation: [],
         facetColumns: [],
+        tokenization: SearchTokenization.Default,
         documentCount: 0,
         uniqueWordCount: 0
     );
@@ -100,6 +101,9 @@ public sealed class IndexSnapshot
     // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
     internal readonly Dictionary<string, long[]> FacetColumns;
 
+    /// <summary>Tokenization preset used when this snapshot was built.</summary>
+    public SearchTokenization Tokenization { get; }
+
     public int DocumentCount { get; }
     public int UniqueWordCount { get; }
 
@@ -116,6 +120,7 @@ public sealed class IndexSnapshot
         string[] sortTexts,
         int[]? sortedPermutation,
         Dictionary<string, long[]> facetColumns,
+        SearchTokenization tokenization,
         int documentCount,
         int uniqueWordCount)
     {
@@ -131,6 +136,7 @@ public sealed class IndexSnapshot
         _sortTexts = sortTexts;
         _sortedPermutation = sortedPermutation;
         FacetColumns = facetColumns;
+        Tokenization = tokenization;
         DocumentCount = documentCount;
         UniqueWordCount = uniqueWordCount;
     }
