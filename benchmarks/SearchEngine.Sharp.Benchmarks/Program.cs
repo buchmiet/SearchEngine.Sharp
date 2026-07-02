@@ -4,6 +4,7 @@ using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
 using SearchEngine;
+using SearchEngine.Filters;
 using SearchEngine.Sharp.Benchmarks;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
@@ -17,10 +18,13 @@ using SearchEngine.Snapshots;
 
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy
 
+//   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --facet
+
 int warmup     = GetInt(args, "--warmup", 3);
 int iterations = GetInt(args, "--iterations", 10);
 int seed       = GetInt(args, "--seed", 1337);
 bool parallel  = args.Contains("--parallel");
+bool facetBench = args.Contains("--facet");
 bool ingestionPolicy = args.Contains("--ingestion-policy");
 int ingestionCount = GetInt(args, "--ingestion-count", 100_000);
 int ingestionScanDelayMs = GetInt(args, "--ingestion-scan-delay-ms", 0);
@@ -46,6 +50,13 @@ var scenarios = new BenchScenario[]
 
 foreach (var scenario in scenarios)
     RunQueryScenario(scenario);
+
+if (facetBench)
+{
+    Console.WriteLine();
+    foreach (var scenario in scenarios.Where(s => s.Name is "medium" or "large"))
+        RunFacetScenario(scenario);
+}
 
 if (parallel)
 {
@@ -75,6 +86,36 @@ void RunQueryScenario(BenchScenario scenario)
     RunQueryBench("Within", data.InfixQueries, q => engine.Find(q, WordMatchMethod.Within));
     RunQueryBench("Glob", data.GlobQueries, q => engine.Find(q, WordMatchMethod.Exact));
     RunQueryBench("Boolean", data.BooleanQueries, q => engine.Find(q, WordMatchMethod.Exact, enableOperators: true));
+    Console.WriteLine();
+}
+
+void RunFacetScenario(BenchScenario scenario)
+{
+    Console.WriteLine($"=== facet — {scenario.Name} — {scenario.DocumentCount:N0} docs ===");
+
+    var data = SyntheticDataFactory.CreateWithFacets(scenario, seed);
+    var provider = new IndexSnapshotProvider();
+    var updater = new IndexUpdater(provider);
+    updater.RebuildFrom(data.Documents.ToDictionary(
+        d => d.Id,
+        d => new IndexedEntry(
+            d.Text,
+            d.Text,
+            FacetValues.FromDictionary(new Dictionary<string, long>
+            {
+                ["size"] = d.SizeBytes,
+                ["modified"] = d.ModifiedTicks,
+            }))));
+    var engine = new SearchEngineSharp(provider);
+
+    var sizeFilter = FacetFilter.Range("size", 1_024, 1_048_576);
+    var recentFilter = FacetFilter.Range("modified", DateTime.UtcNow.AddDays(-30).Ticks, long.MaxValue);
+    var combinedFilter = FacetFilter.Combine(sizeFilter, recentFilter);
+
+    RunQueryBench("Exact+Filter", data.ExactQueries, q => engine.Find(q, WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, sizeFilter));
+    RunQueryBench("Within+Filter", data.InfixQueries, q => engine.Find(q, WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, sizeFilter));
+    RunQueryBench("Glob+Filter", data.GlobQueries, q => engine.Find(q, WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, combinedFilter));
+    RunQueryBench("FilterOnly", data.ExactQueries, _ => engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, sizeFilter));
     Console.WriteLine();
 }
 
@@ -206,7 +247,7 @@ static int GetInt(string[] args, string flag, int defaultValue)
 }
 
 sealed record BenchScenario(string Name, int DocumentCount, int VocabularySize, int QueryCount);
-sealed record BenchDocument(int Id, string Text, string[] Terms);
+sealed record BenchDocument(int Id, string Text, string[] Terms, long SizeBytes = 0, long ModifiedTicks = 0);
 sealed record BenchData(
     IReadOnlyList<BenchDocument> Documents,
     IReadOnlyList<string> ExactQueries,
@@ -234,6 +275,35 @@ static class SyntheticDataFactory
             for (int i = 0; i < terms.Length; i++)
                 terms[i] = PickWord(vocabulary, hotCount, rng);
             documents.Add(new BenchDocument(id, string.Join(' ', terms), terms));
+        }
+
+        return new BenchData(
+            documents,
+            BuildExactQueries(documents, scenario.QueryCount, rng),
+            BuildInfixQueries(documents, scenario.QueryCount, rng),
+            BuildGlobQueries(documents, scenario.QueryCount, rng),
+            BuildBooleanQueries(documents, scenario.QueryCount, rng));
+    }
+
+    public static BenchData CreateWithFacets(BenchScenario scenario, int seed)
+    {
+        var rng = new Random(seed ^ 0x5FAC);
+        var vocabulary = BuildVocabulary(scenario.VocabularySize, rng);
+        Shuffle(vocabulary, rng);
+
+        int hotCount = Math.Max(64, scenario.VocabularySize / 20);
+        var documents = new List<BenchDocument>(scenario.DocumentCount);
+        long nowTicks = DateTime.UtcNow.Ticks;
+
+        for (int id = 0; id < scenario.DocumentCount; id++)
+        {
+            var terms = new string[32];
+            for (int i = 0; i < terms.Length; i++)
+                terms[i] = PickWord(vocabulary, hotCount, rng);
+
+            long sizeBytes = rng.Next(256, 4_194_304);
+            long modifiedTicks = nowTicks - rng.Next(0, 90) * TimeSpan.TicksPerDay;
+            documents.Add(new BenchDocument(id, string.Join(' ', terms), terms, sizeBytes, modifiedTicks));
         }
 
         return new BenchData(

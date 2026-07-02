@@ -1,3 +1,4 @@
+using SearchEngine.Filters;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
 using SearchEngine.Query;
@@ -49,9 +50,21 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     }
 
     /// <inheritdoc />
+    public int CountMatches(string expression, WordMatchMethod method, bool enableOperators, FacetFilter? filter)
+    {
+        var snapshot = snapshotProvider.Current;
+
+        if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
+            return 0;
+
+        using var queryContext = new QueryContext(snapshot.DocumentCount);
+        var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
+        return resultSet?.GetTrueCount() ?? 0;
+    }
+
+    /// <inheritdoc />
     public List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode)
     {
-        // Get snapshot reference once - atomic read
         var snapshot = snapshotProvider.Current;
 
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
@@ -73,13 +86,43 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (resultSet == null)
             return [];
 
-        // Collect results — use pre-sorted permutation or snapshot order
+        return MaterializeResults(snapshot, resultSet, sortMode);
+    }
+
+    /// <inheritdoc />
+    public List<int> Find(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        SearchSortMode sortMode,
+        FacetFilter? filter)
+    {
+        var snapshot = snapshotProvider.Current;
+
+        if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
+            return [];
+
+        using var queryContext = new QueryContext(snapshot.DocumentCount);
+        var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
+        if (resultSet == null)
+            return [];
+
+        return MaterializeResults(snapshot, resultSet, sortMode);
+    }
+
+    private static bool HasQueryInput(string expression, FacetFilter? filter)
+        => !string.IsNullOrWhiteSpace(expression) || filter is not null && !filter.IsEmpty;
+
+    private static List<int> MaterializeResults(
+        IndexSnapshot snapshot,
+        FastBitSet resultSet,
+        SearchSortMode sortMode)
+    {
         var results = new List<int>();
         var recordIdsSpan = snapshot.RecordIds.AsSpan();
 
         if (sortMode == SearchSortMode.NaturalSortAscending)
         {
-            // Linear scan of pre-computed permutation — O(n), no per-query Sort
             var permutation = snapshot.GetSortedPermutation();
             foreach (var idx in permutation)
             {
@@ -97,6 +140,33 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         }
 
         return results;
+    }
+
+    private static FastBitSet? ExecuteQuery(
+        IndexSnapshot snapshot,
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        FacetFilter? filter,
+        QueryContext queryContext)
+    {
+        FastBitSet? resultSet;
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            resultSet = queryContext.RentAllTrueBitSet();
+        }
+        else
+        {
+            resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
+        }
+
+        if (resultSet is null)
+            return null;
+
+        if (filter is not null && !filter.IsEmpty)
+            FacetFilterEvaluator.Apply(resultSet, filter, snapshot, queryContext);
+
+        return resultSet;
     }
 
     private static bool TryGetExactPostingSpan(string word, IndexSnapshot snapshot, out ReadOnlySpan<int> postings)

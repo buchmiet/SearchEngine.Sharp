@@ -106,6 +106,33 @@ updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 
 `SearchText` is tokenized and matched. `SortText` drives `SearchSortMode.NaturalSortAscending`.
 
+Optional facet values attach numeric columns for post-query filtering:
+
+```csharp
+updater.RebuildFrom(new Dictionary<int, IndexedEntry>
+{
+    [10] = new(
+        "GA-100 G-Shock digital",
+        "GA-100",
+        FacetValues.FromDictionary(new Dictionary<string, long>
+        {
+            ["size"] = 12_345,              // bytes
+            ["modified"] = DateTime.UtcNow.Ticks,
+            ["attrs"] = 0x1 | 0x4,          // bit flags
+        })),
+});
+
+var filter = FacetFilter.Combine(
+    FacetFilter.Range("size", 1024, 1_048_576),
+    FacetFilter.Mask("attrs", mustHave: 0x1, mustNot: 0x2));
+
+var hits = engine.Find("g shock", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
+var allLarge = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder,
+    FacetFilter.Range("size", 1_000_000, long.MaxValue));
+```
+
+Missing facet values default to `0` in the snapshot column. Unknown facet names in a filter throw `ArgumentException`.
+
 ### Glob matching
 
 Query tokens containing `*` or `?` are matched as **glob patterns** against whole indexed tokens (anchored at both ends), regardless of `WordMatchMethod`:
@@ -133,6 +160,8 @@ Notes:
 | `WordMatchMethod.Within` | Substring match inside indexed tokens |
 | `SearchSortMode.SnapshotOrder` | Result order follows internal document ordinals |
 | `SearchSortMode.NaturalSortAscending` | Sort by natural key derived from `SortText` |
+| `FacetValues` | Optional per-document facet bag (`long` values) |
+| `FacetFilter` | Post-query AND filter (range / bitmask) |
 
 ## Index updates
 
@@ -178,6 +207,14 @@ dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 10000
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy --ingestion-count 100000
 ```
 
+**Facet filter benchmark:**
+
+```bash
+dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --facet
+```
+
+See [docs/glob-and-facets-report.md](docs/glob-and-facets-report.md) for glob and facet throughput measurements.
+
 
 ## Platform notes
 
@@ -215,6 +252,7 @@ tests/SearchEngine.Sharp.Tests/  xUnit tests
 benchmarks/SearchEngine.Sharp.Benchmarks/  Throughput console app
 demos/ProgressiveIngestion.Demo/           Progressive ingestion demo
 docs/ingestion-policy-report.md            Policy comparison measurements
+docs/glob-and-facets-report.md             Glob and facet filter measurements
 ```
 
 ## License

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using SearchEngine.Filters;
 using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
@@ -188,6 +189,38 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Fact]
+    public async Task Ingest_WithFacets_SupportsFilterQueriesDuringAndAfterScan()
+    {
+        var (engine, _, ingestion) = Create();
+        const int count = 3_000;
+        var filter = FacetFilter.Range("size", 50_000, long.MaxValue);
+        var sawPartialHits = false;
+
+        var ingestTask = ingestion.IngestAsync(
+            FacetedPathFeed.EnumerateAsync(count, seed: 17),
+            new IngestPublishOptions
+            {
+                Policy = IngestPublishPolicy.FixedBatch,
+                FixedBatchSize = 300,
+            });
+
+        while (!ingestTask.IsCompleted)
+        {
+            int hits = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count;
+            if (hits > 0 && hits < count)
+                sawPartialHits = true;
+
+            await Task.Delay(5);
+        }
+
+        var result = await ingestTask;
+
+        Assert.True(result.CompletedSuccessfully);
+        Assert.True(sawPartialHits, "Expected filter-only queries to return partial results during ingestion.");
+        Assert.Equal(count - 500, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count);
+    }
+
+    [Fact]
     public async Task Ingest_RejectsConcurrentRuns()
     {
         var (_, _, ingestion) = Create();
@@ -219,5 +252,23 @@ public class ProgressiveIndexIngestionTests
     {
         await Task.Run(() => gate.Wait(cancellationToken), cancellationToken);
         yield return new KeyValuePair<int, string>(1, "blocked");
+    }
+
+    private static class FacetedPathFeed
+    {
+        public static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> EnumerateAsync(
+            int count,
+            int seed = 42,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var (id, text) in SyntheticPathFeed.CreateDictionary(count, seed))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return new KeyValuePair<int, IndexedEntry>(
+                    id,
+                    new IndexedEntry(text, text, FacetValues.Create("size", id * 100L)));
+                await Task.Yield();
+            }
+        }
     }
 }

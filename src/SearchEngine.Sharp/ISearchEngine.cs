@@ -21,9 +21,24 @@ public interface ISearchEngine
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode);
 
     /// <summary>
+    /// Searches for entries matching the given expression with optional facet filtering.
+    /// </summary>
+    List<int> Find(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        SearchSortMode sortMode,
+        Filters.FacetFilter? filter);
+
+    /// <summary>
     /// Counts entries matching the given expression without materializing document IDs.
     /// </summary>
     int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false);
+
+    /// <summary>
+    /// Counts entries matching the given expression with optional facet filtering.
+    /// </summary>
+    int CountMatches(string expression, WordMatchMethod method, bool enableOperators, Filters.FacetFilter? filter);
 
     /// <summary>
     /// Gets the number of indexed documents in the current snapshot.

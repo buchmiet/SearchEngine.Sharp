@@ -52,6 +52,7 @@ public sealed class IndexSnapshot
         bigramWordIndices: [],
         sortTexts: [],
         sortedPermutation: [],
+        facetColumns: [],
         documentCount: 0,
         uniqueWordCount: 0
     );
@@ -96,6 +97,9 @@ public sealed class IndexSnapshot
     // Computed once on first use via Interlocked.CompareExchange (see GetSortedPermutation).
     private int[]? _sortedPermutation;
 
+    // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
+    internal readonly Dictionary<string, long[]> FacetColumns;
+
     public int DocumentCount { get; }
     public int UniqueWordCount { get; }
 
@@ -111,6 +115,7 @@ public sealed class IndexSnapshot
         Dictionary<int, int[]> bigramWordIndices,
         string[] sortTexts,
         int[]? sortedPermutation,
+        Dictionary<string, long[]> facetColumns,
         int documentCount,
         int uniqueWordCount)
     {
@@ -125,6 +130,7 @@ public sealed class IndexSnapshot
         BigramWordIndices = bigramWordIndices;
         _sortTexts = sortTexts;
         _sortedPermutation = sortedPermutation;
+        FacetColumns = facetColumns;
         DocumentCount = documentCount;
         UniqueWordCount = uniqueWordCount;
     }

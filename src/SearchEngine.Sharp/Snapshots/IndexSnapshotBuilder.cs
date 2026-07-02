@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SearchEngine.Filters;
 using SearchEngine.Index;
 using SearchEngine.Text;
 using SearchEngine.Tokenizer;
@@ -51,7 +52,7 @@ public static class IndexSnapshotBuilder
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress)
     {
-        return BuildCore(entries, static text => text, static text => text, progress);
+        return BuildCore(entries, static text => text, static text => text, static _ => null, progress);
     }
 
     /// <summary>
@@ -67,13 +68,14 @@ public static class IndexSnapshotBuilder
     /// </summary>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress)
     {
-        return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, progress);
+        return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, static entry => entry.Facets, progress);
     }
 
     private static IndexSnapshot BuildCore<TEntry>(
         IEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<TEntry, string> getSearchText,
         Func<TEntry, string> getSortText,
+        Func<TEntry, FacetValues?> getFacets,
         IProgress<float>? progress)
     {
         int entryCount = entries.TryGetNonEnumeratedCount(out int count) ? count : 0;
@@ -84,6 +86,8 @@ public static class IndexSnapshotBuilder
         var recordIds = entryCount > 0 ? new List<int>(entryCount) : [];
         var sortTexts = entryCount > 0 ? new List<string>(entryCount) : [];
         var uniqueWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var facetKeys = new HashSet<string>(StringComparer.Ordinal);
+        var pendingFacetValues = new List<PendingFacetValue>();
 
         int totalWordsLength = 0;
         int totalPostings = 0;
@@ -131,6 +135,16 @@ public static class IndexSnapshotBuilder
 
             totalWordsLength = buildState.TotalWordsLength;
             totalPostings = buildState.TotalPostings;
+
+            FacetValues? facets = getFacets(entry);
+            if (facets is not null && !facets.IsEmpty)
+            {
+                foreach (var (facetName, value) in facets.Values)
+                {
+                    facetKeys.Add(facetName);
+                    pendingFacetValues.Add(new PendingFacetValue(documentIndex, facetName, value));
+                }
+            }
 
             progress?.Report(totalSize > 0 ? (float)documentIndex / totalSize * 50.0f : 50.0f);
             documentIndex++;
@@ -211,6 +225,7 @@ public static class IndexSnapshotBuilder
             bigramWordIndices[bigram] = list.ToArray();
 
         var recordIdsArr = recordIds.ToArray();
+        var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues);
 
         return new IndexSnapshot(
             recordIds: recordIdsArr,
@@ -224,10 +239,31 @@ public static class IndexSnapshotBuilder
             bigramWordIndices: bigramWordIndices,
             sortTexts: [.. sortTexts],
             sortedPermutation: null,
+            facetColumns: facetColumns,
             documentCount: recordIdsArr.Length,
             uniqueWordCount: stringPool.Count
         );
     }
+
+    private static Dictionary<string, long[]> BuildFacetColumns(
+        int documentCount,
+        HashSet<string> facetKeys,
+        List<PendingFacetValue> pendingFacetValues)
+    {
+        if (facetKeys.Count == 0)
+            return [];
+
+        var facetColumns = new Dictionary<string, long[]>(facetKeys.Count, StringComparer.Ordinal);
+        foreach (string facetName in facetKeys)
+            facetColumns[facetName] = new long[documentCount];
+
+        foreach (var pending in pendingFacetValues)
+            facetColumns[pending.FacetName][pending.DocumentIndex] = pending.Value;
+
+        return facetColumns;
+    }
+
+    private readonly record struct PendingFacetValue(int DocumentIndex, string FacetName, long Value);
 
     private readonly struct WordDescription(string word, List<int> documentIds)
     {
