@@ -73,6 +73,7 @@ void RunQueryScenario(BenchScenario scenario)
 
     RunQueryBench("Exact", data.ExactQueries, q => engine.Find(q, WordMatchMethod.Exact));
     RunQueryBench("Within", data.InfixQueries, q => engine.Find(q, WordMatchMethod.Within));
+    RunQueryBench("Glob", data.GlobQueries, q => engine.Find(q, WordMatchMethod.Exact));
     RunQueryBench("Boolean", data.BooleanQueries, q => engine.Find(q, WordMatchMethod.Exact, enableOperators: true));
     Console.WriteLine();
 }
@@ -210,6 +211,7 @@ sealed record BenchData(
     IReadOnlyList<BenchDocument> Documents,
     IReadOnlyList<string> ExactQueries,
     IReadOnlyList<string> InfixQueries,
+    IReadOnlyList<string> GlobQueries,
     IReadOnlyList<string> BooleanQueries);
 
 static class SyntheticDataFactory
@@ -238,6 +240,7 @@ static class SyntheticDataFactory
             documents,
             BuildExactQueries(documents, scenario.QueryCount, rng),
             BuildInfixQueries(documents, scenario.QueryCount, rng),
+            BuildGlobQueries(documents, scenario.QueryCount, rng),
             BuildBooleanQueries(documents, scenario.QueryCount, rng));
     }
 
@@ -290,6 +293,26 @@ static class SyntheticDataFactory
             int len = rng.Next(2, maxLen + 1);
             result.Add(word.Substring(start, len));
         }
+        return result;
+    }
+
+    private static IReadOnlyList<string> BuildGlobQueries(IReadOnlyList<BenchDocument> docs, int count, Random rng)
+    {
+        var result = new List<string>(count);
+        while (result.Count < count)
+        {
+            var doc = docs[rng.Next(docs.Count)];
+            var word = doc.Terms[rng.Next(doc.Terms.Length)];
+            if (word.Length < 4) continue;
+
+            result.Add(rng.Next(3) switch
+            {
+                0 => $"{word[..3]}*",
+                1 => $"*{word[^3..]}",
+                _ => $"{word[0]}?{word[^1]}"
+            });
+        }
+
         return result;
     }
 

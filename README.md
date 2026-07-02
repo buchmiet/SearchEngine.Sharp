@@ -64,6 +64,10 @@ var within = engine.Find("ana", WordMatchMethod.Within);
 // Boolean expression
 var filtered = engine.Find("digital AND watch", WordMatchMethod.Exact, enableOperators: true);
 
+// Glob token match (* and ?) — auto-routed when a token contains metacharacters
+var reports = engine.Find("report*", WordMatchMethod.Exact);
+var filteredGlob = engine.Find("report* AND NOT *tmp", WordMatchMethod.Exact, enableOperators: true);
+
 // Natural sort by model name (requires IndexedEntry with separate SortText)
 var sorted = engine.Find("watch", WordMatchMethod.Exact, enableOperators: false,
     sortMode: SearchSortMode.NaturalSortAscending);
@@ -101,6 +105,19 @@ updater.RebuildFrom(new Dictionary<int, IndexedEntry>
 ```
 
 `SearchText` is tokenized and matched. `SortText` drives `SearchSortMode.NaturalSortAscending`.
+
+### Glob matching
+
+Query tokens containing `*` or `?` are matched as **glob patterns** against whole indexed tokens (anchored at both ends), regardless of `WordMatchMethod`:
+
+- `*` — zero or more characters
+- `?` — exactly one character
+
+Notes:
+
+- Indexed words never contain `*`/`?` (tokenization keeps letters and digits only).
+- `[` and `]` are query separators and are not part of glob syntax.
+- A pattern spanning token boundaries (e.g. `ga-1*`) is split into multiple tokens joined by implicit AND.
 
 ## API summary
 

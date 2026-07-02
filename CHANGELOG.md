@@ -4,6 +4,12 @@ All notable changes to **SearchEngine.Sharp** are documented here.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Glob leaf matching: query tokens with `*` or `?` are auto-routed to whole-token glob matching inside boolean expressions.
+
 ## [0.5.1] - 2026-07-01
 
 ### Added

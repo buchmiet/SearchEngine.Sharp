@@ -34,7 +34,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (method == WordMatchMethod.Exact)
         {
             if (!enableOperators
-                && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord))
+                && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord)
+                && !GlobMatcher.ContainsMetacharacters(singleWord!))
             {
                 return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
                     ? exactMatches.Length
@@ -59,7 +60,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (method == WordMatchMethod.Exact
             && !enableOperators
             && sortMode == SearchSortMode.SnapshotOrder
-            && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord))
+            && QueryExpressionEvaluator.TryGetSingleWord(expression.AsSpan(), out var singleWord)
+            && !GlobMatcher.ContainsMetacharacters(singleWord!))
         {
             return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
                 ? PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, exactMatches)

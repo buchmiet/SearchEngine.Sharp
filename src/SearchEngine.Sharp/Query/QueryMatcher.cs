@@ -13,6 +13,12 @@ internal static class QueryMatcher
         QueryContext qc,
         IndexSnapshot snapshot)
     {
+        if (word.Length == 1 && word[0] == '*')
+            return qc.RentAllTrueBitSet();
+
+        if (GlobMatcher.ContainsMetacharacters(word))
+            return MatchGlob(word, qc, snapshot);
+
         return method == WordMatchMethod.Exact
             ? MatchExact(word, qc, snapshot)
             : MatchWithin(word, qc, snapshot);
@@ -89,6 +95,38 @@ internal static class QueryMatcher
                 snapshot.PostingCounts[wordIndex],
                 searchStart,
                 searchEnd);
+        }
+
+        return result;
+    }
+
+    internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
+    {
+        var result = qc.RentEmptyBitSet();
+        var patternSpan = pattern.AsSpan();
+        int minLen = GlobMatcher.MinMatchLength(patternSpan);
+        bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
+
+        var wordsArray = snapshot.WordsArray.AsSpan();
+        var wordLengths = snapshot.WordLengths.AsSpan();
+
+        for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
+        {
+            int wordLength = wordLengths[wordIndex];
+            if (wordLength < minLen)
+                break;
+
+            if (!hasStar && wordLength != pattern.Length)
+                continue;
+
+            int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
+            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength)))
+                continue;
+
+            int postingOffset = snapshot.PostingOffsets[wordIndex];
+            int postingCount = snapshot.PostingCounts[wordIndex];
+            for (int k = 0; k < postingCount; k++)
+                result.Add(snapshot.PostingDocIds[postingOffset + k]);
         }
 
         return result;
