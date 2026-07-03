@@ -194,6 +194,11 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         QueryContext queryContext,
         IndexSnapshot snapshot)
     {
+        if (method == WordMatchMethod.Regex)
+            return string.IsNullOrWhiteSpace(expression)
+                ? null
+                : RegexMatcher.MatchRegex(expression, queryContext, snapshot);
+
         if (!enableOperators
             && QueryExpressionEvaluator.TryGetSingleWord(
                 expression.AsSpan(),

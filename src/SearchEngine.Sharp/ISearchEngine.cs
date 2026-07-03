@@ -10,8 +10,8 @@ public interface ISearchEngine
     /// Searches for entries matching the given expression.
     /// </summary>
     /// <param name="expression">Search expression.</param>
-    /// <param name="method">Matching method (Exact or Within).</param>
-    /// <param name="enableOperators">Enable AND/OR/NOT operators in the expression.</param>
+    /// <param name="method">Matching method (Exact, Within, or Regex).</param>
+    /// <param name="enableOperators">Enable AND/OR/NOT operators in the expression. Ignored for Regex.</param>
     /// <returns>List of matching document IDs.</returns>
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false);
 

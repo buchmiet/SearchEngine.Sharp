@@ -13,5 +13,11 @@ public enum WordMatchMethod
     /// <summary>
     /// Search term can be a substring of indexed words.
     /// </summary>
-    Within = 1
+    Within = 1,
+
+    /// <summary>
+    /// The entire expression is one .NET regular expression matched against whole indexed tokens.
+    /// Boolean parsing and token separators are bypassed.
+    /// </summary>
+    Regex = 2,
 }

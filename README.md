@@ -164,6 +164,20 @@ Notes:
 
 Full rules and worked examples: [docs/query-semantics.md](docs/query-semantics.md#glob-patterns).
 
+### Regular expressions
+
+Pass `WordMatchMethod.Regex` to match the **whole expression** as one regex against
+indexed tokens (anchored, case-insensitive, non-backtracking):
+
+```csharp
+var hits = engine.Find(@"report.*|log", WordMatchMethod.Regex);
+```
+
+Patterns run on **normalized tokens**, not raw names — under `SearchTokenization.Default`
+a cross-separator pattern such as `report.*\.pdf` will not match. Use
+`SearchTokenization.FileMask` when the token is the full file name. Invalid patterns
+return no matches. See [docs/query-semantics.md](docs/query-semantics.md#regular-expressions-wordmatchmethodregex).
+
 ## API summary
 
 Full signatures: [docs/api.md](docs/api.md).
@@ -178,6 +192,7 @@ Full signatures: [docs/api.md](docs/api.md).
 | `IndexSnapshotBuilder` | Build snapshot without DI |
 | `WordMatchMethod.Exact` | Whole-token match |
 | `WordMatchMethod.Within` | Substring match inside indexed tokens |
+| `WordMatchMethod.Regex` | Whole-expression regex on indexed tokens |
 | `SearchSortMode.SnapshotOrder` | Result order follows internal document ordinals |
 | `SearchSortMode.NaturalSortAscending` | Sort by natural key derived from `SortText` |
 | `FacetValues` | Optional per-document facet bag (`long` values) |

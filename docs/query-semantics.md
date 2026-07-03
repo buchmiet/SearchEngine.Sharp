@@ -148,6 +148,36 @@ content and on the `WordMatchMethod` argument:
 Matching is case-insensitive in all modes. Methods apply per term, so in a single
 expression a plain term uses the requested method while a wildcard term uses glob.
 
+## Regular expressions (`WordMatchMethod.Regex`)
+
+The **entire** `expression` is one .NET regular expression. The boolean tokenizer is
+**not** used — separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
+regex syntax, not query operators. `enableOperators` is ignored.
+
+Matching scans every unique indexed token (same loop as glob), using
+`RegexOptions.IgnoreCase | NonBacktracking` with implicit anchoring on the whole token
+(the engine compiles `^(?:pattern)$`). Invalid patterns or constructs unsupported by
+`NonBacktracking` yield an empty result set (no exception).
+
+**Token-level semantics (Default preset):** patterns run against normalized lowercase
+tokens, not the original `SearchText`. A pattern that spans index separators (e.g.
+`report.*\.pdf`) cannot match because no single token contains both `report` and
+`pdf`. Use **`SearchTokenization.FileMask`** when the indexed token is the full file
+name, or combine regex hits with boolean/glob terms on Default.
+
+Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`):
+
+| Expression | Matches tokens | Documents |
+|---|---|---|
+| `report.*` | `report` only | docs with token `report` |
+| `reporting` | `reporting` if present | — |
+| `pdf` | `pdf` | docs with token `pdf` |
+| `final\|pdf` | `final`, `pdf` | union of posting lists |
+
+On **FileMask** index, token `report-final.pdf` can match `report-final\.pdf` or
+`.*\.pdf$` (suffix patterns need a leading `.*` because matching is anchored on the
+whole token).
+
 ## Glob patterns
 
 A term containing `*` or `?` is matched as a glob against whole indexed tokens
