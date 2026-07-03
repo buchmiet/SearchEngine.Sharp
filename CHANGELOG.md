@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-07-03
+
+### Added
+
+- `WordMatchMethod.Regex` — the entire expression is one .NET regular expression matched against whole indexed tokens (anchored `^(?:pattern)$`, `IgnoreCase | CultureInvariant | NonBacktracking`, 1 s match timeout). Boolean parsing and query separators are bypassed.
+- LRU cache of compiled regex patterns (8 entries) for type-ahead workloads.
+- Invalid patterns and constructs unsupported by `NonBacktracking` (lookarounds, backreferences) return an empty result instead of throwing.
+- Documentation: regex semantics in `docs/query-semantics.md`, README, and `docs/api.md`.
+
 ## [0.5.3] - 2026-07-01
 
 ### Added
