@@ -17,17 +17,26 @@ internal static class RegexMatcher
         var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
 
-        for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
+        try
         {
-            int wordLength = wordLengths[wordIndex];
-            int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
-            if (!regex.IsMatch(wordsArray.Slice(wordStart, wordLength)))
-                continue;
+            for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
+            {
+                int wordLength = wordLengths[wordIndex];
+                int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
+                if (!regex.IsMatch(wordsArray.Slice(wordStart, wordLength)))
+                    continue;
 
-            int postingOffset = snapshot.PostingOffsets[wordIndex];
-            int postingCount = snapshot.PostingCounts[wordIndex];
-            for (int k = 0; k < postingCount; k++)
-                result.Add(snapshot.PostingDocIds[postingOffset + k]);
+                int postingOffset = snapshot.PostingOffsets[wordIndex];
+                int postingCount = snapshot.PostingCounts[wordIndex];
+                for (int k = 0; k < postingCount; k++)
+                    result.Add(snapshot.PostingDocIds[postingOffset + k]);
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Only reachable on the backtracking fallback path (NonBacktracking
+            // cannot time out in practice). Treat like an invalid pattern: empty result.
+            return qc.RentEmptyBitSet();
         }
 
         return result;

@@ -10,7 +10,7 @@
     <AssemblyName>SearchEngine.Sharp</AssemblyName>
 
     <PackageId>SearchEngine.Sharp</PackageId>
-    <Version>0.5.4</Version>
+    <Version>0.5.5</Version>
     <Authors>Lukasz Buchmiet</Authors>
     <Description>In-memory inverted index search for .NET.</Description>
     <PackageTags>search;inverted-index;full-text;substring;boolean-query;regex;natural-sort</PackageTags>

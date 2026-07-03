@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-03
+
+### Changed
+
+- **Breaking:** `WordMatchMethod.Regex` now uses standard unanchored `Regex.IsMatch` on indexed tokens (pattern compiled as-is). In 0.5.4 the engine wrapped patterns as `^(?:pattern)$`; use explicit `^...$` when you need a full-token match.
+- Constructs unsupported by `NonBacktracking` (lookarounds, backreferences) fall back to the default backtracking engine with the same `IgnoreCase | CultureInvariant` options and 1 s timeout instead of returning an empty result.
+- A `RegexMatchTimeoutException` during the token scan (catastrophic backtracking on the fallback path) is caught and returns an empty result instead of propagating to the caller.
+
 ## [0.5.4] - 2026-07-03
 
 ### Added

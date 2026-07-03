@@ -105,7 +105,7 @@ public sealed record IndexedEntry(string SearchText, string SortText, FacetValue
 |---|---|
 | `Exact` | Whole-token equality |
 | `Within` | Substring inside an indexed token |
-| `Regex` | Entire expression is one .NET regex matched against whole indexed tokens; boolean parsing is bypassed |
+| `Regex` | Entire expression is one .NET regex matched against indexed tokens via unanchored `Regex.IsMatch`; boolean parsing is bypassed. Prefer `NonBacktracking`; lookarounds/backreferences fall back to backtracking. Invalid patterns return empty. |
 
 Terms containing `*` or `?` are matched as anchored globs regardless of the method
 (except `Regex`, where they are regex syntax).

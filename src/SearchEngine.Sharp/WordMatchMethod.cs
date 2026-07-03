@@ -16,7 +16,8 @@ public enum WordMatchMethod
     Within = 1,
 
     /// <summary>
-    /// The entire expression is one .NET regular expression matched against whole indexed tokens.
+    /// The entire expression is one .NET regular expression matched against indexed tokens
+    /// via standard unanchored <see cref="Regex.IsMatch(ReadOnlySpan{char})"/>.
     /// Boolean parsing and token separators are bypassed.
     /// </summary>
     Regex = 2,

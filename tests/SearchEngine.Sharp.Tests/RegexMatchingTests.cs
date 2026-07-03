@@ -27,17 +27,16 @@ public class RegexMatchingTests
     }
 
     [Fact]
-    public void Regex_AnchoredOnWholeToken_DoesNotMatchSubstringOfLongerToken()
+    public void Regex_UnanchoredMatch_MatchesSubstringWithinToken()
     {
         var (engine, _) = CreateTokenIndex();
-        Assert.Equal(new[] { 2 }, engine.Find("reporting", WordMatchMethod.Regex));
-        var reportMatches = engine.Find("report", WordMatchMethod.Regex);
-        Assert.Contains(1, reportMatches);
-        Assert.DoesNotContain(2, reportMatches);
+        Assert.Equal(new[] { 2 }, engine.Find("^reporting$", WordMatchMethod.Regex));
+        var reportMatches = engine.Find("report", WordMatchMethod.Regex).OrderBy(x => x);
+        Assert.Equal(new[] { 1, 2 }, reportMatches);
     }
 
     [Fact]
-    public void Regex_PrefixPattern_MatchesWholeToken()
+    public void Regex_PrefixPattern_MatchesTokensContainingPrefix()
     {
         var (engine, _) = CreateTokenIndex();
         Assert.Equal(new[] { 1, 2 }, engine.Find("report.*", WordMatchMethod.Regex).OrderBy(x => x));
@@ -76,13 +75,30 @@ public class RegexMatchingTests
     }
 
     [Theory]
-    [InlineData("(?=a)b")]   // lookahead: NotSupportedException under NonBacktracking
-    [InlineData(@"(a)\1")]   // backreference: NotSupportedException under NonBacktracking
-    public void Regex_NonBacktrackingUnsupportedConstruct_ReturnsEmpty(string pattern)
+    [InlineData("foo(?=bar)", "foobar", 1)]
+    [InlineData(@"(a)\1", "baad", 1)]
+    public void Regex_NonBacktrackingUnsupportedConstruct_FallsBackToBacktracking(
+        string pattern,
+        string searchText,
+        int expectedDocId)
     {
-        var (engine, _) = CreateTokenIndex();
-        Assert.Empty(engine.Find(pattern, WordMatchMethod.Regex));
-        Assert.Equal(0, engine.CountMatches(pattern, WordMatchMethod.Regex));
+        var (engine, updater) = CreateEngine();
+        updater.RebuildFrom(new Dictionary<int, string> { [expectedDocId] = searchText });
+
+        Assert.Equal(new[] { expectedDocId }, engine.Find(pattern, WordMatchMethod.Regex));
+        Assert.Equal(1, engine.CountMatches(pattern, WordMatchMethod.Regex));
+    }
+
+    [Fact]
+    public void Regex_CatastrophicBacktrackingPattern_TimesOutToEmptyResult()
+    {
+        // (?=x) forces the backtracking fallback; (a+)+b against a long 'a' run
+        // is the classic exponential-backtracking case and trips the 1 s timeout.
+        var (engine, updater) = CreateEngine();
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = new string('a', 40) });
+
+        Assert.Empty(engine.Find(@"(a+)+b(?=x)", WordMatchMethod.Regex));
+        Assert.Equal(0, engine.CountMatches(@"(a+)+b(?=x)", WordMatchMethod.Regex));
     }
 
     [Fact]
@@ -148,10 +164,12 @@ public class RegexMatchingTests
         {
             [1] = "report-final.pdf",
             [2] = "notes.txt",
+            [3] = "my-report.pdf",
         });
 
-        Assert.Equal(new[] { 1 }, engine.Find(@"report-final\.pdf", WordMatchMethod.Regex));
-        Assert.Equal(new[] { 1, 2 }, engine.Find(@".*\.(pdf|txt)$", WordMatchMethod.Regex).OrderBy(x => x));
+        Assert.Equal(new[] { 1 }, engine.Find(@"^report-final\.pdf$", WordMatchMethod.Regex));
+        Assert.Equal(new[] { 1, 2, 3 }, engine.Find(@"\.(pdf|txt)$", WordMatchMethod.Regex).OrderBy(x => x));
+        Assert.Equal(new[] { 1, 3 }, engine.Find("report", WordMatchMethod.Regex).OrderBy(x => x));
     }
 
     [Fact]

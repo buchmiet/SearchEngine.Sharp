@@ -2,12 +2,14 @@ using System.Text.RegularExpressions;
 
 namespace SearchEngine.Query;
 
-/// <summary>Small LRU cache of anchored, case-insensitive, non-backtracking regexes.</summary>
+/// <summary>Small LRU cache of case-insensitive regexes (non-backtracking when supported).</summary>
 internal static class RegexPatternCache
 {
     private const int Capacity = 8;
-    private const RegexOptions Options =
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking;
+    private const RegexOptions BaseOptions =
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+    private const RegexOptions NonBacktrackingOptions =
+        BaseOptions | RegexOptions.NonBacktracking;
 
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(1);
     private static readonly Lock Gate = new();
@@ -27,12 +29,7 @@ internal static class RegexPatternCache
             }
         }
 
-        Regex compiled;
-        try
-        {
-            compiled = new Regex($"^(?:{pattern})$", Options, MatchTimeout);
-        }
-        catch (Exception ex) when (ex is RegexParseException or ArgumentException or NotSupportedException)
+        if (!TryCompile(pattern, out var compiled))
         {
             regex = null!;
             return false;
@@ -59,6 +56,33 @@ internal static class RegexPatternCache
 
             regex = compiled;
             return true;
+        }
+    }
+
+    private static bool TryCompile(string pattern, out Regex regex)
+    {
+        try
+        {
+            regex = new Regex(pattern, NonBacktrackingOptions, MatchTimeout);
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            try
+            {
+                regex = new Regex(pattern, BaseOptions, MatchTimeout);
+                return true;
+            }
+            catch (Exception ex) when (ex is RegexParseException or ArgumentException)
+            {
+                regex = null!;
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is RegexParseException or ArgumentException)
+        {
+            regex = null!;
+            return false;
         }
     }
 

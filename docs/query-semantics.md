@@ -155,9 +155,13 @@ The **entire** `expression` is one .NET regular expression. The boolean tokenize
 regex syntax, not query operators. `enableOperators` is ignored.
 
 Matching scans every unique indexed token (same loop as glob), using
-`RegexOptions.IgnoreCase | NonBacktracking` with implicit anchoring on the whole token
-(the engine compiles `^(?:pattern)$`). Invalid patterns or constructs unsupported by
-`NonBacktracking` yield an empty result set (no exception).
+`RegexOptions.IgnoreCase | CultureInvariant` with standard unanchored
+`Regex.IsMatch` (the user pattern is compiled as-is — no implicit `^...$` wrapper).
+`NonBacktracking` is preferred; when the .NET regex engine throws
+`NotSupportedException` (lookarounds, backreferences), the library falls back to the
+default backtracking engine with the same options and 1 s match timeout. Invalid
+patterns and patterns that exceed the match timeout (catastrophic backtracking on
+the fallback path) yield an empty result set (no exception).
 
 **Token-level semantics (Default preset):** patterns run against normalized lowercase
 tokens, not the original `SearchText`. A pattern that spans index separators (e.g.
@@ -169,14 +173,15 @@ Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`
 
 | Expression | Matches tokens | Documents |
 |---|---|---|
-| `report.*` | `report` only | docs with token `report` |
-| `reporting` | `reporting` if present | — |
+| `report` | `report`, `reporting` (substring) | union of posting lists |
+| `^report$` | `report` only | docs with token `report` |
+| `report.*` | tokens containing `report` prefix | e.g. `report`, `reporting` |
 | `pdf` | `pdf` | docs with token `pdf` |
 | `final\|pdf` | `final`, `pdf` | union of posting lists |
 
-On **FileMask** index, token `report-final.pdf` can match `report-final\.pdf` or
-`.*\.pdf$` (suffix patterns need a leading `.*` because matching is anchored on the
-whole token).
+On **FileMask** index, token `report-final.pdf` can match `report-final\.pdf`,
+`\.pdf$`, or unanchored `report` (matches `my-report.pdf` too). Use `^...$` for
+full-name equality.
 
 ## Glob patterns
 
