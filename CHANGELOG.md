@@ -6,6 +6,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-15
+
+### Changed
+
+- **Progressive ingestion:** `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
+- **Exact + facet queries:** single-term exact queries with a `FacetFilter` now use a posting-span fast path — facet predicates are evaluated only for ordinals in the posting list, not all documents. `CountMatches` and filter-only queries received analogous optimisations.
+- Benchmark reports and audit artifacts updated with post-fix measurements on x64 and ARM64.
+
+### Added
+
+- `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `MemoryDiagnoser`, environment fingerprint, CSV/Markdown/HTML export).
+- Audit artifacts under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (x64 Windows, macOS ARM64, Ubuntu ARM64).
+
+### Tests
+
+- `Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale`
+- `ExactSingleTerm_WithFacetFilter_MatchesWithinPlusFilter`
+
 ## [0.5.5] - 2026-07-03
 
 ### Changed
@@ -61,6 +79,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Initial release: in-memory inverted index with exact/within token search, boolean operators, natural sort, snapshot-based concurrent reads, and DI registration.
 
+[0.5.6]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.5...v0.5.6
+[0.5.5]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.4...v0.5.5
 [0.5.3]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.0...v0.5.1

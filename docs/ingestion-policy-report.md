@@ -1,7 +1,6 @@
 # Progressive ingestion policy report
 
-Measured on the development machine (X64, 12 logical cores, .NET 10) using
-`SyntheticPathFeed` tokenized paths (~6–7 tokens per file).
+Measured with `SyntheticPathFeed` tokenized paths (~6–7 tokens per file), seed **1337**, 100k entries, fast scan (no artificial I/O delay).
 
 Harness:
 
@@ -21,7 +20,8 @@ dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 10000
 | Parameter | Value |
 |---|---|
 | `Policy` | `Adaptive` |
-| `FixedBatchSize` | 2,000 |
+| `FixedBatchSize` | 2,000 (initial batch cap) |
+| `GrowthAwareBatchCap` | **true** (default since 0.5.6) |
 | `MinInterval` | 100 ms |
 | `AdaptiveMultiplier` (k) | 2.0 |
 | `MaxStaleness` | 1 s |
@@ -29,63 +29,70 @@ dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 10000
 
 ### Publish triggers
 
-1. **Batch cap** — publish when the buffer reaches 2,000 entries (primary path during fast scans).
-2. **Staleness cap** — publish when the oldest buffered entry has waited ≥ `MaxStaleness` (guarantees UI freshness during slow I/O).
-3. **Adaptive pacing** — after the interval `max(MinInterval, k × lastRebuildDuration)` elapses, publish if the buffer has at least `MinTimerPublishBatch` entries (prevents rebuild thrash while keeping progressive updates).
+1. **Growth-aware batch cap** — after each publish, cap becomes `max(FixedBatchSize, indexedDocumentCount)`. On a fast 100k feed this yields snapshot sizes roughly **2k → 4k → 8k → 16k → 32k → 64k → 100k** (~7 publishes instead of 50).
+2. **Staleness cap** — publish when the oldest buffered entry has waited ≥ `MaxStaleness`.
+3. **Adaptive pacing** — after `max(MinInterval, k × lastRebuildDuration)`, publish if the buffer has at least `MinTimerPublishBatch` entries.
 
-## Results — 100,000 paths (fast scan, no artificial I/O delay)
+Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour (`adaptive-fixed-2k` in the benchmark harness).
 
-| Policy | Scan wall (ms) | Rebuild CPU (ms) | Publishes | Worst staleness (ms) | Overhead×* |
-|---|---:|---:|---:|---:|---:|
-| per-entry | *(skipped at 100k)* | — | — | — | — |
-| fixed-2k | 4,185 | 4,138 | 50 | 927 | 24.8 |
-| debounce-100ms | 463 | 329 | 2 | 140 | 1.8 |
-| **adaptive-k2** | **4,547** | **4,517** | **50** | **1,001** | **25.0** |
+## Results — 100,000 paths (post-fix, v0.5.6+)
 
-\*Overhead× = total rebuild CPU ÷ one-shot `RebuildFrom` for the same 100k set (~167 ms).
+Measured 2026-08-15 on Windows x64 (.NET 10.0.11). ARM64 runs gave the same publish count (7) and similar overhead×.
 
-**Demo (100k, adaptive):** 50 progressive publishes, worst staleness **848 ms**, rebuild CPU **4,337 ms**.
+| Policy | Rebuild CPU (ms) | Publishes | Worst staleness (ms) | Overhead×* |
+|---|---:|---:|---:|---:|
+| fixed-2k | 4,486 | 50 | 886 | 28.6 |
+| debounce-100ms | 296 | 2 | 146 | 1.7 |
+| **adaptive** | **349** | **7** | **158** | **2.2** |
+| adaptive-fixed-2k | 4,005 | 50 | 860 | 25.6 |
 
-## Baseline — 2,000 paths (per-entry feasible)
+\*Overhead× = total rebuild CPU ÷ one-shot `RebuildFrom` for the same 100k set (~157 ms this run).
 
-| Policy | Scan wall (ms) | Rebuild CPU (ms) | Publishes | Worst staleness (ms) | Overhead× |
-|---|---:|---:|---:|---:|---:|
-| **per-entry** | 2,448 | 2,426 | 2,000 | 2,432 | **1,313** |
-| fixed-2k | 5 | 2 | 1 | 3 | 1.4 |
-| debounce-100ms | 6 | 3 | 1 | 3 | 1.9 |
-| adaptive-k2 | 11 | 2 | 1 | 9 | 1.0 |
+Theoretical amplification for growth-aware series: `(2+4+8+16+32+64+100)/100 = **2.26×**` — matches measured **~2.2×**.
 
-Per-entry at 2k already spends **~2.4 s** in rebuilds for a scan that completes in milliseconds. Extrapolated to 100k without batching: **hours** of rebuild CPU (O(N²) total work).
+### Cross-platform check (adaptive, 100k)
+
+| Platform | Overhead× | Publishes | Worst staleness (ms) |
+|----------|----------:|----------:|---------------------:|
+| Windows x64 | 2.22 | 7 | 158 |
+| macOS ARM64 | 2.21 | 7 | 179 |
+| Ubuntu ARM64 | 2.13 | 7 | 204 |
+
+All gates from the performance audit met: amplification **< 10×** (target **< 5×** exceeded), staleness **≤ 1 s**.
+
+## Historical baseline — pre-0.5.6 (fixed 2k adaptive)
+
+Before `GrowthAwareBatchCap`, adaptive behaved like fixed-2k on fast scans:
+
+| Policy | Rebuild CPU (ms) | Publishes | Overhead× |
+|---|---:|---:|---:|
+| adaptive (old) | ~4,500 | 50 | **~25×** |
+
+Per-entry at 2k paths still shows **~1,313×** overhead — per-entry remains a diagnostic baseline only.
 
 ## Slow scan note (1 ms simulated I/O per entry)
 
-With `TimeDebounce` and a trickle feed, timer-only publishing emits **many small batches** (one per `MinInterval`), recreating quadratic rebuild cost. That is why pure debounce was rejected as the default.
-
-`Adaptive` adds `MinTimerPublishBatch` and `MaxStaleness` so slow scans batch meaningfully while keeping staleness bounded. A full 100k × 1 ms benchmark run is dominated by the artificial 100 s sleep; wall time ≈ scan time + rebuild CPU (same order as fast scan rebuild totals).
+Pure time debounce without batch guards recreates quadratic rebuild cost on slow scans. `Adaptive` keeps `MinTimerPublishBatch` and `MaxStaleness` so slow scans batch meaningfully while keeping staleness bounded.
 
 ## Rejected alternatives
 
 | Policy | Reason |
 |---|---|
-| **Per-entry** | Correct but unusable at scale: O(N²) rebuild work (1,313× overhead at 2k; projected hours at 100k). |
-| **Fixed batch only** | Excellent throughput and 50 progressive updates at 100k, but no staleness cap during very slow scans (last partial batch could wait indefinitely). |
-| **Pure time debounce** | On fast scans: only **2** publishes for 100k (poor progressive UX). On slow scans without batch guards: micro-publishes every 100 ms → rebuild thrash. |
+| **Per-entry** | Correct but unusable at scale: O(N²) rebuild work. |
+| **Fixed batch only** | Good throughput but no staleness cap during very slow scans. |
+| **Pure time debounce** | On fast scans: too few publishes; on slow scans without guards: rebuild thrash. |
 
 ## Architecture summary
 
 ```
 scanner (IAsyncEnumerable)
     → bounded Channel (backpressure when full)
-    → publisher (batch + policy)
+    → publisher (growth-aware batch + policy)
     → IIndexUpdater.AddOrUpdateEntries (single rebuild per publish)
     → IndexSnapshotProvider.Publish
 
 queries (ISearchEngine) ── lock-free read of current snapshot
 ```
-
-- **Final flush** always runs on successful scan completion.
-- **Cancellation** optionally flushes the buffer (`FlushOnCancellation`, default `true`).
-- **Scan errors** complete the channel with the exception after the publisher drains.
 
 ## Recommendation for UI integration
 
@@ -93,7 +100,7 @@ queries (ISearchEngine) ── lock-free read of current snapshot
 var ingestion = new ProgressiveIndexIngestion(updater);
 var result = await ingestion.IngestAsync(
     ScanFilesAsync(root, ct),
-    new IngestPublishOptions(), // adaptive defaults
+    new IngestPublishOptions(), // adaptive + growth-aware defaults
     onPublished: _ => dispatcher.Invoke(RefreshResults));
 ```
 

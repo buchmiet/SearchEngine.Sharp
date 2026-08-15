@@ -1,21 +1,82 @@
 # .NET Performance Review — SearchEngine.Sharp (ARM64/x64)
 
-**Target:** `SearchEngine.Sharp` @ `21dd3463a0fc8b8298295c160e9af703b56720ac` (v0.5.5, .NET 10)  
+**Baseline target:** `SearchEngine.Sharp` @ `21dd346` (v0.5.5, .NET 10)  
+**Remediated target:** @ `32f8b7a` (v0.5.6, .NET 10) — commits `0d0efb3` (F-01/F-02), `32f8b7a` (F-03 harness)  
 **Audit package:** `dotnet-performance` (`buchmiet/audits`, branch `markdown-first-retrieval`)  
-**Date:** 2026-08-15  
-**Phase 0:** no prior runs in this repo (first committed report)
-
-This report merges the initial external review with an independent verification pass (code trace + benchmark reproduction on x64 and ARM64).
+**Date:** 2026-08-15 (baseline + post-fix verification same day)  
+**Phase 0:** first committed report; **Phase 1:** remediation verified on x64 + ARM64
 
 Methodology gates applied per [`evidence-and-benchmarking.md`](../../../../audits/dotnet-performance/compendium/references/evidence-and-benchmarking.md) and [`severity-model.md`](../../../../audits/dotnet-performance/compendium/references/severity-model.md): E0 static signals are investigation candidates only; performance findings require E2+ with architecture-specific baselines.
+
+---
+
+## Remediation summary
+
+| ID | Baseline | Post-fix (v0.5.6) | Gate | Status |
+|----|----------|-------------------|------|--------|
+| **F-01** | adaptive ~**25×** rebuild amplification (50 publishes @ 100k) | **~2.2×** (7 publishes) | < 10× (target < 5×) | **resolved** |
+| **F-02** | Exact+Filter P50 **~0.53 ms** (~115× vs Exact) | **~0.016 ms** x64 (~3.7× vs Exact) | P50 < 0.10 ms | **resolved** |
+| **F-03** | Stopwatch-only harness | BDN project + CSV artifacts + environment fingerprint | raw artifacts per arch | **resolved** (workload runner retained) |
+
+Raw BDN CSV: [`artifacts/`](artifacts/README.md). Updated product docs: [`docs/ingestion-policy-report.md`](../../docs/ingestion-policy-report.md), [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md).
+
+---
+
+## Post-fix verification — before → after
+
+Measured 2026-08-15 after `32f8b7a`. Flags: `--seed 1337`, `--warmup 2 --iterations 5` (queries), `--ingestion-count 100000` (ingestion).
+
+### F-01 — progressive ingestion (100k, fast scan)
+
+| Policy | Baseline overhead× | Post-fix overhead× | Publishes (before → after) |
+|--------|-------------------:|-------------------:|---------------------------:|
+| adaptive | 23.6–25.1× (x64 + ARM64) | **2.13–2.22×** | 50 → **7** |
+| fixed-2k | ~25–28× | ~28–29× (unchanged) | 50 |
+| debounce-100ms | ~1.7–2.0× | ~1.7× | 2 |
+
+**Mechanism:** `IngestPublishOptions.GrowthAwareBatchCap = true` (default). After each publish, batch cap becomes `max(FixedBatchSize, indexedDocumentCount)` → snapshot series **2k → 4k → 8k → 16k → 32k → 64k → 100k**. Theoretical amplification `(2+4+8+16+32+64+100)/100 = 2.26×`.
+
+| Platform | adaptive overhead× | Publishes | Worst staleness |
+|----------|-------------------:|----------:|----------------:|
+| Windows x64 | 2.22 | 7 | 158 ms |
+| macOS ARM64 | 2.21 | 7 | 179 ms |
+| Ubuntu ARM64 | 2.13 | 7 | 204 ms |
+
+All staleness values **≤ 1 s** gate.
+
+### F-02 — exact + facet (medium 100k, workload P50)
+
+| Scenario | Baseline P50 (x64) | Post-fix P50 (x64) | Post-fix P50 (ARM64) |
+|----------|-------------------:|-------------------:|---------------------:|
+| Exact | 0.0044 ms | 0.0044 ms (no regression) | 0.0027 ms |
+| Exact + Filter | **0.5313 ms** | **0.0161 ms** | **0.0078 ms** |
+| Ratio vs Exact | ~121× | **~3.7×** | ~2.9× |
+
+**Mechanism:** `TryFindExactWithFacetFastPath()` / `TryGetExactFacetCount()` evaluate facet predicates only for ordinals in the exact posting span; filter-only skips `RentAllTrueBitSet`.
+
+### F-02 — BenchmarkDotNet `ExactFacetBenchmark` (100k, seed 1337)
+
+| Platform | ExactOnly | ExactWithFacetFilter | BDN ratio | Alloc (facet) |
+|----------|----------:|---------------------:|----------:|--------------:|
+| Windows x64 | 1.150 μs | 1.683 μs | **1.46×** | 6.02 KB |
+| macOS ARM64 | 2.018 μs | 2.806 μs | **1.39×** | 6.02 KB |
+| Ubuntu ARM64 | 2.174 μs | 3.019 μs | **1.39×** | 6.02 KB |
+
+Filter-only remains O(N) at **~252 μs** (x64 BDN) — expected; not in F-02 scope.
+
+### F-03 — benchmark infrastructure
+
+- New project: `benchmarks/SearchEngine.Sharp.MicroBenchmarks/` — `MemoryDiagnoser`, CSV/Markdown/HTML export, `EnvironmentFingerprint`, `InProcessNoEmitToolchain` (sibling-repo layout fix in `32f8b7a`).
+- Existing `SearchEngine.Sharp.Benchmarks` retained as workload runner (ingestion policy, facet scenarios).
+- Artifacts committed under [`artifacts/`](artifacts/README.md).
 
 ---
 
 ## Scope and limitations
 
 - **In scope:** query hot paths, progressive ingestion rebuild cost, facet filtering, benchmark harness maturity, SIMD dispatch posture.
-- **Out of scope (this run):** production telemetry (E4), BDN microbenchmark suite, disassembly review, peak RSS during index build, allocation-rate measurement.
-- **Harness limitation:** existing benchmarks use `Stopwatch` + forced `GC.Collect()` — sufficient for ~25× and ~120× gaps ([`F-03`](#f-03-benchmark-harness-not-yet-a-regression-gate)), insufficient for 3–10% gates without BDN + full fingerprint ([`QA.md`](../../../../audits/dotnet-performance/QA.md) acceptance criteria).
+- **Out of scope (this run):** production telemetry (E4), disassembly review, peak RSS during index build, allocation-rate gates for general query paths (C-01).
+- **Harness:** workload runner uses `Stopwatch` — adequate for large-gap confirmation; BDN project now covers tight gates on exact+facet microbenchmark. Full CI matrix automation not yet wired.
 
 ---
 
@@ -23,76 +84,52 @@ Methodology gates applied per [`evidence-and-benchmarking.md`](../../../../audit
 
 | Architecture | Machine | OS / RID | Runtime | Cores | ISA | Notes |
 |--------------|---------|----------|---------|------:|-----|-------|
-| **x64** | Windows dev (Cray) | win-x64 | .NET 10.0.11 | 12 | AVX2 | Original report machine class |
-| **ARM64** | `mac.home` (`ssh macos`) | osx-arm64 | .NET 10.0.10 | 8 | AdvSimd | Repo copied via `git archive` |
-| **ARM64** | `homelab` (`ssh homelab`, Ubuntu) | linux-arm64 | .NET 10.0.10 | 4 | AdvSimd | Repo copied via `git archive` |
+| **x64** | Windows dev (Cray) | win-x64 | .NET 10.0.11 | 12 | AVX2 | Baseline + post-fix |
+| **ARM64** | `mac.home` (`ssh macos`) | osx-arm64 | .NET 10.0.10 | 8 | AdvSimd | Post-fix via `git archive` |
+| **ARM64** | `homelab` (`ssh homelab`, Ubuntu) | linux-arm64 | .NET 10.0.10 | 4 | AdvSimd | Post-fix via `git archive` |
 
 Common benchmark flags: `--warmup 2 --iterations 5 --seed 1337`. Ingestion: `--ingestion-count 100000 --seed 1337`.
 
-**Not recorded (gap vs QA minimum bundle):** CPU SKU model string, PGO/tiering flags, power state, raw CSV/JSON artifacts, git artifact hash of built binaries.
+**Remaining gap vs QA full bundle:** automated CI gate script; PGO/tiering flags not recorded.
 
 ---
 
-## As-Is Performance Architecture
+## Baseline architecture (v0.5.5 @ 21dd346)
 
-Facts confirmed in code and docs:
+Facts confirmed in code at baseline:
 
 - **Reads:** lock-free immutable `IndexSnapshot` via `IndexSnapshotProvider`.
-- **Writes:** `IndexUpdater` serialises mutations; every publish runs `IndexSnapshotBuilder.Build` on the **full** `_entries` dictionary — no incremental inverted index ([`IndexUpdater.cs`](../../src/SearchEngine.Sharp/IndexUpdater.cs)).
-- **Exact single-token (no filter):** posting-span fast path in `SearchEngineSharp.Find` — no bitset ([`SearchEngineSharp.cs`](../../src/SearchEngine.Sharp/SearchEngineSharp.cs)).
-- **Exact + facet:** always `ExecuteQuery` → bitset → `FacetFilterEvaluator.Apply` O(N) ordinal scan ([`FacetFilterEvaluator.cs`](../../src/SearchEngine.Sharp/Query/FacetFilterEvaluator.cs)).
-- **Boolean queries:** `FastBitSet` + `ArrayPool`; AVX2 / AdvSimd / scalar dispatch ([`FastBitSet.cs`](../../src/SearchEngine.Sharp/Index/FastBitSet.cs)).
-- **Progressive ingestion:** `ProgressiveIndexIngestion` batches into `AddOrUpdateEntries`; default `Adaptive` policy still publishes every `FixedBatchSize` (2000) on fast scans ([`ProgressiveIndexIngestion.cs`](../../src/SearchEngine.Sharp/Ingestion/ProgressiveIndexIngestion.cs), [`IngestPublishOptions.cs`](../../src/SearchEngine.Sharp/Ingestion/IngestPublishOptions.cs)).
-- **Existing workload reports:** [`docs/ingestion-policy-report.md`](../../docs/ingestion-policy-report.md), [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md).
-
-Overall posture: mature engine with deliberate optimisations; two architectural boundaries dominate measured cost — not a “rewrite intrinsics everywhere” codebase.
+- **Writes:** `IndexUpdater` serialises mutations; every publish runs `IndexSnapshotBuilder.Build` on the **full** `_entries` dictionary — no incremental inverted index.
+- **Exact single-token (no filter):** posting-span fast path in `SearchEngineSharp.Find`.
+- **Exact + facet (baseline):** always `ExecuteQuery` → bitset → `FacetFilterEvaluator.Apply` O(N) ordinal scan.
+- **Boolean queries:** `FastBitSet` + `ArrayPool`; AVX2 / AdvSimd / scalar dispatch.
+- **Progressive ingestion (baseline):** `Adaptive` policy published every `FixedBatchSize` (2000) on fast scans — ~50 publishes at 100k.
 
 ---
 
-## Measurement matrix
+## Baseline measurement matrix (v0.5.5)
 
 ### Progressive ingestion (100k synthetic paths, fast scan)
 
 Overhead× = total rebuild CPU ÷ one-shot `RebuildFrom` for same 100k set.
 
-| Policy | x64 (this run) | macOS ARM64 | Ubuntu ARM64 | Original review (x64) |
-|--------|---------------:|------------:|-------------:|----------------------:|
-| fixed-2k | **25.69×** (50 publishes) | **26.21×** | **25.61×** | 24.8× |
-| adaptive-k2 | **23.61×** (50 publishes) | **25.11×** | **24.64×** | 25.0× |
-| debounce-100ms | **1.96×** (2 publishes) | **1.71×** | **1.72×** | 1.8× |
+| Policy | x64 | macOS ARM64 | Ubuntu ARM64 |
+|--------|----:|------------:|-------------:|
+| fixed-2k | **25.69×** (50) | **26.21×** | **25.61×** |
+| adaptive-k2 | **23.61×** (50) | **25.11×** | **24.64×** |
+| debounce-100ms | **1.96×** (2) | **1.71×** | **1.72×** |
 
-Theoretical amplification for 50×2k batch full rebuilds: `2000 × (1+…+50) / 100000 = 25.5×` — matches all platforms.
-
-**Command:**
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy --ingestion-count 100000 --seed 1337
-```
+Theoretical amplification for 50×2k batch full rebuilds: `2000 × (1+…+50) / 100000 = 25.5×`.
 
 ### Query latency — facet scenarios (medium 100k, P50)
 
-| Scenario | x64 P50 | macOS ARM64 P50 | Ubuntu ARM64 P50 | Original review P50 |
-|----------|--------:|----------------:|-----------------:|--------------------:|
-| Exact (text only) | 0.0044 ms | 0.0027 ms | 0.0025 ms | 0.0044 ms |
-| Exact + Filter | 0.5313 ms | 0.5333 ms | 0.5348 ms | 0.5049 ms |
-| Ratio (Exact+Filter / Exact) | **~121×** | **~197×** | **~214×** | **~115×** |
+| Scenario | x64 P50 | macOS ARM64 P50 | Ubuntu ARM64 P50 |
+|----------|--------:|----------------:|-----------------:|
+| Exact (text only) | 0.0044 ms | 0.0027 ms | 0.0025 ms |
+| Exact + Filter | 0.5313 ms | 0.5333 ms | 0.5348 ms |
+| Ratio (Exact+Filter / Exact) | **~121×** | **~197×** | **~214×** |
 
-Exact+Filter P50 is **~0.53 ms on all three hosts** — dominated by full ordinal facet scan, not exact lookup variance.
-
-**Command:**
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --facet --warmup 2 --iterations 5 --seed 1337
-```
-
-### Query throughput — facet (250k, q/s)
-
-| Scenario | x64 | macOS ARM64 | Ubuntu ARM64 | Original review |
-|----------|----:|------------:|-------------:|----------------:|
-| Exact + Filter | 712 | 737 | 735 | 694 |
-| Filter-only | 839 | 505 | 623 | 398 |
-
-Filter-only ranking vs Exact+Filter **varies by platform and harness noise**; the structural defect (O(N) facet scan bypassing exact fast path) is stable. Do not use throughput alone as a gate without P50/P99 from BDN.
+Exact+Filter P50 was **~0.53 ms on all three hosts** — dominated by full ordinal facet scan.
 
 ---
 
@@ -100,9 +137,9 @@ Filter-only ranking vs Exact+Filter **varies by platform and harness noise**; th
 
 | ID | Priority | Evidence | Confidence | Arch | Topic | Status |
 |----|----------|----------|------------|------|-------|--------|
-| **F-01** | P2 | E2, x64 + ARM64 | High | cross-arch | Progressive ingestion full rebuild amplification | **confirmed** |
-| **F-02** | P2 | E2, x64 + ARM64 | High | cross-arch | Facet filter bypasses exact fast path | **confirmed** |
-| **F-03** | P3 | E1/E2 | Medium | cross-arch | Benchmark harness not regression-grade | **confirmed** |
+| **F-01** | P2 | E2, x64 + ARM64 | High | cross-arch | Progressive ingestion full rebuild amplification | **resolved** (v0.5.6) |
+| **F-02** | P2 | E2 + BDN, x64 + ARM64 | High | cross-arch | Facet filter bypasses exact fast path | **resolved** (v0.5.6) |
+| **F-03** | P3 | E2 | Medium | cross-arch | Benchmark harness not regression-grade | **resolved** (v0.5.6) |
 | C-01 | investigation | E0 | — | — | Per-query allocations despite `ArrayPool` | open |
 | C-02 | investigation | E0 | — | ARM64 | AdvSimd path benefit unmeasured | open |
 | C-03 | investigation | E0 | — | — | Concurrent natural-sort cold start | open |
@@ -115,85 +152,63 @@ Filter-only ranking vs Exact+Filter **varies by platform and harness noise**; th
 
 ### F-01: Progressive ingestion ~25× rebuild amplification
 
-**Status:** confirmed  
-**Architecture/SKU:** x64 and ARM64 (Ubuntu + macOS); same mechanism on all measured hosts  
-**Claim type:** measured waste on a proven ingestion path  
+**Baseline status:** confirmed (v0.5.5)  
+**Remediation status:** **resolved** (v0.5.6)  
+**Architecture/SKU:** x64 and ARM64  
 **Evidence grade:** E2  
 **Confidence:** high
 
-**Co:** Each progressive publish calls `IndexSnapshotBuilder.Build` on the entire `_entries` set. With `FixedBatchSize = 2000` and 100k documents, ~50 publishes process ~2.55M document-equivalents instead of 100k (~25× rebuild CPU vs one-shot).
+**Co (baseline):** Each progressive publish calls `IndexSnapshotBuilder.Build` on the entire `_entries` set. With `FixedBatchSize = 2000` and 100k documents, ~50 publishes process ~2.55M document-equivalents instead of 100k (~25× rebuild CPU vs one-shot).
 
-**Evidence:**
+**Jak (implemented):** **Growth-aware publishing** — `GrowthAwareBatchCap` raises batch cap to `max(FixedBatchSize, indexedCount)` after each publish; `MaxStaleness` unchanged as hard freshness cap.
 
-- Code: `IndexUpdater.AddOrUpdateEntries` → `RebuildAndPublish` → full build ([`IndexUpdater.cs`](../../src/SearchEngine.Sharp/IndexUpdater.cs) L163–182, L215–218).
-- Policy: `Adaptive` uses the same batch cap as `FixedBatch` for fast scans ([`ProgressiveIndexIngestion.cs`](../../src/SearchEngine.Sharp/Ingestion/ProgressiveIndexIngestion.cs) L335–344).
-- Benchmarks: table above; aligns with [`docs/ingestion-policy-report.md`](../../docs/ingestion-policy-report.md).
+**Resolution evidence:**
 
-**Mechanism:** O(sum of index sizes) across publishes ≈ O(N²/batch) for fixed batch size N/batch times. Adaptive timer pacing does not increase batch size — it only spaces timer-triggered publishes.
+- Code: [`IngestPublishOptions.cs`](../../src/SearchEngine.Sharp/Ingestion/IngestPublishOptions.cs), [`ProgressiveIndexIngestion.cs`](../../src/SearchEngine.Sharp/Ingestion/ProgressiveIndexIngestion.cs).
+- Measured: **~2.2×** overhead×, **7 publishes**, staleness **≤ 204 ms** — table in [Post-fix verification](#post-fix-verification--before--after).
+- Gate G-01: **pass** (< 5× target exceeded with margin).
 
-**Jak:** First experiment: **growth-aware / geometric publishing** — next publish after ~proportional index growth (e.g. 2k → 4k → 8k → …), keeping `MaxStaleness` as hard freshness cap. Avoid incremental mutable inverted index as first step.
-
-**Dlaczego:** Ingestion is explicitly full-rebuild by design comment; progressive UX requires batching but current fixed batch cap recreates quadratic work ([`IndexUpdater.cs`](../../src/SearchEngine.Sharp/IndexUpdater.cs) L9–15). Measured waste gate per [`severity-model.md`](../../../../audits/dotnet-performance/compendium/references/severity-model.md) P2.
-
-**Acceptance criteria (proposed gate):**
-
-- 100k synthetic paths, each architecture separately.
-- `WorstCaseStaleness ≤ 1 s` (unchanged product constraint).
-- Rebuild amplification **< 10×** initially, target **< 5×**.
-- No regression in one-shot `RebuildFrom` time > 5%.
+Set `GrowthAwareBatchCap = false` or use benchmark label `adaptive-fixed-2k` to reproduce pre-fix behaviour (~25×).
 
 ---
 
 ### F-02: Facet filter bypasses exact-query fast path
 
-**Status:** confirmed  
-**Architecture/SKU:** x64 + ARM64; Exact+Filter P50 ~0.53 ms stable across hosts  
-**Claim type:** measured waste on selective query path  
-**Evidence grade:** E2  
+**Baseline status:** confirmed (v0.5.5)  
+**Remediation status:** **resolved** (v0.5.6)  
+**Architecture/SKU:** x64 + ARM64  
+**Evidence grade:** E2 + BDN  
 **Confidence:** high
 
-**Co:** `Find(..., FacetFilter?)` never uses the single-word exact posting fast path. Every filtered exact query pays full bitset evaluation plus O(N) facet scan.
+**Co (baseline):** `Find(..., FacetFilter?)` never used the single-word exact posting fast path. Every filtered exact query paid full bitset evaluation plus O(N) facet scan (~0.53 ms floor on all hosts).
 
-**Evidence:**
+**Jak (implemented):**
 
-- Fast path exists only on overload **without** filter ([`SearchEngineSharp.cs`](../../src/SearchEngine.Sharp/SearchEngineSharp.cs) L69–88 vs L99–117).
-- `FacetFilterEvaluator.Apply` iterates `ordinal = 0 .. DocumentCount-1` ([`FacetFilterEvaluator.cs`](../../src/SearchEngine.Sharp/Query/FacetFilterEvaluator.cs) L26–32).
-- P50 gap ~115–214× (Exact vs Exact+Filter) — table above; original [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md).
+1. Posting-span fast path for single exact term + facet (`TryFindExactWithFacetFastPath`, `TryGetExactFacetCount`).
+2. Filter-only returns facet-matching bitset directly (no `RentAllTrueBitSet` + redundant intersect).
 
-**Mechanism:** Selective exact query with few posting hits still scans all documents for facet predicates, then intersects bitsets.
+**Resolution evidence:**
 
-**Jak:**
+- Workload P50: **0.5313 ms → 0.0161 ms** (x64); Exact unchanged.
+- BDN ratio ExactWithFacetFilter / ExactOnly: **1.39–1.46×** (was effectively ~219× for filter-only path in BDN; exact+facet no longer O(N)).
+- Gate G-02: **pass** (P50 < 0.10 ms; Exact regression ≤ 5%).
 
-1. **Primary:** specialised fast path — single exact term + facet + snapshot order: after resolving posting span, evaluate facet predicates **only for ordinals in the posting list**; same for `CountMatches`.
-2. **Secondary:** filter-only — return facet-matching bitset directly instead of `RentAllTrueBitSet` + second bitset + intersect ([`SearchEngineSharp.cs`](../../src/SearchEngine.Sharp/SearchEngineSharp.cs) L159–175, follow-up noted in [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md)).
-
-**Dlaczego:** Posting fast path is the engine’s main selective-query optimisation; facet post-processing negates it ([`evidence-and-benchmarking.md`](../../../../audits/dotnet-performance/compendium/references/evidence-and-benchmarking.md) — isolate mechanism after profile proves relevance; here E2 shows ~0.53 ms floor = scan cost).
-
-**Acceptance criteria (proposed experimental gate):**
-
-- 100k / seed 1337, per architecture.
-- Exact+Filter P50 **< 0.10 ms** (experimental threshold vs current ~0.53 ms).
-- Exact (no filter) regression **≤ 5%**.
+Filter-only queries remain O(N) by design — documented in [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md).
 
 ---
 
 ### F-03: Benchmark harness not yet a regression gate
 
-**Status:** confirmed  
-**Architecture/SKU:** cross-architecture  
-**Claim type:** infrastructure / measurement maturity  
-**Evidence grade:** E1 (harness design) + E2 (large-gap detection only)  
+**Baseline status:** confirmed (v0.5.5)  
+**Remediation status:** **resolved** (v0.5.6)  
+**Evidence grade:** E2  
 **Confidence:** medium
 
-**Co:** Custom `Stopwatch` runner detects large regressions but lacks BDN-grade statistics, environment fingerprint, and raw artifact retention required for tight gates.
+**Co (baseline):** Custom `Stopwatch` runner detected large regressions but lacked BDN-grade statistics, environment fingerprint, and raw artifact retention.
 
-**Evidence:** [`benchmarks/SearchEngine.Sharp.Benchmarks/Program.cs`](../../benchmarks/SearchEngine.Sharp.Benchmarks/Program.cs) — per-query `Stopwatch`, `GC.Collect()` before measure, no CPU SKU / PGO / CSV export. Docs report arch/cores/SIMD only ([`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md)).
+**Jak (implemented):** Separate `SearchEngine.Sharp.MicroBenchmarks` BDN project; CSV artifacts per platform under [`artifacts/`](artifacts/README.md); `InProcessNoEmitToolchain` for sibling-repo builds (`32f8b7a`).
 
-**Jak:** Keep existing runner as **workload benchmark**; add separate BenchmarkDotNet project for: `FastBitSet`, exact+facet fast path, facet evaluator, query allocations, SIMD paths, natural sort. Store raw results per [`QA.md`](../../../../audits/dotnet-performance/QA.md) acceptance / [`evidence-and-benchmarking.md`](../../../../audits/dotnet-performance/compendium/references/evidence-and-benchmarking.md) minimum bundle.
-
-**Dlaczego:** [`severity-model.md`](../../../../audits/dotnet-performance/compendium/references/severity-model.md) — single undisclosed microbenchmark caps at P3; ARM64 and x64 require separate baselines (rule 4).
-
-**Acceptance criteria:** CI or manual gate script records SHA, RID, CPU, SDK, raw BDN output for x64 and ARM64 matrix before enforcing numeric thresholds on F-01/F-02 fixes.
+**Remaining:** CI automation for x64 + ARM64 matrix on each release — manual gate satisfied for this audit cycle.
 
 ---
 
@@ -203,34 +218,23 @@ Per [`QA.md`](../../../../audits/dotnet-performance/QA.md): *No severity-bearing
 
 | Signal | Location | Why E0 |
 |--------|----------|--------|
-| **C-01** Per-query GC (`QueryContext`, lists) | [`QueryContext.cs`](../../src/SearchEngine.Sharp/Pooling/QueryContext.cs) | Pool covers `ulong[]` only; no B/op measurement |
-| **C-02** ARM64 SIMD popcount path | [`FastBitSet.cs`](../../src/SearchEngine.Sharp/Index/FastBitSet.cs) `GetTrueCountAdvSimd` | No ARM64 vs scalar benchmark |
-| **C-03** Natural sort cold concurrent build | [`IndexSnapshot.cs`](../../src/SearchEngine.Sharp/Snapshots/IndexSnapshot.cs) `GetSortedPermutation` | Correct but may duplicate work; unmeasured |
-| **C-04** Regex LRU global lock | [`RegexPatternCache.cs`](../../src/SearchEngine.Sharp/Query/RegexPatternCache.cs) | O(vocabulary) scan may dominate; needs concurrent benchmark |
-| **C-05** Peak build memory | `IndexSnapshotBuilder` (dict + flat arrays + facet columns) | No RSS/gcdump at 100k/1M |
+| **C-01** Per-query GC (`QueryContext`, lists) | [`QueryContext.cs`](../../src/SearchEngine.Sharp/Pooling/QueryContext.cs) | Pool covers `ulong[]` only; BDN now covers exact+facet alloc (~6 KB) but not general query paths |
+| **C-02** ARM64 SIMD popcount path | [`FastBitSet.cs`](../../src/SearchEngine.Sharp/Index/FastBitSet.cs) | No ARM64 vs scalar benchmark |
+| **C-03** Natural sort cold concurrent build | [`IndexSnapshot.cs`](../../src/SearchEngine.Sharp/Snapshots/IndexSnapshot.cs) | Unmeasured |
+| **C-04** Regex LRU global lock | [`RegexPatternCache.cs`](../../src/SearchEngine.Sharp/Query/RegexPatternCache.cs) | Needs concurrent benchmark |
+| **C-05** Peak build memory | `IndexSnapshotBuilder` | No RSS/gcdump at 100k/1M |
 
 ---
 
-## To-Be Performance Architecture
+## Regression gates
 
-Recommended work order (risk / reward):
-
-1. **F-02 fast path** — local change, ~120× measured gap, low regression risk to unfiltered exact path.
-2. **F-01 growth-aware publishing** — policy change in `ProgressiveIndexIngestion` / options; largest scaling win for directory scans.
-3. **F-03 BDN + fingerprint matrix** — enable safe gates for steps 1–2 and future SIMD/allocation work.
-4. Measure C-01…C-05 only after gates exist; do not rewrite intrinsics without ARM64+x64 disassembly/benchmark evidence ([`simd-api-selection.md`](../../../../audits/dotnet-performance/compendium/references/simd-api-selection.md)).
-
----
-
-## Regression gates (proposed)
-
-| Gate | Metric | Threshold | Arch |
-|------|--------|-----------|------|
-| G-01 ingestion | Rebuild amplification @ 100k | < 10× (target < 5×) | x64 + ARM64 separately |
-| G-01 ingestion | WorstCaseStaleness | ≤ 1 s | both |
-| G-02 exact+facet | P50 latency @ 100k seed 1337 | < 0.10 ms | both |
-| G-02 exact+facet | Exact (no filter) regression | ≤ 5% | both |
-| G-03 infra | Benchmark artifact | SHA, RID, CPU, SDK, raw JSON/CSV | both |
+| Gate | Metric | Threshold | Baseline | Post-fix (v0.5.6) |
+|------|--------|-----------|----------|-------------------|
+| G-01 ingestion | Rebuild amplification @ 100k | < 10× (target < 5×) | ~25× | **~2.2×** ✓ |
+| G-01 ingestion | WorstCaseStaleness | ≤ 1 s | ✓ | ✓ |
+| G-02 exact+facet | P50 latency @ 100k seed 1337 | < 0.10 ms | ~0.53 ms | **~0.016 ms** ✓ |
+| G-02 exact+facet | Exact (no filter) regression | ≤ 5% | — | **0%** ✓ |
+| G-03 infra | Benchmark artifact | SHA, RID, CPU, SDK, raw CSV | missing | **committed** ✓ |
 
 ---
 
@@ -239,10 +243,10 @@ Recommended work order (risk / reward):
 Confirmed good decisions (do not refactor blindly):
 
 - Flat-array posting/word layout and immutable snapshot reads.
-- Exact posting fast path (when no facet filter).
+- Exact posting fast path (extended to exact+facet in v0.5.6).
 - Bigram pruning for `Within`.
 - `ArrayPool` for large bitsets; manual intrinsics with scalar fallback.
-- Full rebuild correctness model for `IndexUpdater` — problem is **publish frequency**, not rebuild itself.
+- Full rebuild correctness model for `IndexUpdater` — F-01 fix adjusts **publish frequency**, not rebuild architecture.
 
 ---
 
@@ -257,25 +261,22 @@ Confirmed good decisions (do not refactor blindly):
 
 ## Verification vs original review
 
-| Original claim | Verification |
-|----------------|--------------|
-| F-01 ~25× on x64 | **Confirmed** (25.7× this run); **also on ARM64** (25–26×) |
-| F-02 ~115× Exact+Filter | **Confirmed** on x64 (~121×); ARM64 ratio higher because Exact is faster, facet scan unchanged (~0.53 ms) |
-| Adaptive does not fix amplification on fast scan | **Confirmed** — same 50 publishes as fixed-2k |
-| Filter-only slowest at 250k | **Partially confirmed** — true on ARM64; inverted on x64 Windows this run (harness variance) |
-| C-01…C-05 remain E0 | **Confirmed** per [`severity-model.md`](../../../../audits/dotnet-performance/compendium/references/severity-model.md) |
-| No general intrinsics refactor | **Confirmed** — no E2 evidence for SIMD change |
+| Original claim | Baseline verification | Post-fix |
+|----------------|----------------------|----------|
+| F-01 ~25× on x64 | **Confirmed** (25.7×); ARM64 25–26× | **~2.2×**, 7 publishes |
+| F-02 ~115× Exact+Filter | **Confirmed** (~121× x64); ~0.53 ms scan floor | **~3.7×** workload; BDN **1.4×** |
+| Adaptive does not fix amplification | **Confirmed** at baseline | **Fixed** via `GrowthAwareBatchCap` |
+| C-01…C-05 remain E0 | **Confirmed** | unchanged |
+| No general intrinsics refactor | **Confirmed** | unchanged |
 
 ---
 
-## Knowledge and evidence gaps
+## Knowledge and evidence gaps (remaining)
 
-Append to package GAPS on next audit iteration:
-
-- No BDN project or allocation diagnoser run for `QueryContext`.
-- No `dotnet-trace` / disassembly compare for `FastBitSet` ARM64 vs scalar.
-- No peak RSS benchmark for index build at 1M documents.
-- Benchmark raw artifacts not yet stored under `audits/.../artifacts/` (recommended follow-up).
+- No automated CI gate script for BDN matrix on x64 + ARM64.
+- No `dotnet-trace` / disassembly compare for `FastBitSet` ARM64 vs scalar (C-02).
+- No peak RSS benchmark for index build at 1M documents (C-05).
+- Filter-only O(N) facet scan not targeted in this remediation cycle.
 
 ---
 

@@ -230,7 +230,7 @@ var result = await ingestion.IngestAsync(
 // result.PublishCount, result.WorstCaseStaleness, result.TotalRebuildCpu
 ```
 
-Defaults target **&lt; 1 s staleness** and ~50 progressive updates per 100k files on typical hardware. See [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) for measured policy comparison.
+Defaults target **&lt; 1 s staleness** and ~7 progressive updates per 100k files on a fast scan (growth-aware batch cap; was ~50 before v0.5.6). See [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) for measured policy comparison.
 
 **Demo:**
 
