@@ -2,6 +2,7 @@ using SearchEngine.Filters;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
 using SearchEngine.Snapshots;
+using System.Buffers;
 
 namespace SearchEngine.Query;
 
@@ -20,6 +21,16 @@ internal static class FacetFilterEvaluator
         if (predicates.Length == 0)
             return;
 
+        int hitCount = results.GetTrueCount();
+        if (hitCount == 0)
+            return;
+
+        if (SelectivityThresholds.UseFacetOnHitsPath(hitCount, snapshot.DocumentCount))
+        {
+            ApplyOnHitsInPlace(results, filter, snapshot, hitCount);
+            return;
+        }
+
         var resolved = ResolvePredicates(predicates, snapshot);
         var matching = qc.RentEmptyBitSet();
 
@@ -30,6 +41,31 @@ internal static class FacetFilterEvaluator
         }
 
         results.IntersectWith(matching);
+    }
+
+    private static void ApplyOnHitsInPlace(
+        FastBitSet results,
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        int hitCount)
+    {
+        int[] ordinals = ArrayPool<int>.Shared.Rent(hitCount);
+        try
+        {
+            int count = results.CopySetBitOrdinals(ordinals.AsSpan(0, hitCount));
+            var resolved = ResolvePredicates(filter.Predicates, snapshot);
+            results.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                int ordinal = ordinals[i];
+                if (MatchesAll(resolved, ordinal))
+                    results.Add(ordinal);
+            }
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(ordinals);
+        }
     }
 
     internal static FastBitSet BuildMatchingBitSet(

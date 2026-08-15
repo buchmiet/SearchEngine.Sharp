@@ -8,7 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Progressive ingestion:** `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
+- **Selectivity-aware query pipeline:** `ResultMaterializer` uses `FastBitSet.CopySetBitOrdinals()` for SnapshotOrder materialization; hybrid facet apply (sparse K → in-place on hits, dense K → full column scan); hybrid NaturalSort (K=0/1 fast paths, precomputed sort-K below 80% density, global permutation above). Thresholds in `SelectivityThresholds` (BDN-derived). `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
 - **Exact + facet queries:** single-term exact queries with a `FacetFilter` now use a posting-span fast path — facet predicates are evaluated only for ordinals in the posting list, not all documents. `CountMatches` and filter-only queries received analogous optimisations.
 - **Single-operand fast path with `enableOperators:true`:** expressions that tokenize to one word (no `AND`/`OR`/`NOT`/parentheses) now use posting-span fast paths for Exact and Exact+Facet, matching `enableOperators:false` behaviour.
 - **Bigram index:** skip duplicate ordinal entries per bigram list (e.g. `banana` no longer registers twice under `an` / `na`).
@@ -35,7 +35,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ExactSingleTerm_WithFacetFilter_EnableOperatorsTrue_SameAsOff`
 - `SingleSemanticWordTests`
 - `BigramIndexTests` — invariant that each bigram list contains a word ordinal at most once (`banana` → `an` / `na`)
-- `FastBitSetEnumerationTests`
+- `SelectivityPipelineTests`
+- `SelectivityThresholdsTests`
 
 ## [0.5.5] - 2026-07-03
 

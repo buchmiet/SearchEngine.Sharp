@@ -206,30 +206,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         IndexSnapshot snapshot,
         FastBitSet resultSet,
         SearchSortMode sortMode)
-    {
-        var results = new List<int>();
-        var recordIdsSpan = snapshot.RecordIds.AsSpan();
-
-        if (sortMode == SearchSortMode.NaturalSortAscending)
-        {
-            var permutation = snapshot.GetSortedPermutation();
-            foreach (var idx in permutation)
-            {
-                if (resultSet.Get(idx))
-                    results.Add(recordIdsSpan[idx]);
-            }
-        }
-        else
-        {
-            for (int k = 0; k < resultSet.Length; k++)
-            {
-                if (resultSet.Get(k))
-                    results.Add(recordIdsSpan[k]);
-            }
-        }
-
-        return results;
-    }
+        => ResultMaterializer.Materialize(snapshot, resultSet, sortMode);
 
     private static FastBitSet? ExecuteQuery(
         IndexSnapshot snapshot,
