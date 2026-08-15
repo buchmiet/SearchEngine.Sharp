@@ -1,0 +1,10 @@
+{
+  "capturedUtc": "2026-08-15T19:44:54.4912633Z",
+  "implementation": "sharp-0.5.0-initial",
+  "gitSha": "1bd312c1bc360c57d04eec84abe88eebf833c517",
+  "runtime": ".NET 10.0.11",
+  "rid": "win-x64",
+  "arch": "X64",
+  "os": "Microsoft Windows 10.0.26200",
+  "processorCount": 12
+}

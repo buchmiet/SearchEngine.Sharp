@@ -1,0 +1,10 @@
+{
+  "capturedUtc": "2026-08-15T19:49:34.6756640Z",
+  "implementation": "sharp-current",
+  "gitSha": null,
+  "runtime": ".NET 10.0.10",
+  "rid": "osx-arm64",
+  "arch": "Arm64",
+  "os": "macOS 26.5.0",
+  "processorCount": 8
+}

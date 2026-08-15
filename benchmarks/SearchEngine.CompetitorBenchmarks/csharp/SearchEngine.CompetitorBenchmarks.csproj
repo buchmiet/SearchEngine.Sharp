@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SearchEngine.CompetitorBenchmarks</RootNamespace>
+    <SharpSourceRoot Condition="'$(SharpSourceRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..</SharpSourceRoot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp\Filters\FacetFilter.cs')">
+    <DefineConstants>$(DefineConstants);SHARP_HAS_FACET</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp\SearchTokenization.cs')">
+    <DefineConstants>$(DefineConstants);SHARP_HAS_FILEMASK</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(SharpSourceRoot)\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+  </ItemGroup>
+</Project>

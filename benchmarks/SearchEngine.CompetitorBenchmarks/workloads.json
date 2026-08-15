@@ -1,0 +1,81 @@
+{
+  "corpusFile": "corpus/file-search-100k-seed2026.json",
+  "warmupIterations": 3,
+  "measureIterations": 10,
+  "workloads": [
+    {
+      "id": "within_snapshot",
+      "description": "Within 'report', SnapshotOrder, no facet",
+      "kind": "within",
+      "query": "report",
+      "sort": "snapshot",
+      "coldIndex": false
+    },
+    {
+      "id": "within_facet_snapshot",
+      "description": "Within 'report' + size facet [1KiB,1MiB], SnapshotOrder",
+      "kind": "within_facet",
+      "query": "report",
+      "sort": "snapshot",
+      "facetMinSize": 1024,
+      "facetMaxSize": 1048576,
+      "coldIndex": false,
+      "requiresFacet": true
+    },
+    {
+      "id": "within_facet_natural_cold",
+      "description": "Within+facet+NaturalSort with cold index rebuild each iteration",
+      "kind": "within_facet",
+      "query": "report",
+      "sort": "natural",
+      "facetMinSize": 1024,
+      "facetMaxSize": 1048576,
+      "coldIndex": true,
+      "requiresFacet": true
+    },
+    {
+      "id": "zero_hits_natural_cold",
+      "description": "Zero-hit Within+NaturalSort with cold index rebuild",
+      "kind": "within",
+      "query": "zzzznotfound999",
+      "sort": "natural",
+      "coldIndex": true
+    },
+    {
+      "id": "exact_first",
+      "description": "Exact match on first document filename",
+      "kind": "exact",
+      "queryFromCorpus": "exactQuery",
+      "sort": "snapshot",
+      "coldIndex": false
+    },
+    {
+      "id": "glob_pdf",
+      "description": "Glob *.pdf on whole filename (FileMask semantics)",
+      "kind": "glob",
+      "query": "*.pdf",
+      "sort": "snapshot",
+      "coldIndex": false
+    },
+    {
+      "id": "naive_within_scan",
+      "description": "Linear scan Contains(report) — cross-language baseline",
+      "kind": "naive_within",
+      "query": "report",
+      "sort": "none",
+      "coldIndex": false,
+      "competitorsOnly": true
+    },
+    {
+      "id": "naive_within_facet_natural",
+      "description": "Linear scan + facet filter + natural sort — cross-language baseline",
+      "kind": "naive_within_facet_natural",
+      "query": "report",
+      "sort": "natural",
+      "facetMinSize": 1024,
+      "facetMaxSize": 1048576,
+      "coldIndex": false,
+      "competitorsOnly": true
+    }
+  ]
+}

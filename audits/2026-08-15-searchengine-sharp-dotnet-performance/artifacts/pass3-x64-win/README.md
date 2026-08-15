@@ -106,6 +106,20 @@ Measured hit counts (`SelectivityPipelineCounts`, file corpus @ 100k):
 
 **Finding:** E2E confirms zero-hit and sparse-final-result queries still pay full cold NaturalSort. Do not label this scenario "~20 hits".
 
+### Post-implementation (selectivity pipeline on main, 2026-08-15 PM)
+
+Source: [`post-implementation/SearchEngine.Sharp.MicroBenchmarks.SelectivityPipelineBenchmark-report.csv`](post-implementation/SearchEngine.Sharp.MicroBenchmarks.SelectivityPipelineBenchmark-report.csv)
+
+Same harness and hit counts (`textHits=10_000`, `postFacet=4`).
+
+| Scenario | Pre-implementation | Post-implementation | Speedup |
+|----------|-------------------:|--------------------:|--------:|
+| 0 text hits + NaturalSort cold | 31.2 ms | **29.3 μs** | **~1060×** |
+| Within+Facet+NaturalSort cold | 24.9 ms | **155.6 μs** | **~160×** |
+| Within+Facet SnapshotOrder | 185 μs med. | **109 μs med.** | **~1.7×** |
+
+Production changes: `ResultMaterializer` (K=0/1, enumerate set bits, hybrid NaturalSort), `FacetFilterEvaluator` (facet-on-K). See commit `9c29c69`.
+
 ---
 
 ## 5. FileMask glob benchmark (`FileMaskGlobBenchmark-report.csv`)

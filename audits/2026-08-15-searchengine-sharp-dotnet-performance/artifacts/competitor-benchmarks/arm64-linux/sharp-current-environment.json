@@ -1,0 +1,10 @@
+{
+  "capturedUtc": "2026-08-15T19:49:34.9141203Z",
+  "implementation": "sharp-current",
+  "gitSha": null,
+  "runtime": ".NET 10.0.10",
+  "rid": "ubuntu.26.04-arm64",
+  "arch": "Arm64",
+  "os": "Ubuntu 26.04 LTS",
+  "processorCount": 4
+}

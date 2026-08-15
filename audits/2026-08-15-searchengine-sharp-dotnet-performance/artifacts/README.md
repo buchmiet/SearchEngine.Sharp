@@ -28,6 +28,7 @@ Pass a **directory** or a **`.json` file path**. Default (no argument) writes to
 | `x64-win/` | Windows x64, 12 cores, AVX2 | win-x64 | 10.0.11 |
 | `arm64-macos/` | mac.home, 8 cores, AdvSimd | osx-arm64 | 10.0.10 |
 | `arm64-linux/` | homelab Ubuntu, 4 cores, AdvSimd | linux-arm64 | 10.0.10 |
+| `competitor-benchmarks/` | x64 + ARM64 cross-language + Sharp historical | mixed | see README |
 
 ## Contents
 

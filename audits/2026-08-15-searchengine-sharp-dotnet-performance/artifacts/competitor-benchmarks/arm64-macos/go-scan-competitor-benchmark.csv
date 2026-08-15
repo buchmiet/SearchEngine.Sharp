@@ -1,0 +1,9 @@
+implementation,workload,hit_count,median_ns,mean_ns,notes
+go-scan,within_snapshot,10000,3394750,3384000,hot-corpus
+go-scan,within_facet_snapshot,4,3321333,3373146,hot-corpus
+go-scan,within_facet_natural_cold,4,3834833,3864633,"hot-corpus,no-index-rebuild"
+go-scan,zero_hits_natural_cold,0,3094584,3112108,"hot-corpus,no-index-rebuild"
+go-scan,exact_first,7,75917,75933,hot-corpus
+go-scan,glob_pdf,6667,4337041,4337358,hot-corpus
+go-scan,naive_within_scan,10000,3246458,3258738,linear-scan
+go-scan,naive_within_facet_natural,4,3346750,3381242,linear-scan

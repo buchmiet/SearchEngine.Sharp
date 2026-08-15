@@ -1,0 +1,7 @@
+implementation,workload,hit_count,median_ns,mean_ns,notes
+sharp-0.5.5,within_snapshot,10000,65400,88490,hot-index
+sharp-0.5.5,within_facet_snapshot,4,172100,164410,hot-index
+sharp-0.5.5,within_facet_natural_cold,4,25988300,26367130,cold-index
+sharp-0.5.5,zero_hits_natural_cold,0,24944800,27991830,cold-index
+sharp-0.5.5,exact_first,7,78500,78680,hot-index
+sharp-0.5.5,glob_pdf,6667,399300,400770,hot-index
