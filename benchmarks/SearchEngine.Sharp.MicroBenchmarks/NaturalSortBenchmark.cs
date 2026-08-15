@@ -7,29 +7,68 @@ namespace SearchEngine.Sharp.MicroBenchmarks;
 [MemoryDiagnoser]
 public class NaturalSortBenchmark
 {
-    private SearchEngineSharp _engine = null!;
+    private Dictionary<int, IndexedEntry> _entries = null!;
+    private SearchEngineSharp _coldEngine = null!;
+    private SearchEngineSharp _warmEngine = null!;
+    private SearchEngineSharp _snapshotOrderEngine = null!;
     private string _query = null!;
 
     [GlobalSetup]
     public void Setup()
     {
         var data = FileSearchDataFactory.Create(100_000, seed: 2026);
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        updater.RebuildFrom(FileSearchDataFactory.ToIndexedEntries(data.Documents));
-        _engine = new SearchEngineSharp(provider);
+        _entries = FileSearchDataFactory.ToIndexedEntries(data.Documents);
         _query = data.InfixQueries[0];
+        RebuildSnapshotOrderEngine();
     }
 
-    [Benchmark(Baseline = true, Description = "Cold — first NaturalSort on snapshot")]
-    public int NaturalSort_Cold()
-        => _engine.Find(_query, WordMatchMethod.Within, enableOperators: true, SearchSortMode.NaturalSortAscending).Count;
+    [IterationSetup(Targets = [nameof(NaturalSort_Cold)])]
+    public void ColdIterationSetup()
+    {
+        var provider = new IndexSnapshotProvider();
+        new IndexUpdater(provider).RebuildFrom(_entries);
+        _coldEngine = new SearchEngineSharp(provider);
+    }
 
-    [Benchmark(Description = "Warm — permutation cached on same snapshot")]
+    [IterationSetup(Targets = [nameof(NaturalSort_Warm)])]
+    public void WarmIterationSetup()
+    {
+        ColdIterationSetup();
+        _ = _coldEngine.Find(
+            _query,
+            WordMatchMethod.Within,
+            enableOperators: true,
+            SearchSortMode.NaturalSortAscending);
+        _warmEngine = _coldEngine;
+    }
+
+    [Benchmark(Baseline = true, Description = "Cold — fresh snapshot, first NaturalSort query")]
+    public int NaturalSort_Cold()
+        => _coldEngine.Find(
+            _query,
+            WordMatchMethod.Within,
+            enableOperators: true,
+            SearchSortMode.NaturalSortAscending).Count;
+
+    [Benchmark(Description = "Warm — same snapshot, permutation already cached")]
     public int NaturalSort_Warm()
-        => _engine.Find(_query, WordMatchMethod.Within, enableOperators: true, SearchSortMode.NaturalSortAscending).Count;
+        => _warmEngine.Find(
+            _query,
+            WordMatchMethod.Within,
+            enableOperators: true,
+            SearchSortMode.NaturalSortAscending).Count;
 
     [Benchmark(Description = "SnapshotOrder baseline (no sort build)")]
     public int SnapshotOrder()
-        => _engine.Find(_query, WordMatchMethod.Within, enableOperators: true).Count;
+        => _snapshotOrderEngine.Find(
+            _query,
+            WordMatchMethod.Within,
+            enableOperators: true).Count;
+
+    private void RebuildSnapshotOrderEngine()
+    {
+        var provider = new IndexSnapshotProvider();
+        new IndexUpdater(provider).RebuildFrom(_entries);
+        _snapshotOrderEngine = new SearchEngineSharp(provider);
+    }
 }

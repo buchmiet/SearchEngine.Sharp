@@ -1,7 +1,4 @@
 using BenchmarkDotNet.Attributes;
-using SearchEngine;
-using SearchEngine.Pooling;
-using SearchEngine.Query;
 using SearchEngine.Sharp.Benchmarks;
 using SearchEngine.Snapshots;
 
@@ -21,20 +18,14 @@ public class WithinBigramBenchmark
         var updater = new IndexUpdater(provider);
         updater.RebuildFrom(FileSearchDataFactory.ToIndexedEntries(data.Documents));
         _snapshot = provider.Current;
-        _query = data.InfixQueries[1]; // "tion" — repeated bigrams in file names
+        _query = data.InfixQueries[1]; // "tion"
     }
 
-    [Benchmark(Baseline = true, Description = "First bigram only (legacy)")]
-    public int Within_FirstBigram()
-    {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
-        return QueryMatcher.MatchWithin(_query, qc, _snapshot, useRarestBigram: false).GetTrueCount();
-    }
+    [Benchmark(Baseline = true, Description = "Production-style first bigram (legacy direct path)")]
+    public int Within_FirstBigram_Legacy()
+        => WithinBigramQueryMatcher.MatchWithinFirstBigram(_query, _snapshot).GetTrueCount();
 
-    [Benchmark(Description = "Rarest bigram among query bigrams")]
-    public int Within_RarestBigram()
-    {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
-        return QueryMatcher.MatchWithin(_query, qc, _snapshot, useRarestBigram: true).GetTrueCount();
-    }
+    [Benchmark(Description = "Experimental rarest bigram among query bigrams")]
+    public int Within_RarestBigram_Experimental()
+        => WithinBigramQueryMatcher.MatchWithinRarestBigram(_query, _snapshot).GetTrueCount();
 }

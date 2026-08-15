@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>SearchEngine.Sharp.MicroBenchmarks.ProgressiveNaturalSortBenchmark-20260815-124637</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.2, Windows 11 (10.0.26200.9168)
+Unknown processor
+.NET SDK 11.0.100-preview.6.26359.118
+  [Host] : .NET 10.0.11 (10.0.1126.37416), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Toolchain=InProcessNoEmitToolchain  InvocationCount=1  UnrollFactor=1  
+</code></pre>
+
+<table>
+<thead><tr><th>Method                                                </th><th>Mean </th><th>Error</th><th>StdDev</th><th>Median</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>&#39;7 cold NaturalSort requeries (fresh snapshot each publish)&#39;</td><td>48,388.5 &mu;s</td><td>960.87 &mu;s</td><td>1,984.36 &mu;s</td><td>47,605.5 &mu;s</td><td>1.002</td><td>0.06</td><td>1000.0000</td><td>24570.13 KB</td><td>1.00</td>
+</tr><tr><td>&#39;7 SnapshotOrder requeries (fresh snapshots, no sort build)&#39;</td><td>134.5 &mu;s</td><td>4.27 &mu;s</td><td>12.05 &mu;s</td><td>130.2 &mu;s</td><td>0.003</td><td>0.00</td><td>-</td><td>262.48 KB</td><td>0.01</td>
+</tr></tbody></table>
+</body>
+</html>

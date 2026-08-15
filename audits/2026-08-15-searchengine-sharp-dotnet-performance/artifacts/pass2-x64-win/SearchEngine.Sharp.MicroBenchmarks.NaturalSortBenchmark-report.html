@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>SearchEngine.Sharp.MicroBenchmarks.NaturalSortBenchmark-20260815-124559</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.2, Windows 11 (10.0.26200.9168)
+Unknown processor
+.NET SDK 11.0.100-preview.6.26359.118
+  [Host] : .NET 10.0.11 (10.0.1126.37416), X64 RyuJIT AVX-512F+CD+BW+DQ+VL+VBMI
+</code></pre>
+<pre><code>Toolchain=InProcessNoEmitToolchain  
+</code></pre>
+
+<table>
+<thead><tr><th>Method                                      </th><th>Job </th><th>InvocationCount</th><th>UnrollFactor</th><th>Mean  </th><th>Error</th><th>StdDev</th><th>Median</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>&#39;SnapshotOrder baseline (no sort build)&#39;</td><td>Job-PONJLD</td><td>Default</td><td>16</td><td>48.29 &mu;s</td><td>0.419 &mu;s</td><td>0.372 &mu;s</td><td>48.29 &mu;s</td><td>?</td><td>?</td><td>7.8125</td><td>1.1597</td><td>128.63 KB</td><td>?</td>
+</tr><tr><td>&#39;Cold — fresh snapshot, first NaturalSort query&#39;</td><td>Job-HRFCSV</td><td>1</td><td>1</td><td>23,426.26 &mu;s</td><td>457.424 &mu;s</td><td>1,236.672 &mu;s</td><td>23,151.35 &mu;s</td><td>1.003</td><td>0.07</td><td>-</td><td>-</td><td>10888.51 KB</td><td>1.00</td>
+</tr><tr><td>&#39;Warm — same snapshot, permutation already cached&#39;</td><td>Job-HRFCSV</td><td>1</td><td>1</td><td>77.28 &mu;s</td><td>3.456 &mu;s</td><td>10.080 &mu;s</td><td>71.65 &mu;s</td><td>0.003</td><td>0.00</td><td>-</td><td>-</td><td>133.21 KB</td><td>0.01</td>
+</tr></tbody></table>
+</body>
+</html>

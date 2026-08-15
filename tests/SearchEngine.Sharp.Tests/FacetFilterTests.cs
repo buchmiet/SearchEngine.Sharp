@@ -210,13 +210,13 @@ public class FacetFilterTests
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 1000, 5000);
 
-        var off = engine.Find("report-final", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
-        var on = engine.Find("report-final", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter);
+        var off = engine.Find("log", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
+        var on = engine.Find("log", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter);
 
         Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
         Assert.Equal(
-            engine.CountMatches("report-final", WordMatchMethod.Exact, true, filter),
-            engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter));
+            engine.CountMatches("log", WordMatchMethod.Exact, true, filter),
+            engine.CountMatches("log", WordMatchMethod.Exact, false, filter));
     }
 
     [Fact]
@@ -224,8 +224,8 @@ public class FacetFilterTests
     {
         var (engine, _) = CreateFacetIndex();
 
-        var off = engine.Find("report-final", WordMatchMethod.Exact, false);
-        var on = engine.Find("report-final", WordMatchMethod.Exact, true);
+        var off = engine.Find("log", WordMatchMethod.Exact, false);
+        var on = engine.Find("log", WordMatchMethod.Exact, true);
 
         Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
     }

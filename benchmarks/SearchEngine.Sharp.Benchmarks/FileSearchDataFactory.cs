@@ -29,8 +29,9 @@ public static class FileSearchDataFactory
     {
         var rng = new Random(seed);
         var documents = new List<BenchDocument>(documentCount);
-        long nowTicks = DateTime.UtcNow.Ticks;
-        var date = new DateTime(2026, 8, 15, 0, 0, 0, DateTimeKind.Utc);
+        var anchor = new DateTime(2026, 8, 15, 0, 0, 0, DateTimeKind.Utc);
+        long nowTicks = anchor.Ticks;
+        var date = anchor;
 
         for (int id = 0; id < documentCount; id++)
         {

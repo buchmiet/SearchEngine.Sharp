@@ -12,7 +12,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Exact + facet queries:** single-term exact queries with a `FacetFilter` now use a posting-span fast path — facet predicates are evaluated only for ordinals in the posting list, not all documents. `CountMatches` and filter-only queries received analogous optimisations.
 - **Single-operand fast path with `enableOperators:true`:** expressions that tokenize to one word (no `AND`/`OR`/`NOT`/parentheses) now use posting-span fast paths for Exact and Exact+Facet, matching `enableOperators:false` behaviour.
 - **Bigram index:** skip duplicate ordinal entries per bigram list (e.g. `banana` no longer registers twice under `an` / `na`).
-- **`WithinBigramBenchmark`:** A/B first-bigram vs rarest-bigram on file corpus (`tion` @ 100k) — rarest ~1.12× slower on x64; production keeps first-bigram selection.
+- **`WithinBigramQueryMatcher` (benchmark assembly only):** A/B legacy first-bigram vs experimental rarest-bigram — rarest **~1.07× slower** on x64 (`tion`, file corpus); **not shipped**. Production `QueryMatcher` uses direct first-bigram path unchanged except ordinal dedupe in builder.
+- **`NaturalSortBenchmark` / `ProgressiveNaturalSortBenchmark`:** `IterationSetup` yields true cold NaturalSort. Single cold query **~22 ms** @ 100k; progressive 7× cold requery **~47 ms** vs SnapshotOrder **~125 μs** — see `artifacts/pass2-x64-win/`.
 - Benchmark reports and audit evidence updated with post-fix measurements on x64 and ARM64.
 - **MicroBenchmarks fingerprint CLI:** `--fingerprint` now accepts a directory or `.json` file path (fixes nested `environment-fingerprint.json/environment-fingerprint.json` output bug).
 - **`docs/file-search-guide.md`:** updated publish count (~7), facet fast-path semantics, and operator guidance.
@@ -21,7 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `OperatorsOnBenchmark`, `FileSearchBenchmark`, `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark`, `WithinBigramBenchmark`, `MemoryDiagnoser`, environment fingerprint CLI, CSV/Markdown/HTML export).
 - `FileSearchDataFactory` — realistic file-name corpus for product-shaped benchmarks.
-- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (x64 Windows, macOS ARM64, Ubuntu ARM64). Full QA evidence bundle (CPU SKU, SDK, PGO, CI matrix) remains follow-up work — see audit report F-03.
+- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 operators/WithinBigram/NaturalSort under `pass2-x64-win/`).
 
 ### Tests
 
