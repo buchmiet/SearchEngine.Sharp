@@ -6,8 +6,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.5.6] - 2026-08-15
-
 ### Changed
 
 - **Progressive ingestion:** `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
@@ -80,7 +78,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Initial release: in-memory inverted index with exact/within token search, boolean operators, natural sort, snapshot-based concurrent reads, and DI registration.
 
-[0.5.6]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.4...v0.5.5
 [0.5.3]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.1...v0.5.2
