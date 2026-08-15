@@ -5,9 +5,20 @@ using SearchEngine.Sharp.Benchmarks;
 
 namespace SearchEngine.Sharp.MicroBenchmarks;
 
+/// <summary>
+/// Measured hit counts for the within+facet scenario (file corpus @ 100k, seed 2026).
+/// Populated once in <see cref="SelectivityPipelineBenchmark.GlobalSetup"/>.
+/// </summary>
+internal static class SelectivityPipelineCounts
+{
+    internal const string WithinQuery = "report";
+    internal static int TextHitCount { get; set; }
+    internal static int PostFacetHitCount { get; set; }
+}
+
 [MemoryDiagnoser]
 [WarmupCount(1)]
-[IterationCount(3)]
+[IterationCount(5)]
 public class SelectivityPipelineBenchmark
 {
     private Dictionary<int, IndexedEntry> _entries = null!;
@@ -25,6 +36,18 @@ public class SelectivityPipelineBenchmark
         _filter = FacetFilter.Range("size", 1_024, 1_048_576);
         _zeroHitQuery = "zzzznotfound999";
         _withinQuery = data.InfixQueries[0];
+
+        var measureProvider = new IndexSnapshotProvider();
+        new IndexUpdater(measureProvider).RebuildFrom(_entries);
+        var measureEngine = new SearchEngineSharp(measureProvider);
+        SelectivityPipelineCounts.TextHitCount = measureEngine.CountMatches(
+            _withinQuery, WordMatchMethod.Within, enableOperators: true);
+        SelectivityPipelineCounts.PostFacetHitCount = measureEngine.CountMatches(
+            _withinQuery, WordMatchMethod.Within, enableOperators: true, _filter);
+
+        Console.WriteLine(
+            $"SelectivityPipelineCounts: query='{_withinQuery}' textHits={SelectivityPipelineCounts.TextHitCount} postFacet={SelectivityPipelineCounts.PostFacetHitCount}");
+
         RebuildColdEngine();
     }
 
@@ -32,7 +55,7 @@ public class SelectivityPipelineBenchmark
     public void IterationSetup()
         => RebuildColdEngine();
 
-    [Benchmark(Baseline = true, Description = "0 hits — NaturalSort cold (full pipeline)")]
+    [Benchmark(Baseline = true, Description = "0 text hits + NaturalSort cold")]
     public int ZeroHits_NaturalSort()
         => _coldEngine.Find(
             _zeroHitQuery,
@@ -40,7 +63,7 @@ public class SelectivityPipelineBenchmark
             enableOperators: true,
             SearchSortMode.NaturalSortAscending).Count;
 
-    [Benchmark(Description = "~20 hits — Within+Facet+NaturalSort cold")]
+    [Benchmark(Description = "Within+Facet+NaturalSort cold (see SelectivityPipelineCounts)")]
     public int WithinFacet_NaturalSort()
         => _coldEngine.Find(
             _withinQuery,
@@ -49,7 +72,7 @@ public class SelectivityPipelineBenchmark
             SearchSortMode.NaturalSortAscending,
             _filter).Count;
 
-    [Benchmark(Description = "~20 hits — Within+Facet SnapshotOrder")]
+    [Benchmark(Description = "Within+Facet SnapshotOrder (see SelectivityPipelineCounts)")]
     public int WithinFacet_SnapshotOrder()
         => _coldEngine.Find(
             _withinQuery,

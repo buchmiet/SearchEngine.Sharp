@@ -2,16 +2,18 @@ using BenchmarkDotNet.Attributes;
 using SearchEngine;
 using SearchEngine.Filters;
 using SearchEngine.Index;
-using SearchEngine.Pooling;
 using SearchEngine.Sharp.Benchmarks;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.MicroBenchmarks;
 
+/// <summary>
+/// Finer K sweep to locate empirical crossover between global permutation vs precomputed sort-K.
+/// </summary>
 [MemoryDiagnoser]
 [WarmupCount(1)]
 [IterationCount(3)]
-public class NaturalSortSelectivityBenchmark
+public class NaturalSortCrossoverBenchmark
 {
     private Dictionary<int, IndexedEntry> _entries = null!;
     private IndexSnapshot _coldSnapshot = null!;
@@ -20,7 +22,7 @@ public class NaturalSortSelectivityBenchmark
     private int[] _ordinalBuffer = null!;
     private string[] _keyScratch = null!;
 
-    [Params(0, 1, 10, 100, 1_000, 10_000, 50_000, 100_000)]
+    [Params(2_000, 5_000, 10_000, 15_000, 20_000, 30_000, 40_000, 50_000, 75_000, 100_000)]
     public int HitCount { get; set; }
 
     [GlobalSetup]
@@ -30,7 +32,7 @@ public class NaturalSortSelectivityBenchmark
         var data = FileSearchDataFactory.Create(documentCount, seed: 2026);
         _entries = FileSearchDataFactory.ToIndexedEntries(data.Documents);
         _bitSet = SelectivityProbe.CreateSparseBitSet(documentCount, HitCount);
-        _results = new List<int>(Math.Max(HitCount, 16));
+        _results = new List<int>(HitCount);
         _ordinalBuffer = new int[documentCount];
         _keyScratch = new string[documentCount];
         RebuildColdSnapshot();
@@ -40,18 +42,14 @@ public class NaturalSortSelectivityBenchmark
     public void IterationSetup()
         => RebuildColdSnapshot();
 
-    [Benchmark(Baseline = true, Description = "Current — build full N permutation, scan all")]
-    public int NaturalSortFullPermutationScan()
+    [Benchmark(Baseline = true, Description = "Current — full N cold permutation + scan")]
+    public int GlobalPermutation()
         => SelectivityProbe.NaturalSortCurrent(_coldSnapshot, _bitSet, _results);
 
     [Benchmark(Description = "Sort K — precompute K keys once (production-shaped)")]
-    public int NaturalSortKPrecomputedKeys()
+    public int SortKPrecomputedKeys()
         => SelectivityProbe.NaturalSortKOnlyPrecomputedKeys(
             _coldSnapshot, _bitSet, _ordinalBuffer, _keyScratch, _results);
-
-    [Benchmark(Description = "Sort K — naive comparator (unfair: rebuilds keys in sort)")]
-    public int NaturalSortKNaiveComparator()
-        => SelectivityProbe.NaturalSortKOnlyNaive(_coldSnapshot, _bitSet, _ordinalBuffer, _results);
 
     private void RebuildColdSnapshot()
     {

@@ -43,12 +43,21 @@ public class FacetSelectivityBenchmark
         return results.GetTrueCount();
     }
 
-    [Benchmark(Description = "Proposed — facet only on K text hits")]
-    public int FacetOnHitsOnly()
+    [Benchmark(Description = "Facet on K — intersect second bitset (conservative prototype)")]
+    public int FacetOnHitsIntersect()
     {
         using var qc = new QueryContext(_snapshot.DocumentCount);
         var results = qc.RentCopyOf(_textHits);
         SelectivityProbe.FacetApplyOnHitsOnly(results, _filter, _snapshot, qc, _ordinalBuffer);
+        return results.GetTrueCount();
+    }
+
+    [Benchmark(Description = "Facet on K — clear + re-add matches (tighter prototype)")]
+    public int FacetOnHitsInPlace()
+    {
+        using var qc = new QueryContext(_snapshot.DocumentCount);
+        var results = qc.RentCopyOf(_textHits);
+        SelectivityProbe.FacetApplyOnHitsInPlace(results, _filter, _snapshot, _ordinalBuffer);
         return results.GetTrueCount();
     }
 }

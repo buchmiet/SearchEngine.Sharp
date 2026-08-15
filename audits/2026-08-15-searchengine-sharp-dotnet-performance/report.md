@@ -121,28 +121,30 @@ Measured 2026-08-15. Raw CSV: [`artifacts/pass3-x64-win/`](artifacts/pass3-x64-w
 
 The ~23 ms NaturalSort cost is a **symptom** of a broader pattern: multiple pipeline stages are **selectivity-blind** — they process all **N** documents even when the text query yields **K ≪ N** hits.
 
-### NaturalSort vs K (cold snapshot, x64 @ 100k)
+### NaturalSort vs K (cold snapshot, x64 @ 100k, precomputed keys)
 
-| K hits | Current (full N sort) | Sort K only | Speedup |
-|-------:|----------------------:|------------:|--------:|
-| 0 | ~22 ms | **161 μs** | **~140×** |
-| 1 | **22.4 ms** | **216 μs** | **~104×** |
-| 100 | **22.0 ms** | **134 μs** | **~165×** |
-| 1,000 | **22.6 ms** | **1.66 ms** | **~14×** |
-| 10,000+ | ~22 ms | ≥24 ms | crossover — use global permutation |
+| K / N | Global permutation | Sort K (precomputed) | Ratio |
+|------:|-------------------:|---------------------:|------:|
+| 0 | ~22 ms | **164 μs** | **~140×** |
+| 10 | **21.8 ms** | **30 μs** | **~730×** |
+| 1,000 | **22.3 ms** | **248 μs** | **~90×** |
+| 10,000 | **21.7 ms** | **2.5 ms** | **~8.7×** |
+| 100,000 | **22.9 ms** | **19.6 ms** | **~0.85×** (crossover ~90% density) |
 
-Zero-hit `Find` + NaturalSort (E2 end-to-end): **55.4 ms** — confirms full permutation build before checking result bitset.
+Naive comparator prototype (rebuilds keys in sort) **invalidated** — gave false crossover ~10k. See `NaturalSortCrossoverBenchmark-report.csv`.
+
+Zero-hit cold NaturalSort confirmed; stable component timing **~22 ms** (E2E 0-hit ~31 ms, high variance).
 
 ### Facet Apply vs K (x64 @ 100k)
 
-General `FacetFilterEvaluator.Apply()` still O(N). Facet-on-K prototype:
+General `FacetFilterEvaluator.Apply()` still O(N). Facet-on-K in-place prototype:
 
 | K | Current | On K only | Speedup |
 |--:|--------:|----------:|--------:|
 | 10 | 64 μs | **1.1 μs** | **~57×** |
 | 1,000 | 64 μs | **3.9 μs** | **~17×** |
 
-Within+Facet SnapshotOrder @ ~20 hits: **199 μs** vs Within+Facet+NaturalSort **21.9 ms**.
+E2E Within `"report"`: **textHitCount=10,000**, **postFacetHitCount=4**. SnapshotOrder **185 μs** vs NaturalSort **24.9 ms** (~134×).
 
 ### BitSet materialization (x64 @ 100k)
 
@@ -156,7 +158,7 @@ Rebuild 100k: **40.6 ms**, **48.7 MB**. Span-aware word pool prototype on token 
 
 Default tokenization `*.pdf` @ 100k: **44 μs** (misleading — `.` splits query). FileMask whole-filename: **260 μs** (**5.9×**). `FileSearchBenchmark` must use `SearchTokenization.FileMask` for glob scenarios.
 
-**Recommended 0.5.6 direction:** unified selectivity-aware query pipeline (enumerate K → facet K → sort K with hybrid threshold), not isolated NaturalSortKeyBuilder tuning.
+**Recommended 0.5.6 direction:** unified selectivity-aware query pipeline — see [`docs/0.5.6-selectivity-research.md`](../../docs/0.5.6-selectivity-research.md).
 
 ---
 

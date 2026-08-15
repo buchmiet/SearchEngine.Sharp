@@ -10,6 +10,7 @@ Harness (`SearchEngine.Sharp.MicroBenchmarks`, `InProcessNoEmitToolchain`, `Warm
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*BitSetMaterializationBenchmark*"
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*NaturalSortSelectivityBenchmark*"
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*FacetSelectivityBenchmark*"
+dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*NaturalSortCrossoverBenchmark*"
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*SelectivityPipelineBenchmark*"
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*FileMaskGlobBenchmark*"
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter "*SnapshotBuildAllocationBenchmark*"
@@ -40,24 +41,29 @@ N=100k. Synthetic bitsets with K hits spread across ordinals.
 
 ---
 
-## 2. NaturalSort selectivity (`NaturalSortSelectivityBenchmark-report.csv`)
+## 2. NaturalSort selectivity
 
-Cold snapshot each iteration (`IterationSetup`, `InvocationCount=1`). Compares current `GetSortedPermutation()` + full permutation scan vs prototype **enumerate K + sort K keys only**.
+### 2a. Fair prototype — precompute K keys once (`NaturalSortCrossoverBenchmark-report.csv`)
 
-| K | Current (full N sort + scan) | Sort K only | Speedup |
-|--:|-----------------------------:|------------:|--------:|
-| 0 | **22–63 ms** (cold build dominates) | **161 μs** | **~140×** |
-| 1 | **22.4 ms** | **216 μs** | **~104×** |
-| 10 | **22.2 ms** | **37.6 μs** | **~590×** |
-| 100 | **22.0 ms** | **134 μs** | **~165×** |
-| 1,000 | **22.6 ms** | **1.66 ms** | **~14×** |
-| 10,000 | **21.8 ms** | 24.0 ms | ~0.9× (crossover) |
-| 50,000 | **22.0 ms** | 106 ms | ~0.2× |
-| 100,000 | **21.9 ms** | 193 ms | ~0.1× |
+Earlier naive comparator rebuilt keys during `Array.Sort` comparisons → bogus crossover ~10k and 353 MB alloc @ K=100k. **Corrected:** build each key once, then sort ordinals by cached keys.
 
-**Finding:** cold NaturalSort cost is **independent of K** in the current pipeline — 0 hits pays the same ~22 ms as 1 hit. Sort-K-only wins for **K ≲ 1–5% of N** (~1k @ 100k). Above ~10% use cached global permutation.
+| K / 100k | Global permutation | Sort K (precomputed) | Ratio |
+|---------:|-------------------:|---------------------:|------:|
+| 0 | ~22 ms | **164 μs** | **~140×** |
+| 10 | **21.8 ms** | **30 μs** | **~730×** |
+| 1,000 | **22.3 ms** | **248 μs** | **~90×** |
+| 10,000 | **21.7 ms** | **2.5 ms** | **~8.7×** |
+| 50,000 | **22.7 ms** | **9.0 ms** | **~2.5×** |
+| 75,000 | **22.5 ms** | **14.4 ms** | **~1.6×** |
+| 100,000 | **22.9 ms** | **19.6 ms** | **~0.85×** |
 
-**Recommended hybrid:** enumerate K → if K==0 return []; if K==1 return; if K small sort K; else `GetSortedPermutation()` + filter.
+**Empirical crossover ~90% of N** (not ~10%). Hybrid: sort-K below threshold; global cached permutation at high density.
+
+See also `NaturalSortSelectivityBenchmark-report.csv` (includes naive comparator row labelled unfair for comparison).
+
+**Finding:** cold NaturalSort cost is **independent of K** in the current pipeline — 0 hits pays ~22 ms same as 1 hit.
+
+**Recommended hybrid:** K==0 → []; K==1 → single id; K below crossover → enumerate + precompute keys + sort K; else global permutation + filter.
 
 ---
 
@@ -84,15 +90,21 @@ Historical signal: Within ~0.156 ms + facet adds ~0.53 ms floor = same full-scan
 
 ## 4. End-to-end pipeline (`SelectivityPipelineBenchmark-report.csv`)
 
-Real `SearchEngineSharp.Find`, cold snapshot per iteration, file corpus @ 100k.
+Measured hit counts (`SelectivityPipelineCounts`, file corpus @ 100k):
 
-| Scenario | Mean | Notes |
-|----------|-----:|-------|
-| **0 hits + NaturalSort** | **55.4 ms** | query `zzzznotfound999`; still builds full natural permutation |
-| **~20 hits Within+Facet+NaturalSort** | **21.9 ms** | query `report`; dominated by cold sort, not facet |
-| **~20 hits Within+Facet SnapshotOrder** | **199 μs** | same query; **~110× faster** without NaturalSort |
+| Metric | Value |
+|--------|------:|
+| Query | `"report"` (Within) |
+| **textHitCount** | **10,000** |
+| **postFacetHitCount** (size 1KiB–1MiB) | **4** |
 
-**Finding:** E2 confirmation — zero-hit query with NaturalSort pays full cold-sort cost. Selective typeahead should not trigger global N-sort.
+| Scenario | Mean |
+|----------|-----:|
+| 0 text hits + NaturalSort cold | **31.2 ms** (high variance; use ~22 ms component benchmark for stable timing) |
+| Within+Facet+NaturalSort cold | **24.9 ms** |
+| Within+Facet SnapshotOrder | **185 μs** (~**134×**) |
+
+**Finding:** E2E confirms zero-hit and sparse-final-result queries still pay full cold NaturalSort. Do not label this scenario "~20 hits".
 
 ---
 
@@ -130,6 +142,6 @@ FileMask `*.pdf` + facet @ 100k: **486 μs** (full O(N) facet scan on glob hits 
 | Facet (non-Exact) | O(N) `Apply()` | O(K) on text hits |
 | NaturalSort | O(N) cold build always | K==0 skip; K small sort K; K large cached permutation |
 
-**Priority for 0.5.6:** unified selectivity-aware query pipeline (not isolated NaturalSortKeyBuilder tuning).
+**Priority for 0.5.6:** unified selectivity-aware query pipeline — see [`docs/0.5.6-selectivity-research.md`](../../../docs/0.5.6-selectivity-research.md).
 
 ARM64 pass 3 not yet measured.

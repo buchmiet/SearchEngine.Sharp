@@ -71,7 +71,11 @@ internal static class SelectivityProbe
         return results.Count;
     }
 
-    internal static int NaturalSortKOnly(IndexSnapshot snapshot, FastBitSet resultSet, int[] ordinals, List<int> results)
+    internal static int NaturalSortKOnlyNaive(
+        IndexSnapshot snapshot,
+        FastBitSet resultSet,
+        int[] ordinals,
+        List<int> results)
     {
         results.Clear();
         int hitCount = resultSet.CopySetBitOrdinals(ordinals.AsSpan());
@@ -94,6 +98,40 @@ internal static class SelectivityProbe
                 StringComparison.Ordinal);
             return cmp != 0 ? cmp : recordIds[a].CompareTo(recordIds[b]);
         }));
+
+        for (int i = 0; i < hitCount; i++)
+            results.Add(recordIds[ordinals[i]]);
+
+        return results.Count;
+    }
+
+    /// <summary>
+    /// Production-shaped prototype: build each natural sort key exactly once, then sort K ordinals by cached keys.
+    /// </summary>
+    internal static int NaturalSortKOnlyPrecomputedKeys(
+        IndexSnapshot snapshot,
+        FastBitSet resultSet,
+        int[] ordinals,
+        string[] keyScratch,
+        List<int> results)
+    {
+        results.Clear();
+        int hitCount = resultSet.CopySetBitOrdinals(ordinals.AsSpan());
+        if (hitCount == 0)
+            return 0;
+
+        if (hitCount == 1)
+        {
+            results.Add(snapshot.RecordIds[ordinals[0]]);
+            return 1;
+        }
+
+        string[] sortTexts = snapshot.SortTextArray;
+        var recordIds = snapshot.RecordIds;
+        for (int i = 0; i < hitCount; i++)
+            keyScratch[i] = NaturalSortKeyBuilder.Build(sortTexts[ordinals[i]]);
+
+        Array.Sort(keyScratch, ordinals, 0, hitCount, StringComparer.Ordinal);
 
         for (int i = 0; i < hitCount; i++)
             results.Add(recordIds[ordinals[i]]);
@@ -135,6 +173,35 @@ internal static class SelectivityProbe
         }
 
         results.IntersectWith(matching);
+    }
+
+    /// <summary>
+    /// Tighter prototype: enumerate text hits, clear bitset, re-add only facet matches (no second bitset + intersect).
+    /// </summary>
+    internal static void FacetApplyOnHitsInPlace(
+        FastBitSet results,
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        Span<int> ordinals)
+    {
+        if (filter.IsEmpty)
+            return;
+
+        int hitCount = results.CopySetBitOrdinals(ordinals);
+        if (hitCount == 0)
+        {
+            results.Clear();
+            return;
+        }
+
+        var resolved = FacetFilterEvaluatorProbe.ResolvePredicates(filter.Predicates, snapshot);
+        results.Clear();
+        for (int i = 0; i < hitCount; i++)
+        {
+            int ordinal = ordinals[i];
+            if (FacetFilterEvaluatorProbe.MatchesAll(resolved, ordinal))
+                results.Add(ordinal);
+        }
     }
 }
 
