@@ -1,9 +1,0 @@
-implementation,workload,hit_count,median_ns,mean_ns,notes
-rust-scan,within_snapshot,10000,2053900,2097380,"hot-corpus"
-rust-scan,within_facet_snapshot,4,2000400,2039840,"hot-corpus"
-rust-scan,within_facet_natural_cold,4,4847900,4862400,"hot-corpus,no-index-rebuild"
-rust-scan,zero_hits_natural_cold,0,1656200,1691510,"hot-corpus,no-index-rebuild"
-rust-scan,exact_first,7,443400,469130,"hot-corpus"
-rust-scan,glob_pdf,6667,46455100,46339550,"hot-corpus"
-rust-scan,naive_within_scan,10000,2282100,2428460,"linear-scan"
-rust-scan,naive_within_facet_natural,4,1897400,1901610,"linear-scan"

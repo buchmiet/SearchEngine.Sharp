@@ -29,8 +29,7 @@ internal sealed record WorkloadSpec(
     long? FacetMinSize,
     long? FacetMaxSize,
     bool ColdIndex,
-    bool RequiresFacet = false,
-    bool CompetitorsOnly = false);
+    bool RequiresFacet = false);
 
 internal sealed record WorkloadsFile(
     string CorpusFile,

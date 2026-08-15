@@ -26,7 +26,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `SelectivityPipelineCounts` — records measured `textHitCount` / `postFacetHitCount` for E2E benchmarks.
 - `FileSearchDataFactory` — realistic file-name corpus for product-shaped benchmarks.
 - BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 under `pass2-x64-win/`; pass 3 selectivity under `pass3-x64-win/` including post-implementation SelectivityPipeline CSV).
-- `benchmarks/SearchEngine.CompetitorBenchmarks/` — cross-language file-search benchmark harness (Sharp v0.5.0-initial / v0.5.5 / current vs Rust/Go/Node linear-scan baselines); CSV evidence under `audits/.../artifacts/competitor-benchmarks/`.
+- `benchmarks/SearchEngine.CompetitorBenchmarks/` — library benchmark harness (SearchEngine.Sharp version comparison; external libs planned). CSV evidence under `audits/.../artifacts/competitor-benchmarks/`.
 - [`docs/0.5.6-selectivity-research.md`](docs/0.5.6-selectivity-research.md) — pass 3 research closure and 0.5.6 implementation scope.
 
 ### Tests

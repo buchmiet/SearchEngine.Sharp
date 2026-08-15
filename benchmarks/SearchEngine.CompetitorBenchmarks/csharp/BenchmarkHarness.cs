@@ -19,8 +19,6 @@ internal static class BenchmarkHarness
         var rows = new List<BenchResultRow>();
         foreach (var workload in config.Workloads)
         {
-            if (workload.CompetitorsOnly)
-                continue;
             if (workload.RequiresFacet && !supportsFacet)
                 continue;
             if (workload.Kind == "glob" && !supportsGlob)
@@ -28,21 +26,6 @@ internal static class BenchmarkHarness
 
             string query = ResolveQuery(corpus, workload);
             rows.Add(MeasureSharp(implementation, entries, config, workload, query, supportsFacet));
-        }
-
-        return rows;
-    }
-
-    internal static IReadOnlyList<BenchResultRow> RunNaive(
-        string implementation,
-        CorpusFile corpus,
-        WorkloadsFile config)
-    {
-        var rows = new List<BenchResultRow>();
-        foreach (var workload in config.Workloads.Where(w => w.CompetitorsOnly))
-        {
-            string query = ResolveQuery(corpus, workload);
-            rows.Add(MeasureNaive(implementation, corpus, config, workload, query));
         }
 
         return rows;
@@ -80,29 +63,6 @@ internal static class BenchmarkHarness
         return ToRow(implementation, workload.Id, hitCount, timings, workload.ColdIndex ? "cold-index" : "hot-index");
     }
 
-    private static BenchResultRow MeasureNaive(
-        string implementation,
-        CorpusFile corpus,
-        WorkloadsFile config,
-        WorkloadSpec workload,
-        string query)
-    {
-        var timings = new List<long>(config.MeasureIterations);
-        int hitCount = 0;
-
-        for (int i = 0; i < config.WarmupIterations + config.MeasureIterations; i++)
-        {
-            bool measure = i >= config.WarmupIterations;
-            var sw = Stopwatch.StartNew();
-            hitCount = ExecuteNaive(corpus, workload, query);
-            sw.Stop();
-            if (measure)
-                timings.Add(sw.ElapsedTicks * 1_000_000_000L / Stopwatch.Frequency);
-        }
-
-        return ToRow(implementation, workload.Id, hitCount, timings, "linear-scan");
-    }
-
     private static int ExecuteSharp(
         SearchEngineSharp engine,
         WorkloadSpec workload,
@@ -131,45 +91,6 @@ internal static class BenchmarkHarness
 
         if (workload.Kind == "glob")
             return engine.Find(query, WordMatchMethod.Exact, enableOperators: false, sort).Count;
-
-        throw new NotSupportedException(workload.Kind);
-    }
-
-    private static int ExecuteNaive(CorpusFile corpus, WorkloadSpec workload, string query)
-    {
-        if (workload.Kind == "naive_within")
-        {
-            int count = 0;
-            foreach (var doc in corpus.Documents)
-            {
-                if (doc.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-                    count++;
-            }
-
-            return count;
-        }
-
-        if (workload.Kind == "naive_within_facet_natural")
-        {
-            long min = workload.FacetMinSize ?? corpus.FacetMinSize;
-            long max = workload.FacetMaxSize ?? corpus.FacetMaxSize;
-            var hits = new List<(int Id, string Name)>();
-            foreach (var doc in corpus.Documents)
-            {
-                if (doc.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
-                    && doc.SizeBytes >= min
-                    && doc.SizeBytes <= max)
-                {
-                    hits.Add((doc.Id, doc.Name));
-                }
-            }
-
-            hits.Sort((a, b) => string.Compare(
-                NaturalSortKey.Build(a.Name),
-                NaturalSortKey.Build(b.Name),
-                StringComparison.Ordinal));
-            return hits.Count;
-        }
 
         throw new NotSupportedException(workload.Kind);
     }

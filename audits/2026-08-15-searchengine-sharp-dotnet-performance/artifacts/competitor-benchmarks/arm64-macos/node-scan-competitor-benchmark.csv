@@ -1,9 +1,0 @@
-implementation,workload,hit_count,median_ns,mean_ns,notes
-node-scan,within_snapshot,10000,3142375,3214408,"hot-corpus"
-node-scan,within_facet_snapshot,4,2171833,2501637,"hot-corpus"
-node-scan,within_facet_natural_cold,4,6459333,6446413,"hot-corpus,no-index-rebuild"
-node-scan,zero_hits_natural_cold,0,2476042,2451992,"hot-corpus,no-index-rebuild"
-node-scan,exact_first,7,781250,779200,"hot-corpus"
-node-scan,glob_pdf,6667,68029792,68157242,"hot-corpus"
-node-scan,naive_within_scan,10000,3434542,3468709,"linear-scan"
-node-scan,naive_within_facet_natural,4,2782958,2833250,"linear-scan"

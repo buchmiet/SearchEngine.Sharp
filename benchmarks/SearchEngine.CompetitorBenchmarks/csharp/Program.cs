@@ -7,7 +7,6 @@ internal static class Program
     private static int Main(string[] args)
     {
         string root = FindRoot();
-        string mode = GetArg(args, "--mode") ?? "all";
         string outputDir = GetArg(args, "--output") ?? Path.Combine(root, "results", Environment.MachineName.ToLowerInvariant());
         string implementation = GetArg(args, "--implementation") ?? "sharp-current";
         bool supportsFacet = !args.Contains("--no-facet");
@@ -21,25 +20,14 @@ internal static class Program
             ?? throw new InvalidOperationException("Invalid workloads.json");
 
         Directory.CreateDirectory(outputDir);
-        var allRows = new List<BenchResultRow>();
+        var rows = BenchmarkHarness.RunSharp(implementation, corpus, config, supportsFacet, supportsGlob);
 
-        if (mode is "all" or "sharp")
-        {
-            allRows.AddRange(BenchmarkHarness.RunSharp(implementation, corpus, config, supportsFacet, supportsGlob));
-        }
-
-        if (mode is "all" or "naive")
-        {
-            string naiveImpl = mode == "naive" ? implementation : "csharp-naive-scan";
-            allRows.AddRange(BenchmarkHarness.RunNaive(naiveImpl, corpus, config));
-        }
-
-        string csvPath = Path.Combine(outputDir, $"{Sanitize(implementation)}-competitor-benchmark.csv");
-        BenchmarkHarness.WriteCsv(csvPath, allRows);
+        string csvPath = Path.Combine(outputDir, $"{Sanitize(implementation)}-library-benchmark.csv");
+        BenchmarkHarness.WriteCsv(csvPath, rows);
         BenchmarkHarness.WriteEnvironment(Path.Combine(outputDir, $"{Sanitize(implementation)}-environment.json"), implementation, gitSha);
 
         Console.WriteLine($"Wrote {csvPath}");
-        foreach (var row in allRows)
+        foreach (var row in rows)
         {
             Console.WriteLine($"{row.Implementation,-24} {row.Workload,-32} hits={row.HitCount,6} median={row.MedianNs / 1000.0,10:F1} µs  ({row.Notes})");
         }

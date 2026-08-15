@@ -36,7 +36,6 @@ foreach ($ref in $Refs) {
         "--project", (Join-Path $BenchRoot "csharp"),
         "/p:SharpSourceRoot=$worktree",
         "--",
-        "--mode", "sharp",
         "--implementation", $meta.Impl,
         "--output", $OutputRoot,
         "--git-sha", $sha

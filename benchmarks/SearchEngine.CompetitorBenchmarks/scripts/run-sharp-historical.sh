@@ -23,7 +23,7 @@ run_ref() {
     mkdir -p "$WORKTREES_ROOT"
     git -C "$REPO_ROOT" worktree add "$worktree" "$sha" --detach
   fi
-  local args=(run -c Release --project "$BENCH_ROOT/csharp" "/p:SharpSourceRoot=$worktree" -- --mode sharp --implementation "$impl" --output "$OUTPUT_ROOT" --git-sha "$sha")
+  local args=(run -c Release --project "$BENCH_ROOT/csharp" "/p:SharpSourceRoot=$worktree" -- --implementation "$impl" --output "$OUTPUT_ROOT" --git-sha "$sha")
   [[ "$no_facet" == "1" ]] && args+=(--no-facet)
   [[ "$no_glob" == "1" ]] && args+=(--no-glob)
   echo "=== $impl @ $sha ==="

@@ -56,26 +56,6 @@
       "query": "*.pdf",
       "sort": "snapshot",
       "coldIndex": false
-    },
-    {
-      "id": "naive_within_scan",
-      "description": "Linear scan Contains(report) — cross-language baseline",
-      "kind": "naive_within",
-      "query": "report",
-      "sort": "none",
-      "coldIndex": false,
-      "competitorsOnly": true
-    },
-    {
-      "id": "naive_within_facet_natural",
-      "description": "Linear scan + facet filter + natural sort — cross-language baseline",
-      "kind": "naive_within_facet_natural",
-      "query": "report",
-      "sort": "natural",
-      "facetMinSize": 1024,
-      "facetMaxSize": 1048576,
-      "coldIndex": false,
-      "competitorsOnly": true
     }
   ]
 }
