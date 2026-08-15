@@ -20,9 +20,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `OperatorsOnBenchmark`, `FileSearchBenchmark`, `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark`, `WithinBigramBenchmark`, `MemoryDiagnoser`, environment fingerprint CLI, CSV/Markdown/HTML export).
+- `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `OperatorsOnBenchmark`, `FileSearchBenchmark`, `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark`, `WithinBigramBenchmark`, `BitSetMaterializationBenchmark`, `NaturalSortSelectivityBenchmark`, `FacetSelectivityBenchmark`, `SelectivityPipelineBenchmark`, `FileMaskGlobBenchmark`, `SnapshotBuildAllocationBenchmark`, `MemoryDiagnoser`, environment fingerprint CLI, CSV/Markdown/HTML export).
+- `FastBitSet.CopySetBitOrdinals()` / `ForEachSetBit()` — set-bit enumeration primitive (used by pass 3 benchmarks; production pipeline not yet selectivity-aware).
+- `SelectivityProbe` — benchmark-only current vs prototype comparisons for materialization, facet-on-K, sort-K-only NaturalSort.
 - `FileSearchDataFactory` — realistic file-name corpus for product-shaped benchmarks.
-- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 operators/WithinBigram/NaturalSort under `pass2-x64-win/`).
+- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 under `pass2-x64-win/`; pass 3 selectivity investigation under `pass3-x64-win/`).
 
 ### Tests
 
@@ -31,6 +33,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ExactSingleTerm_WithFacetFilter_EnableOperatorsTrue_SameAsOff`
 - `SingleSemanticWordTests`
 - `BigramIndexTests` — invariant that each bigram list contains a word ordinal at most once (`banana` → `an` / `na`)
+- `FastBitSetEnumerationTests`
 
 ## [0.5.5] - 2026-07-03
 

@@ -37,8 +37,10 @@ Pass a **directory** or a **`.json` file path**. Default (no argument) writes to
 | `x64-win/*-report-github.md` | BDN Markdown summary (x64 only) |
 | `x64-win/environment-fingerprint.json` | Runtime/RID/arch/core count/ISA/git SHA (partial — no CPU SKU or SDK version) |
 | `pass2-x64-win/*.csv` | Pass 2 BDN: OperatorsOn, WithinBigram A/B, cold NaturalSort, progressive requery |
+| `pass3-x64-win/*.csv` | Pass 3 BDN: selectivity sweep (bitset materialization, NaturalSort vs K, facet vs K, E2E pipeline, FileMask glob, build allocation) |
 
-Pass 2 summary: [`pass2-x64-win/README.md`](pass2-x64-win/README.md).
+Pass 2 summary: [`pass2-x64-win/README.md`](pass2-x64-win/README.md).  
+Pass 3 summary: [`pass3-x64-win/README.md`](pass3-x64-win/README.md).
 
 ## F-03 evidence status
 

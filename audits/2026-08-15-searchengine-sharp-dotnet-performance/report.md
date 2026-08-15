@@ -3,6 +3,7 @@
 **Baseline target:** `SearchEngine.Sharp` @ `21dd346` (v0.5.5, .NET 10)  
 **Remediated target (pass 1):** @ `32f8b7a` — commits `0d0efb3` (F-01/F-02), `32f8b7a` (F-03 harness)  
 **Pass 2 target (unreleased):** @ `0d34a07` — operators-on fast path, bigram dedupe, product BDN; see [Pass 2 verification](#pass-2-verification-unreleased-034a07)  
+**Pass 3 target (investigation):** selectivity-aware pipeline BDN — see [Pass 3 verification](#pass-3-verification-selectivity-aware-pipeline)  
 **Audit package:** `dotnet-performance` (`buchmiet/audits`, branch `markdown-first-retrieval`)  
 **Date:** 2026-08-15 (baseline + post-fix verification same day)  
 **Phase 0:** first committed report; **Phase 1:** remediation verified on x64 + ARM64
@@ -109,6 +110,53 @@ BDN uses `IterationSetup` → fresh snapshot, `InvocationCount=1` (true cold inv
 | Progressive 7× SnapshotOrder requery | **134.5 μs** (~**360×** less) |
 
 **Assessment:** cold NaturalSort is a dominant cost in progressive file-search requery on x64 @ 100k. Not elevated to P2 (no production call-volume/SLO evidence), but no longer E0 — **E2 x64, medium confidence, follow-up**. ARM64 pass 2 unverified.
+
+---
+
+## Pass 3 verification (selectivity-aware pipeline)
+
+Measured 2026-08-15. Raw CSV: [`artifacts/pass3-x64-win/`](artifacts/pass3-x64-win/README.md). Prototypes in `SelectivityProbe.cs` (benchmark assembly only).
+
+### Core finding
+
+The ~23 ms NaturalSort cost is a **symptom** of a broader pattern: multiple pipeline stages are **selectivity-blind** — they process all **N** documents even when the text query yields **K ≪ N** hits.
+
+### NaturalSort vs K (cold snapshot, x64 @ 100k)
+
+| K hits | Current (full N sort) | Sort K only | Speedup |
+|-------:|----------------------:|------------:|--------:|
+| 0 | ~22 ms | **161 μs** | **~140×** |
+| 1 | **22.4 ms** | **216 μs** | **~104×** |
+| 100 | **22.0 ms** | **134 μs** | **~165×** |
+| 1,000 | **22.6 ms** | **1.66 ms** | **~14×** |
+| 10,000+ | ~22 ms | ≥24 ms | crossover — use global permutation |
+
+Zero-hit `Find` + NaturalSort (E2 end-to-end): **55.4 ms** — confirms full permutation build before checking result bitset.
+
+### Facet Apply vs K (x64 @ 100k)
+
+General `FacetFilterEvaluator.Apply()` still O(N). Facet-on-K prototype:
+
+| K | Current | On K only | Speedup |
+|--:|--------:|----------:|--------:|
+| 10 | 64 μs | **1.1 μs** | **~57×** |
+| 1,000 | 64 μs | **3.9 μs** | **~17×** |
+
+Within+Facet SnapshotOrder @ ~20 hits: **199 μs** vs Within+Facet+NaturalSort **21.9 ms**.
+
+### BitSet materialization (x64 @ 100k)
+
+O(N) `Get()` scan flat **~37–77 μs** for K=0..10k. `CopySetBitOrdinals()`: **400 ns – 10 μs** at sparse K.
+
+### Build allocation (x64)
+
+Rebuild 100k: **40.6 ms**, **48.7 MB**. Span-aware word pool prototype on token loop: **4.65 ms / 3.0 MB** vs current **7.37 ms / 10.1 MB** — E1 signal for integrated builder change.
+
+### FileMask glob benchmark gap
+
+Default tokenization `*.pdf` @ 100k: **44 μs** (misleading — `.` splits query). FileMask whole-filename: **260 μs** (**5.9×**). `FileSearchBenchmark` must use `SearchTokenization.FileMask` for glob scenarios.
+
+**Recommended 0.5.6 direction:** unified selectivity-aware query pipeline (enumerate K → facet K → sort K with hybrid threshold), not isolated NaturalSortKeyBuilder tuning.
 
 ---
 

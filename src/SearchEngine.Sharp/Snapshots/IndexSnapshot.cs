@@ -93,6 +93,8 @@ public sealed class IndexSnapshot
 
     // Original sort texts parallel to RecordIds, used to build the sorted permutation on demand.
     private readonly string[] _sortTexts;
+    internal ReadOnlySpan<string> SortTexts => _sortTexts;
+    internal string[] SortTextArray => _sortTexts;
 
     // Lazily computed index permutation for NaturalSortAscending.
     // Computed once on first use via Interlocked.CompareExchange (see GetSortedPermutation).

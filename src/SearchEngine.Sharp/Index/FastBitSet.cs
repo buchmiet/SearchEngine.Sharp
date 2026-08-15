@@ -151,6 +151,60 @@ internal sealed class FastBitSet
         return GetTrueCountScalar();
     }
 
+    /// <summary>
+    /// Writes set-bit ordinals into <paramref name="destination"/> and returns the count written.
+    /// Uses trailing-zero-count per ulong word — O(N/64 + K) instead of O(N) Get() scans.
+    /// </summary>
+    internal int CopySetBitOrdinals(Span<int> destination)
+    {
+        int written = 0;
+        int limit = _length;
+
+        for (int wordIndex = 0; wordIndex < _wordCount; wordIndex++)
+        {
+            ulong bits = _bits[wordIndex];
+            while (bits != 0)
+            {
+                int bit = BitOperations.TrailingZeroCount(bits);
+                int ordinal = (wordIndex << 6) + bit;
+                if (ordinal >= limit)
+                    break;
+
+                if ((uint)written >= (uint)destination.Length)
+                    throw new InvalidOperationException("Destination buffer too small for set bits.");
+
+                destination[written++] = ordinal;
+                bits &= bits - 1;
+            }
+        }
+
+        return written;
+    }
+
+    internal int ForEachSetBit(Action<int> action)
+    {
+        int count = 0;
+        int limit = _length;
+
+        for (int wordIndex = 0; wordIndex < _wordCount; wordIndex++)
+        {
+            ulong bits = _bits[wordIndex];
+            while (bits != 0)
+            {
+                int bit = BitOperations.TrailingZeroCount(bits);
+                int ordinal = (wordIndex << 6) + bit;
+                if (ordinal >= limit)
+                    break;
+
+                action(ordinal);
+                count++;
+                bits &= bits - 1;
+            }
+        }
+
+        return count;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private unsafe void ExceptVector256(FastBitSet other)
     {
