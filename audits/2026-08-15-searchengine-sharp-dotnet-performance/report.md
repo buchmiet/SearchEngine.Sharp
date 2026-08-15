@@ -1,7 +1,8 @@
 # .NET Performance Review — SearchEngine.Sharp (ARM64/x64)
 
 **Baseline target:** `SearchEngine.Sharp` @ `21dd346` (v0.5.5, .NET 10)  
-**Remediated target:** @ `32f8b7a` (v0.5.6, .NET 10) — commits `0d0efb3` (F-01/F-02), `32f8b7a` (F-03 harness)  
+**Remediated target (pass 1):** @ `32f8b7a` — commits `0d0efb3` (F-01/F-02), `32f8b7a` (F-03 harness)  
+**Pass 2 target (unreleased):** @ `0d34a07` — operators-on fast path, bigram dedupe, product BDN; see [Pass 2 verification](#pass-2-verification-unreleased-034a07)  
 **Audit package:** `dotnet-performance` (`buchmiet/audits`, branch `markdown-first-retrieval`)  
 **Date:** 2026-08-15 (baseline + post-fix verification same day)  
 **Phase 0:** first committed report; **Phase 1:** remediation verified on x64 + ARM64
@@ -70,6 +71,44 @@ Filter-only remains O(N) at **~252 μs** (x64 BDN) — expected; not in F-02 sco
 - Existing `SearchEngine.Sharp.Benchmarks` retained as workload runner (ingestion policy, facet scenarios).
 - **Committed evidence:** BDN CSV exports per platform under [`artifacts/`](artifacts/README.md) (previously blocked by root `.gitignore` `artifacts/` rule — fixed in this branch).
 - **Not yet complete vs original F-03 gate:** no automated CI matrix; PGO/tiering flags not recorded; `EnvironmentFingerprint` captures runtime/RID/arch/core count/ISA but not CPU SKU or SDK version.
+- **Pass 2 extension:** BDN also covers operators-on, WithinBigram A/B, cold NaturalSort, and progressive requery — see [`artifacts/pass2-x64-win/`](artifacts/pass2-x64-win/README.md) (x64 CSV committed; ARM64 pass 2 not yet run).
+
+---
+
+## Pass 2 verification (unreleased @ `0d34a07`)
+
+Measured 2026-08-15. Raw CSV: [`artifacts/pass2-x64-win/`](artifacts/pass2-x64-win/README.md). Numbers below match committed BDN exports.
+
+### Operators-on fast path
+
+`TryGetSingleSemanticWord()` reuses tokenizer + `CorrectTokens`; boolean/NOT/parentheses excluded; glob rejected via `ContainsMetacharacters`.
+
+| Benchmark (x64) | Mean | vs baseline |
+|-----------------|-----:|------------:|
+| Exact operators off | 1,387 ns | 1.00 |
+| Exact operators on | 1,397 ns | **1.01** |
+| Exact+Facet off / on | 2,881 / 2,891 ns | **2.08×** vs Exact off |
+
+**Status:** verified — no material Find regression with `enableOperators:true` for single-token exact paths.
+
+### Bigram ordinal dedupe + rarest-bigram experiment
+
+- **Shipped:** builder dedupe `list[^1] != i` (e.g. `banana` → one entry per bigram list for that word ordinal).
+- **Rejected:** rarest-bigram selection — **7.40 μs** vs **7.93 μs** (**1.07×** slower) on file corpus query `tion`; experiment lives in `WithinBigramQueryMatcher` (benchmark assembly only).
+
+### NaturalSort cold build (C-03 follow-up)
+
+BDN uses `IterationSetup` → fresh snapshot, `InvocationCount=1` (true cold invocation).
+
+| Scenario (x64, file corpus 100k) | Mean |
+|----------------------------------|-----:|
+| Cold first `NaturalSortAscending` | **23,426 μs** |
+| Warm (same snapshot) | **77.3 μs** |
+| SnapshotOrder baseline | **48.3 μs** |
+| Progressive 7× cold NaturalSort requery | **48,389 μs** |
+| Progressive 7× SnapshotOrder requery | **134.5 μs** (~**360×** less) |
+
+**Assessment:** cold NaturalSort is a dominant cost in progressive file-search requery on x64 @ 100k. Not elevated to P2 (no production call-volume/SLO evidence), but no longer E0 — **E2 x64, medium confidence, follow-up**. ARM64 pass 2 unverified.
 
 ---
 
@@ -77,7 +116,7 @@ Filter-only remains O(N) at **~252 μs** (x64 BDN) — expected; not in F-02 sco
 
 - **In scope:** query hot paths, progressive ingestion rebuild cost, facet filtering, benchmark harness maturity, SIMD dispatch posture.
 - **Out of scope (this run):** production telemetry (E4), disassembly review, peak RSS during index build, allocation-rate gates for general query paths (C-01).
-- **Harness:** workload runner uses `Stopwatch` — adequate for large-gap confirmation; BDN project now covers tight gates on exact+facet microbenchmark. Full CI matrix automation not yet wired.
+- **Harness:** workload runner uses `Stopwatch` — adequate for large-gap confirmation; BDN project covers exact+facet (pass 1), operators-on, WithinBigram A/B, and cold NaturalSort (pass 2 x64). Full CI matrix automation not yet wired.
 
 ---
 
@@ -143,7 +182,7 @@ Exact+Filter P50 was **~0.53 ms on all three hosts** — dominated by full ordin
 | **F-03** | P3 | E2 | Medium | cross-arch | Benchmark harness not regression-grade | **substantially remediated** (manual gate; v0.5.6) |
 | C-01 | investigation | E0 | — | — | Per-query allocations despite `ArrayPool` | open |
 | C-02 | investigation | E0 | — | ARM64 | AdvSimd path benefit unmeasured | open |
-| C-03 | investigation | E0 | — | — | Concurrent natural-sort cold start | open |
+| C-03 | investigation | **E2 x64** (cold NaturalSort); concurrent duplicate build E0 | Medium (x64) | x64 measured | Natural sort cold build on new snapshot | **follow-up** (pass 2) |
 | C-04 | investigation | E0 | — | — | Regex cache global lock | open |
 | C-05 | investigation | E0 | — | — | Peak memory during snapshot build | open |
 
@@ -226,7 +265,7 @@ Per [`QA.md`](../../../../audits/dotnet-performance/QA.md): *No severity-bearing
 |--------|----------|--------|
 | **C-01** Per-query GC (`QueryContext`, lists) | [`QueryContext.cs`](../../src/SearchEngine.Sharp/Pooling/QueryContext.cs) | Pool covers `ulong[]` only; BDN now covers exact+facet alloc (~6 KB) but not general query paths |
 | **C-02** ARM64 SIMD popcount path | [`FastBitSet.cs`](../../src/SearchEngine.Sharp/Index/FastBitSet.cs) | No ARM64 vs scalar benchmark |
-| **C-03** Natural sort cold concurrent build | [`IndexSnapshot.cs`](../../src/SearchEngine.Sharp/Snapshots/IndexSnapshot.cs) | Unmeasured |
+| **C-03** Natural sort cold build on new snapshot | [`IndexSnapshot.cs`](../../src/SearchEngine.Sharp/Snapshots/IndexSnapshot.cs) `GetSortedPermutation` | **E2 x64** (pass 2 BDN, [`pass2-x64-win/`](artifacts/pass2-x64-win/README.md)): cold **23.4 ms**, warm **77 μs** @ 100k; progressive 7× cold **48.4 ms**. Concurrent duplicate cold build on parallel first callers still **E0**. |
 | **C-04** Regex LRU global lock | [`RegexPatternCache.cs`](../../src/SearchEngine.Sharp/Query/RegexPatternCache.cs) | Needs concurrent benchmark |
 | **C-05** Peak build memory | `IndexSnapshotBuilder` | No RSS/gcdump at 100k/1M |
 
@@ -272,7 +311,7 @@ Confirmed good decisions (do not refactor blindly):
 | F-01 ~25× on x64 | **Confirmed** (25.7×); ARM64 25–26× | **~2.2×**, 7 publishes |
 | F-02 ~115× Exact+Filter | **Confirmed** (~121× x64); ~0.53 ms scan floor | **~3.7×** workload; BDN **1.4×** |
 | Adaptive does not fix amplification | **Confirmed** at baseline | **Fixed** via `GrowthAwareBatchCap` |
-| C-01…C-05 remain E0 | **Confirmed** | unchanged |
+| C-01…C-05 at baseline | **Confirmed** E0 | C-03 cold NaturalSort now **E2 x64** (pass 2); others unchanged |
 | No general intrinsics refactor | **Confirmed** | unchanged |
 
 ---
@@ -283,7 +322,8 @@ Confirmed good decisions (do not refactor blindly):
 - `EnvironmentFingerprint` missing CPU SKU and SDK version; PGO/tiering flags not recorded.
 - No `dotnet-trace` / disassembly compare for `FastBitSet` ARM64 vs scalar (C-02).
 - No peak RSS benchmark for index build at 1M documents (C-05).
-- Filter-only O(N) facet scan not targeted in this remediation cycle.
+- ARM64 pass 2 BDN (operators-on, NaturalSort cold) not yet run.
+- Concurrent duplicate NaturalSort build under parallel first callers (C-03 sub-item) still unmeasured.
 
 ---
 

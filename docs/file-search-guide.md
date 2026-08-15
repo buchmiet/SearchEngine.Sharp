@@ -264,8 +264,9 @@ points from that report (synthetic data, single thread):
   queries still scan all documents for facet predicates.
 - Glob matching scans unique tokens; Within uses the bigram index then substring verification.
 
-Requerying on every ingestion publish (~7 publishes per 100k files on a fast scan) adds negligible
-load at these latencies.
+Query evaluation itself is cheap at 100k scale, but **`NaturalSortAscending` on a new snapshot** builds and caches a full permutation on first use. Measured x64/file corpus @ 100k ([`pass2-x64-win/`](../../audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/pass2-x64-win/README.md)): **~23 ms** cold, **~77 μs** warm on the same snapshot; progressive growth-aware ingestion (~7 publishes) totals **~48 ms** cold NaturalSort requery vs **~135 μs** with SnapshotOrder.
+
+Requerying on every ingestion publish therefore adds modest query cost but can add **tens of milliseconds per publish** when the UI sorts results naturally — acceptable for many UIs, but not negligible.
 
 ## Pitfalls checklist
 
