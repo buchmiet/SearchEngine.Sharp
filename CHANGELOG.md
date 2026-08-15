@@ -12,12 +12,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Progressive ingestion:** `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
 - **Exact + facet queries:** single-term exact queries with a `FacetFilter` now use a posting-span fast path — facet predicates are evaluated only for ordinals in the posting list, not all documents. `CountMatches` and filter-only queries received analogous optimisations.
-- Benchmark reports and audit artifacts updated with post-fix measurements on x64 and ARM64.
+- Benchmark reports and audit evidence updated with post-fix measurements on x64 and ARM64.
+- **MicroBenchmarks fingerprint CLI:** `--fingerprint` now accepts a directory or `.json` file path (fixes nested `environment-fingerprint.json/environment-fingerprint.json` output bug).
 
 ### Added
 
-- `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `MemoryDiagnoser`, environment fingerprint, CSV/Markdown/HTML export).
-- Audit artifacts under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (x64 Windows, macOS ARM64, Ubuntu ARM64).
+- `benchmarks/SearchEngine.Sharp.MicroBenchmarks` — BenchmarkDotNet project (`ExactFacetBenchmark`, `MemoryDiagnoser`, environment fingerprint CLI, CSV/Markdown/HTML export).
+- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (x64 Windows, macOS ARM64, Ubuntu ARM64). Full QA evidence bundle (CPU SKU, SDK, PGO, CI matrix) remains follow-up work — see audit report F-03.
 
 ### Tests
 

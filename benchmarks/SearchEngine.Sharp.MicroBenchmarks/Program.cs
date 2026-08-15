@@ -8,7 +8,10 @@ if (args.Contains("--fingerprint"))
         && flagIndex + 1 < args.Length
         && !args[flagIndex + 1].StartsWith('-')
         ? args[flagIndex + 1]
-        : Path.Combine(MicroBenchmarkConfig.ArtifactsDirectory, "environment-fingerprint.json");
+        : MicroBenchmarkConfig.ArtifactsDirectory;
+
+    if (!Path.IsPathRooted(output))
+        output = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), output));
 
     EnvironmentFingerprint.WriteArtifact(output);
     return;

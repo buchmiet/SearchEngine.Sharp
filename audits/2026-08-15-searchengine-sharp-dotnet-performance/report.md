@@ -16,7 +16,7 @@ Methodology gates applied per [`evidence-and-benchmarking.md`](../../../../audit
 |----|----------|-------------------|------|--------|
 | **F-01** | adaptive ~**25×** rebuild amplification (50 publishes @ 100k) | **~2.2×** (7 publishes) | < 10× (target < 5×) | **resolved** |
 | **F-02** | Exact+Filter P50 **~0.53 ms** (~115× vs Exact) | **~0.016 ms** x64 (~3.7× vs Exact) | P50 < 0.10 ms | **resolved** |
-| **F-03** | Stopwatch-only harness | BDN project + CSV artifacts + environment fingerprint | raw artifacts per arch | **resolved** (workload runner retained) |
+| **F-03** | Stopwatch-only harness | BDN project + committed CSV artifacts + partial environment fingerprint | full QA bundle (CPU SKU, SDK, PGO, CI matrix) | **substantially remediated** (manual gate) |
 
 Raw BDN CSV: [`artifacts/`](artifacts/README.md). Updated product docs: [`docs/ingestion-policy-report.md`](../../docs/ingestion-policy-report.md), [`docs/glob-and-facets-report.md`](../../docs/glob-and-facets-report.md).
 
@@ -68,7 +68,8 @@ Filter-only remains O(N) at **~252 μs** (x64 BDN) — expected; not in F-02 sco
 
 - New project: `benchmarks/SearchEngine.Sharp.MicroBenchmarks/` — `MemoryDiagnoser`, CSV/Markdown/HTML export, `EnvironmentFingerprint`, `InProcessNoEmitToolchain` (sibling-repo layout fix in `32f8b7a`).
 - Existing `SearchEngine.Sharp.Benchmarks` retained as workload runner (ingestion policy, facet scenarios).
-- Artifacts committed under [`artifacts/`](artifacts/README.md).
+- **Committed evidence:** BDN CSV exports per platform under [`artifacts/`](artifacts/README.md) (previously blocked by root `.gitignore` `artifacts/` rule — fixed in this branch).
+- **Not yet complete vs original F-03 gate:** no automated CI matrix; PGO/tiering flags not recorded; `EnvironmentFingerprint` captures runtime/RID/arch/core count/ISA but not CPU SKU or SDK version.
 
 ---
 
@@ -139,7 +140,7 @@ Exact+Filter P50 was **~0.53 ms on all three hosts** — dominated by full ordin
 |----|----------|----------|------------|------|-------|--------|
 | **F-01** | P2 | E2, x64 + ARM64 | High | cross-arch | Progressive ingestion full rebuild amplification | **resolved** (v0.5.6) |
 | **F-02** | P2 | E2 + BDN, x64 + ARM64 | High | cross-arch | Facet filter bypasses exact fast path | **resolved** (v0.5.6) |
-| **F-03** | P3 | E2 | Medium | cross-arch | Benchmark harness not regression-grade | **resolved** (v0.5.6) |
+| **F-03** | P3 | E2 | Medium | cross-arch | Benchmark harness not regression-grade | **substantially remediated** (manual gate; v0.5.6) |
 | C-01 | investigation | E0 | — | — | Per-query allocations despite `ArrayPool` | open |
 | C-02 | investigation | E0 | — | ARM64 | AdvSimd path benefit unmeasured | open |
 | C-03 | investigation | E0 | — | — | Concurrent natural-sort cold start | open |
@@ -200,15 +201,20 @@ Filter-only queries remain O(N) by design — documented in [`docs/glob-and-face
 ### F-03: Benchmark harness not yet a regression gate
 
 **Baseline status:** confirmed (v0.5.5)  
-**Remediation status:** **resolved** (v0.5.6)  
+**Remediation status:** **substantially remediated** (v0.5.6) — manual gate available; full automated QA bundle not yet complete  
 **Evidence grade:** E2  
 **Confidence:** medium
 
 **Co (baseline):** Custom `Stopwatch` runner detected large regressions but lacked BDN-grade statistics, environment fingerprint, and raw artifact retention.
 
-**Jak (implemented):** Separate `SearchEngine.Sharp.MicroBenchmarks` BDN project; CSV artifacts per platform under [`artifacts/`](artifacts/README.md); `InProcessNoEmitToolchain` for sibling-repo builds (`32f8b7a`).
+**Jak (implemented):** Separate `SearchEngine.Sharp.MicroBenchmarks` BDN project; CSV artifacts per platform under [`artifacts/`](artifacts/README.md); `InProcessNoEmitToolchain` for sibling-repo builds (`32f8b7a`); root `.gitignore` exception so audit CSVs are committed.
 
-**Remaining:** CI automation for x64 + ARM64 matrix on each release — manual gate satisfied for this audit cycle.
+**Remaining vs original F-03 acceptance criteria:**
+
+- CI automation for x64 + ARM64 matrix on each release — not wired.
+- PGO / tiering flags — not recorded.
+- `EnvironmentFingerprint` — runtime, RID, arch, core count, ISA, git SHA; **not** CPU SKU or SDK version.
+- Workload runner (`Stopwatch`) retained for large-gap scenarios; BDN covers tight gates on exact+facet microbenchmark only.
 
 ---
 
@@ -234,7 +240,7 @@ Per [`QA.md`](../../../../audits/dotnet-performance/QA.md): *No severity-bearing
 | G-01 ingestion | WorstCaseStaleness | ≤ 1 s | ✓ | ✓ |
 | G-02 exact+facet | P50 latency @ 100k seed 1337 | < 0.10 ms | ~0.53 ms | **~0.016 ms** ✓ |
 | G-02 exact+facet | Exact (no filter) regression | ≤ 5% | — | **0%** ✓ |
-| G-03 infra | Benchmark artifact | SHA, RID, CPU, SDK, raw CSV | missing | **committed** ✓ |
+| G-03 infra | Benchmark artifact | SHA, RID, CPU SKU, SDK, PGO, raw CSV, CI matrix | missing | **partial** — BDN CSV committed; fingerprint partial; manual only ✓ |
 
 ---
 
@@ -273,7 +279,8 @@ Confirmed good decisions (do not refactor blindly):
 
 ## Knowledge and evidence gaps (remaining)
 
-- No automated CI gate script for BDN matrix on x64 + ARM64.
+- No automated CI gate script for BDN matrix on x64 + ARM64 (F-03 follow-up).
+- `EnvironmentFingerprint` missing CPU SKU and SDK version; PGO/tiering flags not recorded.
 - No `dotnet-trace` / disassembly compare for `FastBitSet` ARM64 vs scalar (C-02).
 - No peak RSS benchmark for index build at 1M documents (C-05).
 - Filter-only O(N) facet scan not targeted in this remediation cycle.

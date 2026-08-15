@@ -1,0 +1,12 @@
+{
+  "capturedUtc": "2026-08-15T10:29:56.6371854Z",
+  "gitSha": "25e141ac14365d4875d0c2a69ad4777c1e2f095e",
+  "runtime": ".NET 10.0.11",
+  "processArchitecture": "X64",
+  "osDescription": "Microsoft Windows 10.0.26200",
+  "rid": "win-x64",
+  "processorCount": 12,
+  "avx2": true,
+  "advSimd": false,
+  "assembly": "1.0.0.0"
+}

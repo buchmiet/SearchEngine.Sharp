@@ -27,11 +27,18 @@ internal static class EnvironmentFingerprint
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    internal static void WriteArtifact(string outputDirectory, string? gitSha = null)
+    internal static void WriteArtifact(string outputPath, string? gitSha = null)
     {
-        Directory.CreateDirectory(outputDirectory);
+        string filePath = outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            ? outputPath
+            : Path.Combine(outputPath, "environment-fingerprint.json");
+
+        string? directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
         string json = Capture(gitSha);
-        File.WriteAllText(Path.Combine(outputDirectory, "environment-fingerprint.json"), json);
+        File.WriteAllText(filePath, json);
         Console.WriteLine(json);
     }
 
