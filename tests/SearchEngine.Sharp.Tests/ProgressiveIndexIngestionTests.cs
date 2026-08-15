@@ -221,6 +221,38 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Fact]
+    public async Task Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale()
+    {
+        var (_, _, ingestion) = Create();
+        const int count = 20_000;
+
+        var growth = await ingestion.IngestAsync(
+            SyntheticPathFeed.EnumerateAsync(count, seed: 42),
+            new IngestPublishOptions
+            {
+                Policy = IngestPublishPolicy.Adaptive,
+                FixedBatchSize = 2_000,
+                GrowthAwareBatchCap = true,
+            });
+
+        var (_, _, ingestionFixed) = Create();
+        var fixedBatch = await ingestionFixed.IngestAsync(
+            SyntheticPathFeed.EnumerateAsync(count, seed: 42),
+            new IngestPublishOptions
+            {
+                Policy = IngestPublishPolicy.Adaptive,
+                FixedBatchSize = 2_000,
+                GrowthAwareBatchCap = false,
+            });
+
+        Assert.True(growth.CompletedSuccessfully);
+        Assert.True(fixedBatch.CompletedSuccessfully);
+        Assert.True(growth.PublishCount < fixedBatch.PublishCount,
+            $"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
+        Assert.True(growth.TotalRebuildCpu < fixedBatch.TotalRebuildCpu);
+    }
+
+    [Fact]
     public async Task Ingest_RejectsConcurrentRuns()
     {
         var (_, _, ingestion) = Create();

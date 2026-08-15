@@ -25,7 +25,8 @@ public enum IngestPublishPolicy
     /// <summary>
     /// Publishes when the pending buffer is non-empty and elapsed time since the last publish
     /// is at least <c>max(MinInterval, AdaptiveMultiplier × lastRebuildDuration)</c>.
-    /// Also publishes when the buffer reaches <see cref="IngestPublishOptions.FixedBatchSize"/>.
+    /// Also publishes when the buffer reaches the current batch cap (see
+    /// <see cref="IngestPublishOptions.GrowthAwareBatchCap"/>).
     /// </summary>
     Adaptive,
 }

@@ -177,6 +177,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         long lastPublishTimestamp = Stopwatch.GetTimestamp();
         TimeSpan lastRebuildDuration = TimeSpan.Zero;
         bool flushOnCancel = options.FlushOnCancellation;
+        int batchCap = options.FixedBatchSize;
 
         try
         {
@@ -184,7 +185,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             {
                 if (buffer.Count > 0 && ShouldPublishForTimer(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt, buffer.Count))
                 {
-                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                 }
 
                 if (reader.Completion.IsCompleted)
@@ -193,14 +194,14 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                         AppendEntry(buffer, bufferedAt, entry);
 
                     if (buffer.Count > 0)
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
 
                     break;
                 }
 
-                if (buffer.Count > 0 && ShouldPublishForBatch(buffer.Count, options))
+                if (buffer.Count > 0 && ShouldPublishForBatch(buffer.Count, options, batchCap))
                 {
-                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                     continue;
                 }
 
@@ -213,7 +214,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                         && buffer.Count > 0
                         && ShouldPublishForTimer(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt, buffer.Count))
                     {
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                         continue;
                     }
 
@@ -229,9 +230,9 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 {
                     AppendEntry(buffer, bufferedAt, entry);
 
-                    if (ShouldPublishForBatch(buffer.Count, options))
+                    if (ShouldPublishForBatch(buffer.Count, options, batchCap))
                     {
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                         break;
                     }
                 }
@@ -241,7 +242,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             if (flushOnCancel && buffer.Count > 0)
             {
-                PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration);
+                PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
             }
 
             throw;
@@ -282,7 +283,8 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         IProgress<IngestionProgress>? progress,
         Action<IngestionPublishEvent>? onPublished,
         ref long lastPublishTimestamp,
-        ref TimeSpan lastRebuildDuration)
+        ref TimeSpan lastRebuildDuration,
+        ref int batchCap)
     {
         if (buffer.Count == 0)
             return;
@@ -295,6 +297,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         var rebuildDuration = Stopwatch.GetElapsedTime(publishStarted);
         lastRebuildDuration = rebuildDuration;
         lastPublishTimestamp = Stopwatch.GetTimestamp();
+        UpdateBatchCap(options, ref batchCap);
 
         int publishedCount = buffer.Count;
         int publishSequence = state.PublishCount;
@@ -332,16 +335,25 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         bufferedAt.Add(entry.BufferedAtTimestamp);
     }
 
-    private static bool ShouldPublishForBatch(int bufferCount, IngestPublishOptions options)
+    private static bool ShouldPublishForBatch(int bufferCount, IngestPublishOptions options, int batchCap)
     {
         return options.Policy switch
         {
             IngestPublishPolicy.PerEntry => bufferCount >= 1,
             IngestPublishPolicy.FixedBatch => bufferCount >= options.FixedBatchSize,
             IngestPublishPolicy.TimeDebounce => false,
-            IngestPublishPolicy.Adaptive => bufferCount >= options.FixedBatchSize,
+            IngestPublishPolicy.Adaptive => bufferCount >= batchCap,
             _ => false,
         };
+    }
+
+    private void UpdateBatchCap(IngestPublishOptions options, ref int batchCap)
+    {
+        if (options.Policy != IngestPublishPolicy.Adaptive || !options.GrowthAwareBatchCap)
+            return;
+
+        int indexedCount = _updater.EntryCount;
+        batchCap = Math.Max(options.FixedBatchSize, indexedCount);
     }
 
     private static bool ShouldPublishForTimer(

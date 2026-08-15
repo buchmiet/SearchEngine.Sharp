@@ -32,6 +32,124 @@ internal static class FacetFilterEvaluator
         results.IntersectWith(matching);
     }
 
+    internal static FastBitSet BuildMatchingBitSet(
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        QueryContext qc)
+    {
+        var matching = qc.RentEmptyBitSet();
+        if (filter.IsEmpty)
+        {
+            matching.FillAllTrue();
+            return matching;
+        }
+
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        for (int ordinal = 0; ordinal < matching.Length; ordinal++)
+        {
+            if (MatchesAll(resolved, ordinal))
+                matching.Add(ordinal);
+        }
+
+        return matching;
+    }
+
+    internal static int CountMatchingOrdinals(
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        ReadOnlySpan<int> ordinals)
+    {
+        if (ordinals.Length == 0)
+            return 0;
+
+        if (filter.IsEmpty)
+            return ordinals.Length;
+
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        int count = 0;
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            if (MatchesAll(resolved, ordinals[i]))
+                count++;
+        }
+
+        return count;
+    }
+
+    internal static List<int> MaterializeMatchingRecordIds(
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        ReadOnlySpan<int> ordinals)
+    {
+        if (ordinals.Length == 0)
+            return [];
+
+        if (filter.IsEmpty)
+            return PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, ordinals);
+
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        var results = new List<int>(ordinals.Length);
+        var recordIds = snapshot.RecordIds.AsSpan();
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            int ordinal = ordinals[i];
+            if (MatchesAll(resolved, ordinal))
+                results.Add(recordIds[ordinal]);
+        }
+
+        return results;
+    }
+
+    internal static int CountFilterOnly(FacetFilter filter, IndexSnapshot snapshot)
+    {
+        if (filter.IsEmpty)
+            return snapshot.DocumentCount;
+
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        int count = 0;
+        for (int ordinal = 0; ordinal < snapshot.DocumentCount; ordinal++)
+        {
+            if (MatchesAll(resolved, ordinal))
+                count++;
+        }
+
+        return count;
+    }
+
+    internal static List<int> MaterializeFilterOnly(
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        SearchSortMode sortMode)
+    {
+        if (filter.IsEmpty)
+            return [];
+
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        var results = new List<int>();
+        var recordIds = snapshot.RecordIds.AsSpan();
+
+        if (sortMode == SearchSortMode.NaturalSortAscending)
+        {
+            var permutation = snapshot.GetSortedPermutation();
+            for (int i = 0; i < permutation.Length; i++)
+            {
+                int ordinal = permutation[i];
+                if (MatchesAll(resolved, ordinal))
+                    results.Add(recordIds[ordinal]);
+            }
+        }
+        else
+        {
+            for (int ordinal = 0; ordinal < snapshot.DocumentCount; ordinal++)
+            {
+                if (MatchesAll(resolved, ordinal))
+                    results.Add(recordIds[ordinal]);
+            }
+        }
+
+        return results;
+    }
+
     private static ResolvedPredicate[] ResolvePredicates(
         ReadOnlySpan<FacetPredicate> predicates,
         IndexSnapshot snapshot)

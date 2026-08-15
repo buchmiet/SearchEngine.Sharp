@@ -34,12 +34,21 @@ internal static class IngestionPolicyBenchmark
             FixedBatchSize = 50_000,
         });
 
-        RunScenario("adaptive-k2", documentCount, seed, scanDelayMs, new IngestPublishOptions
+        RunScenario("adaptive", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
             Policy = IngestPublishPolicy.Adaptive,
             FixedBatchSize = 2_000,
             MinInterval = TimeSpan.FromMilliseconds(100),
             AdaptiveMultiplier = 2.0,
+        });
+
+        RunScenario("adaptive-fixed-2k", documentCount, seed, scanDelayMs, new IngestPublishOptions
+        {
+            Policy = IngestPublishPolicy.Adaptive,
+            FixedBatchSize = 2_000,
+            MinInterval = TimeSpan.FromMilliseconds(100),
+            AdaptiveMultiplier = 2.0,
+            GrowthAwareBatchCap = false,
         });
 
         Console.WriteLine();

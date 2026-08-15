@@ -190,4 +190,17 @@ public class FacetFilterTests
         var filter = FacetFilter.Range("size", 0, 0);
         Assert.Equal(new[] { 2 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
     }
+
+    [Fact]
+    public void ExactSingleTerm_WithFacetFilter_MatchesWithinPlusFilter()
+    {
+        var (engine, _) = CreateFacetIndex();
+        var filter = FacetFilter.Range("size", 1000, 5000);
+
+        var within = engine.Find("report-final", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
+        var exact = engine.Find("report-final", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
+
+        Assert.Equal(within.OrderBy(x => x), exact.OrderBy(x => x));
+        Assert.Equal(exact.Count, engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter));
+    }
 }

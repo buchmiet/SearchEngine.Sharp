@@ -60,6 +60,21 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return 0;
 
+        if (filter is not null && !filter.IsEmpty)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return FacetFilterEvaluator.CountFilterOnly(filter, snapshot);
+
+            if (TryGetExactFacetCount(
+                    expression,
+                    method,
+                    enableOperators,
+                    filter,
+                    snapshot,
+                    out int exactFacetCount))
+                return exactFacetCount;
+        }
+
         using var queryContext = new QueryContext(snapshot.DocumentCount);
         var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
         return resultSet?.GetTrueCount() ?? 0;
@@ -108,6 +123,22 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return [];
 
+        if (filter is not null && !filter.IsEmpty)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return FacetFilterEvaluator.MaterializeFilterOnly(filter, snapshot, sortMode);
+
+            if (TryFindExactWithFacetFastPath(
+                    expression,
+                    method,
+                    enableOperators,
+                    sortMode,
+                    filter,
+                    snapshot,
+                    out var exactFacetResults))
+                return exactFacetResults;
+        }
+
         using var queryContext = new QueryContext(snapshot.DocumentCount);
         var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
         if (resultSet == null)
@@ -118,6 +149,58 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
 
     private static bool HasQueryInput(string expression, FacetFilter? filter)
         => !string.IsNullOrWhiteSpace(expression) || filter is not null && !filter.IsEmpty;
+
+    private static bool TryGetExactFacetCount(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        out int count)
+    {
+        count = 0;
+        if (method != WordMatchMethod.Exact
+            || enableOperators
+            || !QueryExpressionEvaluator.TryGetSingleWord(
+                expression.AsSpan(),
+                snapshot.Tokenization.QuerySeparatorValues,
+                out var singleWord)
+            || GlobMatcher.ContainsMetacharacters(singleWord!))
+            return false;
+
+        if (!TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches))
+            return true;
+
+        count = FacetFilterEvaluator.CountMatchingOrdinals(filter, snapshot, exactMatches);
+        return true;
+    }
+
+    private static bool TryFindExactWithFacetFastPath(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        SearchSortMode sortMode,
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        out List<int> results)
+    {
+        results = [];
+        if (method != WordMatchMethod.Exact
+            || enableOperators
+            || sortMode != SearchSortMode.SnapshotOrder
+            || !QueryExpressionEvaluator.TryGetSingleWord(
+                expression.AsSpan(),
+                snapshot.Tokenization.QuerySeparatorValues,
+                out var singleWord)
+            || GlobMatcher.ContainsMetacharacters(singleWord!))
+            return false;
+
+        if (!TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches))
+            return true;
+
+        results = FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
+        return true;
+    }
 
     private static List<int> MaterializeResults(
         IndexSnapshot snapshot,
@@ -159,18 +242,20 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         FastBitSet? resultSet;
         if (string.IsNullOrWhiteSpace(expression))
         {
-            resultSet = queryContext.RentAllTrueBitSet();
+            if (filter is not null && !filter.IsEmpty)
+                resultSet = FacetFilterEvaluator.BuildMatchingBitSet(filter, snapshot, queryContext);
+            else
+                return null;
         }
         else
         {
             resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
+            if (resultSet is null)
+                return null;
+
+            if (filter is not null && !filter.IsEmpty)
+                FacetFilterEvaluator.Apply(resultSet, filter, snapshot, queryContext);
         }
-
-        if (resultSet is null)
-            return null;
-
-        if (filter is not null && !filter.IsEmpty)
-            FacetFilterEvaluator.Apply(resultSet, filter, snapshot, queryContext);
 
         return resultSet;
     }

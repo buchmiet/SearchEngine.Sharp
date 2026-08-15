@@ -53,6 +53,14 @@ public sealed class IngestPublishOptions
     /// </summary>
     public int MinTimerPublishBatch { get; init; } = 200;
 
+    /// <summary>
+    /// When <see langword="true"/> (default) and <see cref="Policy"/> is
+    /// <see cref="IngestPublishPolicy.Adaptive"/>, the batch cap grows after each publish to
+    /// <c>max(FixedBatchSize, indexed document count)</c> so fast scans avoid fixed-size
+    /// rebuild amplification.
+    /// </summary>
+    public bool GrowthAwareBatchCap { get; init; } = true;
+
     internal void Validate()
     {
         if (FixedBatchSize < 1)
