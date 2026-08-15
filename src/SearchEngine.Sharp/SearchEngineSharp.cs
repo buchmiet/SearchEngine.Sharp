@@ -34,9 +34,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
 
         if (method == WordMatchMethod.Exact)
         {
-            if (!enableOperators
-                && QueryExpressionEvaluator.TryGetSingleWord(
+            if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
                     expression.AsSpan(),
+                    enableOperators,
                     snapshot.Tokenization.QuerySeparatorValues,
                     out var singleWord)
                 && !GlobMatcher.ContainsMetacharacters(singleWord!))
@@ -89,10 +89,10 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             return [];
 
         if (method == WordMatchMethod.Exact
-            && !enableOperators
             && sortMode == SearchSortMode.SnapshotOrder
-            && QueryExpressionEvaluator.TryGetSingleWord(
+            && QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
+                enableOperators,
                 snapshot.Tokenization.QuerySeparatorValues,
                 out var singleWord)
             && !GlobMatcher.ContainsMetacharacters(singleWord!))
@@ -160,9 +160,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     {
         count = 0;
         if (method != WordMatchMethod.Exact
-            || enableOperators
-            || !QueryExpressionEvaluator.TryGetSingleWord(
+            || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
+                enableOperators,
                 snapshot.Tokenization.QuerySeparatorValues,
                 out var singleWord)
             || GlobMatcher.ContainsMetacharacters(singleWord!))
@@ -186,10 +186,10 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     {
         results = [];
         if (method != WordMatchMethod.Exact
-            || enableOperators
             || sortMode != SearchSortMode.SnapshotOrder
-            || !QueryExpressionEvaluator.TryGetSingleWord(
+            || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
+                enableOperators,
                 snapshot.Tokenization.QuerySeparatorValues,
                 out var singleWord)
             || GlobMatcher.ContainsMetacharacters(singleWord!))
@@ -284,9 +284,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
                 ? null
                 : RegexMatcher.MatchRegex(expression, queryContext, snapshot);
 
-        if (!enableOperators
-            && QueryExpressionEvaluator.TryGetSingleWord(
+        if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
+                enableOperators,
                 snapshot.Tokenization.QuerySeparatorValues,
                 out var singleWord))
             return QueryMatcher.Match(singleWord!, method, queryContext, snapshot);

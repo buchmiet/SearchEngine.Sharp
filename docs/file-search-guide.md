@@ -123,8 +123,8 @@ IngestionResult result = await ingestion.IngestAsync(
     cancellationToken: ct);
 ```
 
-Defaults (`IngestPublishPolicy.Adaptive`) target under 1 s between a file being scanned
-and becoming searchable, at roughly 50 index publishes per 100k files. Tunables:
+Defaults (`IngestPublishPolicy.Adaptive`, `GrowthAwareBatchCap = true`) target under 1 s between a file being scanned
+and becoming searchable, at roughly **7 index publishes per 100k files** on a fast scan (was ~50 before growth-aware batch cap). Tunables:
 [ingestion-policy-report.md](ingestion-policy-report.md).
 
 Starting a new search scope: `updater.Clear()`, reset the `paths` table, start a new
@@ -184,8 +184,9 @@ static List<int> Search(ISearchEngine engine, SearchCriteria c)
 {
     FacetFilter filter = BuildFilter(c);
 
-    // The filter overloads always run the full pipeline; keep the fast path
-    // for pure text queries by calling the overload without a filter.
+    // Single-term exact queries with a filter use a posting-span fast path when the name
+    // expression is one operand (even with enableOperators:true). Multi-term boolean
+    // expressions still run the full evaluator + facet post-processing.
     return filter.IsEmpty
         ? engine.Find(c.NameQuery, WordMatchMethod.Within,
             enableOperators: true, SearchSortMode.NaturalSortAscending)
@@ -258,10 +259,12 @@ points from that report (synthetic data, single thread):
   depending on match method.
 - With a facet filter at 250k documents the slowest mode (filter-only, all documents
   considered) still completes in ~2.5 ms — comfortably per-keystroke territory.
-- Facet filtering costs one pass over all documents per query; glob costs one pass over
-  unique tokens. Both scale linearly.
+- **Exact + single-term facet** queries use a posting-span fast path (facet predicates
+  checked only for matching ordinals). **Filter-only** and general boolean + facet
+  queries still scan all documents for facet predicates.
+- Glob matching scans unique tokens; Within uses the bigram index then substring verification.
 
-Requerying on every ingestion publish (~50 publishes per 100k files) adds negligible
+Requerying on every ingestion publish (~7 publishes per 100k files on a fast scan) adds negligible
 load at these latencies.
 
 ## Pitfalls checklist
@@ -270,8 +273,10 @@ load at these latencies.
 - Facet names are case-sensitive; pick one spelling (`size`, not `Size`) and stick to it.
 - Filtering on a facet name that no document carries throws `ArgumentException` — build
   filters only from facets your scanner writes.
-- Don't pass an empty filter to the filter overloads; call the filter-less overload to
-  keep the exact-match fast path.
+- Don't pass an empty filter to the filter overloads; call the filter-less overload when
+  no facet criteria apply.
+- Single-term **Exact** queries (including with `enableOperators:true` when the expression
+  is one word) keep posting fast paths; **Within** + **NaturalSort** still materialize via bitset.
 - Keep all timestamp facets in UTC; mixing kinds shifts range boundaries.
 - `*.txt` has token semantics under **Default**, not end-anchored semantics — use
   **FileMask** or an `ext` facet; see [File extensions](#file-extensions).

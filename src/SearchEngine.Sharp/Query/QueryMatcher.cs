@@ -50,33 +50,13 @@ internal static class QueryMatcher
         // benchmarks/SearchEngine.Sharp.Benchmarks for measurement; it is not part of the library API.
 
         // For queries of length >= 2 use the bigram index to prune candidates.
-        // The bigram maps to word indices already in length-descending order,
-        // so the early-exit on length is preserved exactly as in the linear scan.
         if (wordLength >= 2 && snapshot.BigramWordIndices.Count > 0)
         {
-            int firstBigram = (word[0] << 16) | word[1];
-            if (!snapshot.BigramWordIndices.TryGetValue(firstBigram, out var candidates))
+            if (!TryGetBigramCandidates(word, snapshot, useRarestBigram: false, out var candidates))
                 return result;
 
-            foreach (int wordIndex in candidates)
-            {
-                if (wordLengths[wordIndex] < wordLength)
-                    break; // candidates are in length-descending order
-
-                int searchStart = snapshot.WordEnds[wordIndex] - wordLengths[wordIndex];
-                int searchEnd = snapshot.WordEnds[wordIndex];
-
-                MatchSubstring(
-                    result,
-                    wordSpan,
-                    wordsArray,
-                    snapshot.PostingDocIds,
-                    snapshot.PostingOffsets[wordIndex],
-                    snapshot.PostingCounts[wordIndex],
-                    searchStart,
-                    searchEnd);
-            }
-
+            ScanBigramCandidates(
+                wordSpan, wordLength, candidates, result, wordsArray, wordLengths, snapshot);
             return result;
         }
 
@@ -98,6 +78,135 @@ internal static class QueryMatcher
         }
 
         return result;
+    }
+
+    /// <summary>Benchmark-only overload comparing first-bigram vs rarest-bigram pruning.</summary>
+    internal static FastBitSet MatchWithin(
+        string word,
+        QueryContext qc,
+        IndexSnapshot snapshot,
+        bool useRarestBigram)
+    {
+        int wordLength = word.Length;
+        var result = qc.RentEmptyBitSet();
+        var wordSpan = word.AsSpan();
+        var wordsArray = snapshot.WordsArray.AsSpan();
+        var wordLengths = snapshot.WordLengths.AsSpan();
+
+        if (wordLength >= 2 && snapshot.BigramWordIndices.Count > 0)
+        {
+            if (!TryGetBigramCandidates(word, snapshot, useRarestBigram, out var candidates))
+                return result;
+
+            ScanBigramCandidates(
+                wordSpan, wordLength, candidates, result, wordsArray, wordLengths, snapshot);
+            return result;
+        }
+
+        for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= wordLength; wordIndex++)
+        {
+            int searchStart = snapshot.WordEnds[wordIndex] - wordLengths[wordIndex];
+            int searchEnd = snapshot.WordEnds[wordIndex];
+
+            MatchSubstring(
+                result,
+                wordSpan,
+                wordsArray,
+                snapshot.PostingDocIds,
+                snapshot.PostingOffsets[wordIndex],
+                snapshot.PostingCounts[wordIndex],
+                searchStart,
+                searchEnd);
+        }
+
+        return result;
+    }
+
+    private static bool TryGetBigramCandidates(
+        string word,
+        IndexSnapshot snapshot,
+        bool useRarestBigram,
+        out int[] candidates)
+    {
+        candidates = [];
+        if (word.Length < 2)
+            return false;
+
+        if (!useRarestBigram || word.Length == 2)
+        {
+            int firstBigram = (word[0] << 16) | word[1];
+            if (snapshot.BigramWordIndices.TryGetValue(firstBigram, out var list))
+            {
+                candidates = list;
+                return true;
+            }
+
+            return false;
+        }
+
+        int bestKey = -1;
+        int bestCount = int.MaxValue;
+        for (int j = 0; j + 1 < word.Length; j++)
+        {
+            int bigram = (word[j] << 16) | word[j + 1];
+            if (!snapshot.BigramWordIndices.TryGetValue(bigram, out var list))
+                continue;
+
+            if (list.Length < bestCount)
+            {
+                bestCount = list.Length;
+                bestKey = bigram;
+            }
+        }
+
+        if (bestKey < 0)
+        {
+            int firstBigram = (word[0] << 16) | word[1];
+            if (snapshot.BigramWordIndices.TryGetValue(firstBigram, out var list))
+            {
+                candidates = list;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (snapshot.BigramWordIndices.TryGetValue(bestKey, out var bestList))
+        {
+            candidates = bestList;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void ScanBigramCandidates(
+        ReadOnlySpan<char> wordSpan,
+        int wordLength,
+        int[] candidates,
+        FastBitSet result,
+        ReadOnlySpan<char> wordsArray,
+        ReadOnlySpan<int> wordLengths,
+        IndexSnapshot snapshot)
+    {
+        foreach (int wordIndex in candidates)
+        {
+            if (wordLengths[wordIndex] < wordLength)
+                break;
+
+            int searchStart = snapshot.WordEnds[wordIndex] - wordLengths[wordIndex];
+            int searchEnd = snapshot.WordEnds[wordIndex];
+
+            MatchSubstring(
+                result,
+                wordSpan,
+                wordsArray,
+                snapshot.PostingDocIds,
+                snapshot.PostingOffsets[wordIndex],
+                snapshot.PostingCounts[wordIndex],
+                searchStart,
+                searchEnd);
+        }
     }
 
     internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)

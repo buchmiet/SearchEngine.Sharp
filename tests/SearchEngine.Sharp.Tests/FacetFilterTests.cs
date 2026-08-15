@@ -203,4 +203,30 @@ public class FacetFilterTests
         Assert.Equal(within.OrderBy(x => x), exact.OrderBy(x => x));
         Assert.Equal(exact.Count, engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter));
     }
+
+    [Fact]
+    public void ExactSingleTerm_WithFacetFilter_EnableOperatorsTrue_SameAsOff()
+    {
+        var (engine, _) = CreateFacetIndex();
+        var filter = FacetFilter.Range("size", 1000, 5000);
+
+        var off = engine.Find("report-final", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
+        var on = engine.Find("report-final", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter);
+
+        Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
+        Assert.Equal(
+            engine.CountMatches("report-final", WordMatchMethod.Exact, true, filter),
+            engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter));
+    }
+
+    [Fact]
+    public void ExactSingleTerm_EnableOperatorsTrue_SameAsOff()
+    {
+        var (engine, _) = CreateFacetIndex();
+
+        var off = engine.Find("report-final", WordMatchMethod.Exact, false);
+        var on = engine.Find("report-final", WordMatchMethod.Exact, true);
+
+        Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
+    }
 }

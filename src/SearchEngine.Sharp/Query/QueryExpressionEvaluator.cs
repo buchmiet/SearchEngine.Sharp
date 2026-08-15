@@ -54,6 +54,32 @@ internal static class QueryExpressionEvaluator
         return hasWord;
     }
 
+    /// <summary>
+    /// Returns true when the expression evaluates to a single word operand — with or without
+    /// <paramref name="enableOperators"/>. Multi-word, NOT, and parenthesized expressions return false.
+    /// </summary>
+    internal static bool TryGetSingleSemanticWord(
+        ReadOnlySpan<char> expression,
+        bool enableOperators,
+        SearchValues<char> separators,
+        out string? word)
+    {
+        if (!enableOperators)
+            return TryGetSingleWord(expression, separators, out word);
+
+        word = null;
+        var tokens = Tokenize(expression, enableOperators: true, separators);
+        if (tokens.Count == 0)
+            return false;
+
+        CorrectTokens(tokens);
+        if (tokens.Count != 1 || tokens[0].Operation != WordOperations.None)
+            return false;
+
+        word = tokens[0].Word;
+        return !string.IsNullOrEmpty(word);
+    }
+
     internal static FastBitSet? Evaluate(
         string expression,
         bool enableOperators,

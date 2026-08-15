@@ -246,7 +246,8 @@ public static class IndexSnapshotBuilder
                 prev = bigram;
                 if (!bigramLists.TryGetValue(bigram, out var list))
                     bigramLists[bigram] = list = [];
-                list.Add(i);
+                if (list.Count == 0 || list[^1] != i)
+                    list.Add(i);
             }
         }
         var bigramWordIndices = new Dictionary<int, int[]>(bigramLists.Count);
