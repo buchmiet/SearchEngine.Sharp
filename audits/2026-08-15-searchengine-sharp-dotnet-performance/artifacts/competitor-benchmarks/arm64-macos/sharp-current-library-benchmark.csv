@@ -1,7 +1,7 @@
 implementation,workload,hit_count,median_ns,mean_ns,notes
-sharp-current,within_snapshot,10000,68334,67871,hot-index
-sharp-current,within_facet_snapshot,4,112208,113350,hot-index
-sharp-current,within_facet_natural_cold,4,146209,146354,cold-index
-sharp-current,zero_hits_natural_cold,0,23417,178729,cold-index
-sharp-current,exact_first,7,98541,97417,hot-index
-sharp-current,glob_pdf,6667,769583,763683,hot-index
+sharp-current,within_snapshot,10000,74292,75308,hot-index
+sharp-current,within_facet_snapshot,4,114542,114388,hot-index
+sharp-current,within_facet_natural_cold,4,162375,162942,cold-index
+sharp-current,zero_hits_natural_cold,0,22958,23446,cold-index
+sharp-current,exact_first,7,98541,101608,hot-index
+sharp-current,glob_pdf,6667,752458,749112,hot-index

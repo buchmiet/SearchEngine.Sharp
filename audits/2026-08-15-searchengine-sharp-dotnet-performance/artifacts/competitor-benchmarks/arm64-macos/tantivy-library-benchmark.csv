@@ -1,0 +1,7 @@
+implementation,workload,hit_count,median_ns,mean_ns,notes
+tantivy,within_snapshot,10000,9905125,9868429,"hot-index"
+tantivy,within_facet_snapshot,4,9746291,9919350,"hot-index"
+tantivy,within_facet_natural_cold,4,75202459,73867562,"cold-index"
+tantivy,zero_hits_natural_cold,0,70515541,70703308,"cold-index"
+tantivy,exact_first,7,265250,265446,"hot-index"
+tantivy,glob_pdf,6667,4840666,4983217,"hot-index"

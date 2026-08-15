@@ -1,4 +1,4 @@
 implementation,workload,hit_count,median_ns,mean_ns,notes
-sharp-0.5.0-initial,within_snapshot,10000,78600,81120,hot-index
-sharp-0.5.0-initial,zero_hits_natural_cold,0,25298400,27540130,cold-index
-sharp-0.5.0-initial,exact_first,7,78800,78820,hot-index
+sharp-0.5.0-initial,within_snapshot,10000,66900,66680,hot-index
+sharp-0.5.0-initial,zero_hits_natural_cold,0,31760400,32935660,cold-index
+sharp-0.5.0-initial,exact_first,7,85900,97050,hot-index

@@ -1,0 +1,8 @@
+{
+  "name": "minisearch-library-bench",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "minisearch": "^7.1.2"
+  }
+}

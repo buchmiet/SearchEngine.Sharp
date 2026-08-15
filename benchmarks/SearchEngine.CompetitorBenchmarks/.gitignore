@@ -1,2 +1,4 @@
 .worktrees/
 results/
+tantivy/target/
+rust/target/

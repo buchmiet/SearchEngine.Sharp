@@ -1,0 +1,7 @@
+implementation,workload,hit_count,median_ns,mean_ns,notes
+minisearch,within_snapshot,10000,27310700,29704820,"hot-index"
+minisearch,within_facet_snapshot,4,30354200,33870660,"hot-index"
+minisearch,within_facet_natural_cold,4,34655800,36426640,"cold-index"
+minisearch,zero_hits_natural_cold,0,12669000,12327380,"cold-index"
+minisearch,exact_first,7,728400,742580,"hot-index"
+minisearch,glob_pdf,6667,14907400,14237880,"hot-index"
