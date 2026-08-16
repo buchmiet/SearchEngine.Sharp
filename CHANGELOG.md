@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-16
+
 ### Changed
 
 - **Selectivity-aware query pipeline:** `ResultMaterializer` uses `FastBitSet.CopySetBitOrdinals()` for SnapshotOrder materialization; hybrid facet apply (sparse K → in-place on hits, dense K → full column scan); hybrid NaturalSort (K=0/1 fast paths, precomputed sort-K below 80% density, global permutation above). Thresholds in `SelectivityThresholds` (BDN-derived). `IngestPublishOptions.GrowthAwareBatchCap` is `true` by default for `Adaptive` policy. Batch cap grows to `max(FixedBatchSize, indexedDocumentCount)` after each publish, cutting 100k fast-scan rebuild amplification from ~**25×** to ~**2.2×** (~7 publishes instead of 50). Set `GrowthAwareBatchCap = false` to restore fixed 2k batch behaviour.
