@@ -1,0 +1,12 @@
+{
+  "capturedUtc": "2026-08-16T21:59:43.7075940Z",
+  "gitSha": null,
+  "runtime": ".NET 10.0.10",
+  "processArchitecture": "Arm64",
+  "osDescription": "macOS 26.5.0",
+  "rid": "osx-arm64",
+  "processorCount": 8,
+  "avx2": false,
+  "advSimd": true,
+  "assembly": "1.0.0.0"
+}

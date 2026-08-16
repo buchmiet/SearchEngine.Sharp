@@ -72,7 +72,7 @@ Filter-only remains O(N) at **~252 μs** (x64 BDN) — expected; not in F-02 sco
 - Existing `SearchEngine.Sharp.Benchmarks` retained as workload runner (ingestion policy, facet scenarios).
 - **Committed evidence:** BDN CSV exports per platform under [`artifacts/`](artifacts/README.md) (previously blocked by root `.gitignore` `artifacts/` rule — fixed in this branch).
 - **Not yet complete vs original F-03 gate:** no automated CI matrix; PGO/tiering flags not recorded; `EnvironmentFingerprint` captures runtime/RID/arch/core count/ISA but not CPU SKU or SDK version.
-- **Pass 2 extension:** BDN also covers operators-on, WithinBigram A/B, cold NaturalSort, and progressive requery — see [`artifacts/pass2-x64-win/`](artifacts/pass2-x64-win/README.md) (x64 CSV committed; ARM64 pass 2 not yet run).
+- **Pass 2 extension:** BDN covers operators-on, WithinBigram A/B, cold NaturalSort, and progressive requery on **x64 + ARM64** — [`pass2-x64-win/`](artifacts/pass2-x64-win/README.md), [`pass2-arm64-macos/`](artifacts/pass2-arm64-macos/README.md), [`pass2-arm64-linux/`](artifacts/pass2-arm64-linux/README.md) (measured 2026-08-16).
 
 ---
 
@@ -90,7 +90,13 @@ Measured 2026-08-15. Raw CSV: [`artifacts/pass2-x64-win/`](artifacts/pass2-x64-w
 | Exact operators on | 1,397 ns | **1.01** |
 | Exact+Facet off / on | 2,881 / 2,891 ns | **2.08×** vs Exact off |
 
-**Status:** verified — no material Find regression with `enableOperators:true` for single-token exact paths.
+| Platform | Exact off | Exact on | Ratio |
+|----------|----------:|---------:|------:|
+| x64-win | 1,387 ns | 1,397 ns | **1.01** |
+| macOS ARM64 | 2,255 ns | 2,158 ns | **0.96** |
+| Ubuntu ARM64 | 2,272 ns | 2,347 ns | **1.03** |
+
+**Status:** verified on x64 + ARM64 — no material Find regression with `enableOperators:true` for single-token exact paths.
 
 ### Bigram ordinal dedupe + rarest-bigram experiment
 
@@ -109,7 +115,13 @@ BDN uses `IterationSetup` → fresh snapshot, `InvocationCount=1` (true cold inv
 | Progressive 7× cold NaturalSort requery | **48,389 μs** |
 | Progressive 7× SnapshotOrder requery | **134.5 μs** (~**360×** less) |
 
-**Assessment:** cold NaturalSort is a dominant cost in progressive file-search requery on x64 @ 100k. Not elevated to P2 (no production call-volume/SLO evidence), but no longer E0 — **E2 x64, medium confidence, follow-up**. ARM64 pass 2 unverified.
+| Platform | Cold | Warm | 7× cold NS | 7× SnapshotOrder | NS/SO ratio |
+|----------|-----:|-----:|-----------:|-----------------:|------------:|
+| x64-win | **23.4 ms** | **77 μs** | **48.4 ms** | **134 μs** | **~360×** |
+| macOS ARM64 | **3.0 ms** | **2.9 ms** | **6.0 ms** | **141 μs** | **~43×** |
+| Ubuntu ARM64 | **3.3 ms** | **3.3 ms** | **6.7 ms** | **150 μs** | **~45×** |
+
+**Assessment:** cold NaturalSort dominates progressive requery vs SnapshotOrder on all measured platforms (ratio **~45–360×** depending on arch). x64 single-snapshot warm cache **~303×** faster than cold; ARM64 pass-2 `Find` rows show little warm speedup — use component benchmarks in pass 3 for K=0 global permutation. Not elevated to P2 (no call-volume/SLO evidence) — **E2 x64 + ARM64, medium confidence, follow-up**.
 
 ---
 
@@ -144,7 +156,17 @@ General `FacetFilterEvaluator.Apply()` still O(N). Facet-on-K in-place prototype
 | 10 | 64 μs | **1.1 μs** | **~57×** |
 | 1,000 | 64 μs | **3.9 μs** | **~17×** |
 
-E2E Within `"report"`: **textHitCount=10,000**, **postFacetHitCount=4**. SnapshotOrder **185 μs** vs NaturalSort **24.9 ms** (~134×).
+E2E Within `"report"` (pre-implementation): **textHitCount=10,000**, **postFacetHitCount=4**. SnapshotOrder **185 μs** vs NaturalSort **24.9 ms** (~134×).
+
+### Post-implementation E2E (selectivity pipeline shipped, 2026-08-15 PM x64; ARM64 **2026-08-16**)
+
+| Scenario | x64-win | macOS ARM64 | Ubuntu ARM64 |
+|----------|-------:|------------:|-------------:|
+| 0 hits + NaturalSort cold | **29.3 μs** | **40.7 μs** | **51.0 μs** |
+| Within+Facet+NaturalSort cold | **155.6 μs** | **233.5 μs** | **274.7 μs** |
+| Within+Facet SnapshotOrder (median) | **109 μs** | **196 μs** | **221 μs** |
+
+Sources: [`pass3-x64-win/post-implementation/`](artifacts/pass3-x64-win/post-implementation/), [`pass3-arm64-macos/post-implementation/`](artifacts/pass3-arm64-macos/post-implementation/), [`pass3-arm64-linux/post-implementation/`](artifacts/pass3-arm64-linux/post-implementation/). Sparse-final-result NaturalSort E2E drops from **~25 ms** to **sub-ms** on x64; ARM64 **~230–275 μs** for the same hit counts.
 
 ### BitSet materialization (x64 @ 100k)
 
@@ -372,7 +394,6 @@ Confirmed good decisions (do not refactor blindly):
 - `EnvironmentFingerprint` missing CPU SKU and SDK version; PGO/tiering flags not recorded.
 - No `dotnet-trace` / disassembly compare for `FastBitSet` ARM64 vs scalar (C-02).
 - No peak RSS benchmark for index build at 1M documents (C-05).
-- ARM64 pass 2 BDN (operators-on, NaturalSort cold) not yet run.
 - Concurrent duplicate NaturalSort build under parallel first callers (C-03 sub-item) still unmeasured.
 
 ---

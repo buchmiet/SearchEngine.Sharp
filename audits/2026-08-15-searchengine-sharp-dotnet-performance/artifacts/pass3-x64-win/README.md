@@ -158,4 +158,4 @@ FileMask `*.pdf` + facet @ 100k: **486 μs** (full O(N) facet scan on glob hits 
 
 **Priority for 0.5.6:** unified selectivity-aware query pipeline — see [`docs/0.5.6-selectivity-research.md`](../../../docs/0.5.6-selectivity-research.md).
 
-ARM64 pass 3 not yet measured.
+ARM64 pass 3 measured **2026-08-16** — see [`pass3-arm64-macos/`](../pass3-arm64-macos/README.md) and [`pass3-arm64-linux/`](../pass3-arm64-linux/README.md). Post-implementation E2E (Within+Facet+NaturalSort cold, sparse final result): **~233 μs** macOS / **~275 μs** Ubuntu vs **~156 μs** x64.

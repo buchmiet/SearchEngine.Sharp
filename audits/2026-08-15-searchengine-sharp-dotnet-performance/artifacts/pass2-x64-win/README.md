@@ -64,6 +64,9 @@ Ratio NaturalSort / SnapshotOrder: **~360×** (48,389 / 134.5).
 
 Progressive file-search UI with `NaturalSortAscending` on every publish: expect **~48 ms** cold-sort work per full 100k scan (7 publishes), vs **~135 μs** if SnapshotOrder were used instead.
 
-## ARM64
+## ARM64 (2026-08-16)
 
-Pass 2 CSVs above are **x64 only**. ARM64 pass 2 not yet measured.
+| Platform | Folder | OperatorsOn off/on | Within first/rarest | Cold NaturalSort | 7× progressive NS / SnapshotOrder |
+|----------|--------|-------------------:|----------------------:|-----------------:|----------------------------------:|
+| macOS ARM64 | [`pass2-arm64-macos/`](../pass2-arm64-macos/README.md) | 2,255 / 2,158 ns (**0.96×**) | 26.82 / 26.67 μs (**0.99×**) | **2,956 μs** | **6,010 / 141 μs** (~43×) |
+| Ubuntu ARM64 | [`pass2-arm64-linux/`](../pass2-arm64-linux/README.md) | 2,272 / 2,347 ns (**1.03×**) | 26.69 / 26.68 μs (**1.00×**) | **3,267 μs** | **6,658 / 150 μs** (~45×) |

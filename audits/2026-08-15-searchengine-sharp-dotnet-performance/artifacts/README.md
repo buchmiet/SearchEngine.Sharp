@@ -37,11 +37,15 @@ Pass a **directory** or a **`.json` file path**. Default (no argument) writes to
 | `*/ExactFacetBenchmark-report.csv` | BDN CSV export (`ExactOnly`, `ExactWithFacetFilter`, `FilterOnly`) |
 | `x64-win/*-report-github.md` | BDN Markdown summary (x64 only) |
 | `x64-win/environment-fingerprint.json` | Runtime/RID/arch/core count/ISA/git SHA (partial — no CPU SKU or SDK version) |
-| `pass2-x64-win/*.csv` | Pass 2 BDN: OperatorsOn, WithinBigram A/B, cold NaturalSort, progressive requery |
-| `pass3-x64-win/*.csv` | Pass 3 BDN: selectivity sweep (bitset materialization, NaturalSort vs K, facet vs K, E2E pipeline, FileMask glob, build allocation) |
+| `pass2-x64-win/*.csv` | Pass 2 BDN (x64): OperatorsOn, WithinBigram A/B, cold NaturalSort, progressive requery |
+| `pass2-arm64-macos/*.csv` | Pass 2 BDN (macOS ARM64) — same suite |
+| `pass2-arm64-linux/*.csv` | Pass 2 BDN (Ubuntu ARM64) — same suite |
+| `pass3-x64-win/*.csv` | Pass 3 BDN (x64): selectivity sweep + post-implementation SelectivityPipeline |
+| `pass3-arm64-macos/*.csv` | Pass 3 BDN (macOS ARM64) |
+| `pass3-arm64-linux/*.csv` | Pass 3 BDN (Ubuntu ARM64) |
 
-Pass 2 summary: [`pass2-x64-win/README.md`](pass2-x64-win/README.md).  
-Pass 3 summary: [`pass3-x64-win/README.md`](pass3-x64-win/README.md).
+Pass 2: [`pass2-x64-win/README.md`](pass2-x64-win/README.md), [`pass2-arm64-macos/README.md`](pass2-arm64-macos/README.md), [`pass2-arm64-linux/README.md`](pass2-arm64-linux/README.md).  
+Pass 3: [`pass3-x64-win/README.md`](pass3-x64-win/README.md), [`pass3-arm64-macos/README.md`](pass3-arm64-macos/README.md), [`pass3-arm64-linux/README.md`](pass3-arm64-linux/README.md).
 
 ## F-03 evidence status
 

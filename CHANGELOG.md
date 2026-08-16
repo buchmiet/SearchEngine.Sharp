@@ -25,7 +25,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `NaturalSortCrossoverBenchmark` — empirical sort-K vs global permutation crossover (precomputed keys).
 - `SelectivityPipelineCounts` — records measured `textHitCount` / `postFacetHitCount` for E2E benchmarks.
 - `FileSearchDataFactory` — realistic file-name corpus for product-shaped benchmarks.
-- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 under `pass2-x64-win/`; pass 3 selectivity under `pass3-x64-win/` including post-implementation SelectivityPipeline CSV).
+- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 on x64 + ARM64; pass 3 selectivity on x64 + ARM64 including post-implementation SelectivityPipeline CSV).
 - `benchmarks/SearchEngine.CompetitorBenchmarks/` — library benchmark harness (SearchEngine.Sharp version comparison + Tantivy 0.22, MiniSearch 7, Bleve 2.4 adapters with verified hit counts). CSV evidence under `audits/.../artifacts/competitor-benchmarks/`.
 - [`docs/0.5.6-selectivity-research.md`](docs/0.5.6-selectivity-research.md) — pass 3 research closure and 0.5.6 implementation scope.
 

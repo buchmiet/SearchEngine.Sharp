@@ -1,0 +1,12 @@
+{
+  "capturedUtc": "2026-08-16T21:59:44.2232052Z",
+  "gitSha": null,
+  "runtime": ".NET 10.0.10",
+  "processArchitecture": "Arm64",
+  "osDescription": "Ubuntu 26.04 LTS",
+  "rid": "ubuntu.26.04-arm64",
+  "processorCount": 4,
+  "avx2": false,
+  "advSimd": true,
+  "assembly": "1.0.0.0"
+}
