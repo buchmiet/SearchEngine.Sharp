@@ -44,6 +44,14 @@ public sealed class IngestPublishOptions
     /// Maximum time an accepted entry may remain unpublished before a staleness-triggered
     /// publish is forced. Defaults to 1 second.
     /// </summary>
+    /// <remarks>
+    /// Under <see cref="IngestPublishPolicy.Adaptive"/> (unless <see cref="StrictMaxStaleness"/> is set)
+    /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last
+    /// rebuild duration has passed since the previous publish. While rebuilds are faster than
+    /// <c>MaxStaleness / AdaptiveMultiplier</c> nothing changes; for larger indexes the observed
+    /// staleness grows to about <c>(1 + AdaptiveMultiplier)</c> × one rebuild instead of the scan
+    /// degrading to back-to-back full rebuilds.
+    /// </remarks>
     public TimeSpan MaxStaleness { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
@@ -60,6 +68,14 @@ public sealed class IngestPublishOptions
     /// rebuild amplification.
     /// </summary>
     public bool GrowthAwareBatchCap { get; init; } = true;
+
+    /// <summary>
+    /// When <see langword="true"/>, <see cref="IngestPublishPolicy.Adaptive"/> publishes as soon as the
+    /// oldest buffered entry exceeds <see cref="MaxStaleness"/>, even when that means starting a full
+    /// rebuild immediately after the previous one (0.5.6 behaviour; quadratic total rebuild work once a
+    /// rebuild takes longer than <see cref="MaxStaleness"/>). Defaults to <see langword="false"/>.
+    /// </summary>
+    public bool StrictMaxStaleness { get; init; }
 
     internal void Validate()
     {

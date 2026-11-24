@@ -26,6 +26,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Glob leaves:** patterns of the form `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) are matched with vectorized span primitives (`StartsWith`/`EndsWith`/`IndexOf`) instead of the general backtracking matcher. Results are unchanged (randomized equivalence test).
+- **Progressive ingestion at scale:** under `Adaptive`, once one full rebuild took longer than `MaxStaleness` (about 400–500k file-name entries on a laptop-class x64 CPU), every batch was already stale when the previous rebuild ended, so the publisher rebuilt back to back every `ChannelCapacity` (10k) entries: a 1M-file scan made ~60–75 publishes and spent ~100 s rebuilding instead of ~10 s. A staleness-triggered publish now also waits `AdaptiveMultiplier` × the last rebuild duration. Behaviour is unchanged while rebuilds are faster than `MaxStaleness / AdaptiveMultiplier`.
+
+### Added
+
+- `IngestPublishOptions.StrictMaxStaleness` (default `false`) restores the previous behaviour.
 
 ## [0.5.6] - 2026-08-16
 

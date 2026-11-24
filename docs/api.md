@@ -229,7 +229,8 @@ Entries already published stay in the index.
 | `AdaptiveMultiplier` | 2.0 | `k` in the adaptive interval formula |
 | `ChannelCapacity` | 10 000 | Scanner→publisher channel bound (backpressure when full) |
 | `FlushOnCancellation` | `true` | Flush buffered entries on cancel |
-| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished |
+| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished; under `Adaptive` a staleness publish also waits `AdaptiveMultiplier` × last rebuild |
+| `StrictMaxStaleness` | `false` | `true`: publish on staleness even right after a rebuild (0.5.6 behaviour, quadratic on large scans) |
 | `MinTimerPublishBatch` | 200 | Min buffered entries for a timer-triggered adaptive publish |
 
 ### `IngestionProgress` (struct)

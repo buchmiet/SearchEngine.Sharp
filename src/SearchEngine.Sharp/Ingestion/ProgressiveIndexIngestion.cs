@@ -367,7 +367,18 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             return false;
 
         if (Stopwatch.GetElapsedTime(bufferedAt[0]) >= options.MaxStaleness)
+        {
+            // Once one rebuild takes longer than MaxStaleness, every batch is already stale when
+            // the previous rebuild finishes; publishing on staleness alone then rebuilds back to
+            // back every ChannelCapacity entries and total work becomes quadratic. Under Adaptive,
+            // staleness may not publish sooner than AdaptiveMultiplier x the last rebuild duration.
+            if (options.Policy == IngestPublishPolicy.Adaptive
+                && !options.StrictMaxStaleness
+                && ElapsedSince(lastPublishTimestamp) < lastRebuildDuration * options.AdaptiveMultiplier)
+                return false;
+
             return true;
+        }
 
         if (ElapsedSince(lastPublishTimestamp) < ComputeInterval(options, lastRebuildDuration))
             return false;
