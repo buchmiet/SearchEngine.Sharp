@@ -23,6 +23,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `FacetValues` stores its pairs in two small arrays instead of a copied `Dictionary`; `FromDictionary` no longer allocates a second dictionary.
+### Changed
+
+- **Glob leaves:** patterns of the form `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) are matched with vectorized span primitives (`StartsWith`/`EndsWith`/`IndexOf`) instead of the general backtracking matcher. Results are unchanged (randomized equivalence test).
 
 ## [0.5.6] - 2026-08-16
 

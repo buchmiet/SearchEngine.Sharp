@@ -106,6 +106,7 @@ internal static class QueryMatcher
         var patternSpan = pattern.AsSpan();
         int minLen = GlobMatcher.MinMatchLength(patternSpan);
         bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
+        var shape = new GlobMatcher.Shape(patternSpan);
 
         var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
@@ -120,7 +121,7 @@ internal static class QueryMatcher
                 continue;
 
             int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
-            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength)))
+            if (!shape.IsMatch(wordsArray.Slice(wordStart, wordLength)))
                 continue;
 
             int postingOffset = snapshot.PostingOffsets[wordIndex];
