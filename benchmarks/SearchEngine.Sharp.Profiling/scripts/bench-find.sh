@@ -14,8 +14,8 @@ QUERIES_FULL=(
   "--query *report*"
   "--query img_*"
   "--query package.json"
-  "--query *.jpg|OR|*.png"
-  "--query *.cs|AND|NOT|*tests*"
+  "--query *.jpg_SP_OR_SP_*.png"
+  "--query *.cs_SP_AND_SP_NOT_SP_*tests*"
   "--regex --query \\.(jpg|png)\$"
   "--query *.log --size-min 1048576"
   "--query * --days 30"
@@ -27,9 +27,9 @@ if [ "$QSET" = short ]; then QUERIES=("${QUERIES_SHORT[@]}"); else QUERIES=("${Q
 "$BIN" find --variant C --root "$ROOT" --query zzzz-warmup > /dev/null 2>&1
 for r in $(seq 1 "$REPS"); do
   for q in "${QUERIES[@]}"; do
-    # "|" inside a query stands for a space within the pattern.
+    # "_SP_" inside a query stands for a space within the pattern.
     read -r -a parts <<< "$q"
-    for i in "${!parts[@]}"; do parts[$i]=${parts[$i]//|/ }; done
+    for i in "${!parts[@]}"; do parts[$i]=${parts[$i]//_SP_/ }; done
     run --variant A "${parts[@]}"
     run --variant B --policy adaptive --batch 20000 "${parts[@]}"
     run --variant B --policy debounce --interval 250 --batch 1000000 "${parts[@]}"

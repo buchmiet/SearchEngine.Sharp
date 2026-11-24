@@ -90,7 +90,7 @@ static class FindRun
         double firstHitMs = -1;
         int hits = 0;
         CommanderPattern? cp = null;
-        var hitPaths = a.Opt("dump-hits") is not null ? new List<string>() : null;
+        var hitPaths = a.Opt("dump-hits") is not null || a.Has("hash") ? new List<string>() : null;
 
         void OnHit(string path)
         {
@@ -102,7 +102,8 @@ static class FindRun
         {
             case "A":
             case "B":
-                cp = new CommanderPattern(variant == "A" ? null : opts, instrument);
+            case "E":
+                cp = new CommanderPattern(variant == "A" ? null : opts, instrument, fseScan: variant == "E");
                 await foreach (var (path, _) in cp.FindAsync(req)) OnHit(path);
                 break;
             case "C":
@@ -118,10 +119,12 @@ static class FindRun
 
         double totalMs = sw.Elapsed.TotalMilliseconds;
         var g1 = Proc.GcNow();
+        string? hitsHash = null;
         if (hitPaths is not null)
         {
             hitPaths.Sort(StringComparer.Ordinal);
-            File.WriteAllLines(a.Str("dump-hits"), hitPaths);
+            if (a.Opt("dump-hits") is { } dump) File.WriteAllLines(dump, hitPaths);
+            hitsHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join('\n', hitPaths))))[..16];
         }
 
         var result = new Dictionary<string, object?>
@@ -129,11 +132,12 @@ static class FindRun
             ["mode"] = "find",
             ["label"] = a.Opt("label"),
             ["variant"] = variant,
-            ["policy"] = variant == "B" ? a.Opt("policy") ?? "adaptive" : null,
-            ["batch"] = variant == "B" ? opts.FixedBatchSize : null,
+            ["policy"] = variant is "B" or "E" ? a.Opt("policy") ?? "adaptive" : null,
+            ["batch"] = variant is "B" or "E" ? opts.FixedBatchSize : null,
             ["query"] = req.NamePattern,
             ["regex"] = req.UseRegex,
             ["hits"] = hits,
+            ["hitsHash"] = hitsHash,
             ["firstHitMs"] = Math.Round(firstHitMs, 2),
             ["totalMs"] = Math.Round(totalMs, 2),
             ["allocMB"] = Math.Round((g1.Alloc - g0.Alloc) / 1048576.0, 2),

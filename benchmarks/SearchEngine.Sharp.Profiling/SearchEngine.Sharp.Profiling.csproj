@@ -8,6 +8,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <DefineConstants Condition="'$(NewFacets)' == 'true'">$(DefineConstants);NEWFACETS</DefineConstants>
+    <DefineConstants Condition="'$(UnicodeOpt)' == 'true'">$(DefineConstants);UNICODEOPT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />

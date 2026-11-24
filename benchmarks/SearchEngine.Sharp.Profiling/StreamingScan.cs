@@ -175,6 +175,8 @@ public static class StreamingScan
         return new FileSystemEnumerable<string>(Path.GetFullPath(r.Root), static (ref FileSystemEntry e) => e.ToFullPath(), Recursive)
         {
             ShouldIncludePredicate = (ref FileSystemEntry e) => !e.IsDirectory && name.IsMatch(e.FileName) && facets.Matches(ref e),
+            // Recursive enumeration follows directory symlinks on Unix; /usr/bin/X11 -> . makes that explode.
+            ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
         };
     }
 

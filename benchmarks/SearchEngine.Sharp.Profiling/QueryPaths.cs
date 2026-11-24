@@ -112,12 +112,16 @@ static class QueryPaths
         {
             int n = int.Parse(nStr);
             var entries = Bench.Entries(n, seed, facets: true);
-            foreach (var (presetName, preset, queries) in new[]
+            foreach (var (presetName, preset0, queries) in new[]
                      {
                          ("Default", SearchTokenization.Default, DefaultQueries),
                          ("FileMask", SearchTokenization.FileMask, FileMaskQueries),
                      })
             {
+                var preset = preset0;
+#if UNICODEOPT
+                if (a.Int("unicode", 0) is var u and not 0) preset = preset.WithUnicodeMatching((UnicodeMatching)u);
+#endif
                 var sw = Stopwatch.StartNew();
                 var snap = IndexSnapshotBuilder.Build(entries, preset);
                 double buildMs = sw.Elapsed.TotalMilliseconds;
@@ -142,7 +146,7 @@ static class QueryPaths
     static void Emit(Args a, int n, string preset, string q, double med, double p95, double alloc, int hits, int iters, double buildMs, IndexSnapshot s)
         => Console.WriteLine(JsonSerializer.Serialize(new
         {
-            mode = "querypaths", label = a.Opt("label"), n, preset, q, medUs = med, p95Us = p95, allocB = alloc, hits, iters,
+            mode = "querypaths", label = a.Opt("label"), unicode = a.Int("unicode", 0), n, preset, q, medUs = med, p95Us = p95, allocB = alloc, hits, iters,
             buildMs = Math.Round(buildMs, 1), words = s.UniqueWordCount,
             tiered = Environment.GetEnvironmentVariable("DOTNET_TieredCompilation") ?? "default",
         }));

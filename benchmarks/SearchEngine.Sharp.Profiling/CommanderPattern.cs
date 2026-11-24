@@ -31,7 +31,7 @@ public sealed class Breakdown
 /// Stopwatch instrumentation and an injectable <see cref="IngestPublishOptions"/> (variant B).
 /// Logic, call order and allocations are kept identical to the original when instrumentation is off.
 /// </summary>
-public sealed class CommanderPattern(IngestPublishOptions? options, bool instrument)
+public sealed class CommanderPattern(IngestPublishOptions? options, bool instrument, bool fseScan = false)
 {
     public Breakdown B { get; } = new();
 
@@ -54,7 +54,7 @@ public sealed class CommanderPattern(IngestPublishOptions? options, bool instrum
         var (nameQuery, matchMethod, enableOperators) = BuildQuery(request);
 
         var ingestTask = ingestion.IngestAsync(
-            ScanFilesAsync(request.Root, paths, cancellationToken),
+            fseScan ? ScanFseAsync(request.Root, paths, cancellationToken) : ScanFilesAsync(request.Root, paths, cancellationToken),
             options,
             onPublished: e =>
             {
@@ -220,6 +220,46 @@ public sealed class CommanderPattern(IngestPublishOptions? options, bool instrum
             }
 
             await Task.Yield();
+        }
+    }
+
+    /// <summary>
+    /// Variant E scan: one recursive FileSystemEnumerable pass; size, time and attributes come from the
+    /// enumeration entry (one lstat per file on Unix), no Directory.Exists, no FileInfo.
+    /// Does not follow directory symlinks (the original Directory.Exists check does).
+    /// </summary>
+    async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> ScanFseAsync(
+        string rootDirectory, List<string> paths,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await Task.Yield();
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 };
+        var files = new System.IO.Enumeration.FileSystemEnumerable<(string Path, int NameStart, long Size, long Modified, long Attrs)>(
+            Path.GetFullPath(rootDirectory),
+            static (ref System.IO.Enumeration.FileSystemEntry e) =>
+            {
+                string full = e.ToFullPath();
+                return (full, full.Length - e.FileName.Length, e.Length, e.LastWriteTimeUtc.UtcTicks, (long)e.Attributes);
+            },
+            options)
+        {
+            ShouldIncludePredicate = static (ref System.IO.Enumeration.FileSystemEntry e) => !e.IsDirectory,
+            ShouldRecursePredicate = static (ref System.IO.Enumeration.FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
+        };
+        int sinceYield = 0;
+        foreach (var f in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string name = f.Path[f.NameStart..];
+#if NEWFACETS
+            var facets = FacetValues.Create([new("size", f.Size), new("modified", f.Modified), new("attrs", f.Attrs)]);
+#else
+            var facets = FacetValues.FromDictionary(new Dictionary<string, long> { ["size"] = f.Size, ["modified"] = f.Modified, ["attrs"] = f.Attrs });
+#endif
+            var id = paths.Count;
+            paths.Add(f.Path);
+            yield return new KeyValuePair<int, IndexedEntry>(id, new IndexedEntry(name, name, facets));
+            if (++sinceYield == 256) { sinceYield = 0; await Task.Yield(); }
         }
     }
 }

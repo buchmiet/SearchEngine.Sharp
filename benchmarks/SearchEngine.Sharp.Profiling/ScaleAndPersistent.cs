@@ -14,6 +14,9 @@ static class Scale
         int n = a.Int("n", 100_000);
         bool facets = a.Has("facets");
         var preset = a.Opt("preset") == "Default" ? SearchTokenization.Default : SearchTokenization.FileMask;
+#if UNICODEOPT
+        if (a.Int("unicode", 0) is var u and not 0) preset = preset.WithUnicodeMatching((UnicodeMatching)u);
+#endif
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         long heap0 = GC.GetTotalMemory(true);
         var entries = Bench.Entries(n, a.Int("seed", 2026), facets);
@@ -44,7 +47,7 @@ static class Scale
 
         Console.WriteLine(JsonSerializer.Serialize(new
         {
-            mode = "scale", label = a.Opt("label"), n, preset = a.Opt("preset") ?? "FileMask", facets,
+            mode = "scale", label = a.Opt("label"), unicode = a.Int("unicode", 0), n, preset = a.Opt("preset") ?? "FileMask", facets,
             buildMs = Math.Round(buildMs, 1),
             buildAllocMB = Math.Round((g1.Alloc - g0.Alloc) / 1048576.0, 1),
             gc0 = g1.G0 - g0.G0, gc1 = g1.G1 - g0.G1, gc2 = g1.G2 - g0.G2,
