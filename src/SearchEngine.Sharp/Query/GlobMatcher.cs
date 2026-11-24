@@ -154,9 +154,13 @@ internal static class GlobMatcher
             }
         }
 
+        /// <summary>False when the pattern needs the general matcher (<c>?</c>, several inner <c>*</c>).</summary>
+        internal bool IsSpecialized => _kind != Kind.General;
+
         internal bool IsMatch(ReadOnlySpan<char> word) => _kind switch
         {
-            Kind.Prefix => word.StartsWith(_head),
+            // First-character check before the vectorized compare: most words differ there.
+            Kind.Prefix => word.Length >= _head.Length && word[0] == _head[0] && word.StartsWith(_head),
             Kind.Suffix => word.EndsWith(_tail),
             Kind.Contains => word.IndexOf(_head) >= 0,
             Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail),
