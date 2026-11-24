@@ -16,6 +16,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Within / bigram index:** the bigram index is no longer built in `IndexSnapshotBuilder.Build`; it is built on the first `WordMatchMethod.Within` query against a snapshot and cached (same lazy pattern as the natural-sort permutation). Exact, glob and regex queries never need it, so snapshot builds are cheaper; the first Within query after each publish pays the bigram build instead.
+### Added
+
+- `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` — builds a facet bag without an intermediate dictionary (one per indexed file in scan workloads). Duplicate names throw `ArgumentException`.
+
+### Changed
+
+- `FacetValues` stores its pairs in two small arrays instead of a copied `Dictionary`; `FromDictionary` no longer allocates a second dictionary.
 
 ## [0.5.6] - 2026-08-16
 

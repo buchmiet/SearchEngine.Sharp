@@ -169,10 +169,11 @@ public static class IndexSnapshotBuilder
             FacetValues? facets = getFacets(entry);
             if (facets is not null && !facets.IsEmpty)
             {
-                foreach (var (facetName, value) in facets.Values)
+                for (int f = 0; f < facets.Count; f++)
                 {
+                    string facetName = facets.NameAt(f);
                     facetKeys.Add(facetName);
-                    pendingFacetValues.Add(new PendingFacetValue(documentIndex, facetName, value));
+                    pendingFacetValues.Add(new PendingFacetValue(documentIndex, facetName, facets.ValueAt(f)));
                 }
             }
 
