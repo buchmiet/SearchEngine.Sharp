@@ -2,7 +2,7 @@
 
 In-memory inverted index for .NET. Supports exact token match, substring (within-word) search, glob patterns (`*`, `?`), boolean expressions (AND / OR / NOT), numeric facet filters (ranges and bitmasks over dates, sizes, flags), natural sort ordering, and progressive indexing during long scans.
 
-Target: .NET 10 (C# 14). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
+Target: .NET 11 (C# 15). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
 
 **Tokenization presets:** `SearchTokenization.Default` (token-level search) and
 `SearchTokenization.FileMask` (whole-file-name classic masks — `*.pdf` is end-anchored).
@@ -20,7 +20,7 @@ Pass to `IndexUpdater`; details in [docs/query-semantics.md](docs/query-semantic
 
 ## Requirements
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- [.NET 11 SDK](https://dotnet.microsoft.com/download)
 
 ## Build
 
@@ -255,7 +255,7 @@ See [docs/glob-and-facets-report.md](docs/glob-and-facets-report.md) for glob an
 
 ## Platform notes
 
-Runs on any .NET 10-supported OS and CPU architecture.
+Runs on any .NET 11-supported OS and CPU architecture.
 
 `FastBitSet` set operations use runtime CPU detection:
 
