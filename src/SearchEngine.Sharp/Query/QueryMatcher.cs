@@ -102,12 +102,14 @@ internal static class QueryMatcher
 
     internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
     {
-        var result = qc.RentEmptyBitSet();
         var patternSpan = pattern.AsSpan();
         int minLen = GlobMatcher.MinMatchLength(patternSpan);
         bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
         var shape = new GlobMatcher.Shape(patternSpan);
+        if (!shape.IsSpecialized)
+            return MatchGlobGeneral(patternSpan, minLen, hasStar, qc, snapshot);
 
+        var result = qc.RentEmptyBitSet();
         var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
 
@@ -122,6 +124,34 @@ internal static class QueryMatcher
 
             int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
             if (!shape.IsMatch(wordsArray.Slice(wordStart, wordLength)))
+                continue;
+
+            int postingOffset = snapshot.PostingOffsets[wordIndex];
+            int postingCount = snapshot.PostingCounts[wordIndex];
+            for (int k = 0; k < postingCount; k++)
+                result.Add(snapshot.PostingDocIds[postingOffset + k]);
+        }
+
+        return result;
+    }
+
+    private static FastBitSet MatchGlobGeneral(ReadOnlySpan<char> patternSpan, int minLen, bool hasStar, QueryContext qc, IndexSnapshot snapshot)
+    {
+        var result = qc.RentEmptyBitSet();
+        var wordsArray = snapshot.WordsArray.AsSpan();
+        var wordLengths = snapshot.WordLengths.AsSpan();
+
+        for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
+        {
+            int wordLength = wordLengths[wordIndex];
+            if (wordLength < minLen)
+                break;
+
+            if (!hasStar && wordLength != patternSpan.Length)
+                continue;
+
+            int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
+            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength)))
                 continue;
 
             int postingOffset = snapshot.PostingOffsets[wordIndex];
