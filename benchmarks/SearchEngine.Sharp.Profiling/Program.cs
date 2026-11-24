@@ -33,6 +33,9 @@ switch (mode)
     case "unicode":
         UnicodeProbe.Run(a);
         break;
+    case "study":
+        FastChangingStudy.Run(a);
+        break;
     case "concurrency":
         Concurrency.Run(a);
         break;

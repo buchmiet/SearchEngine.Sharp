@@ -112,11 +112,15 @@ static class QueryPaths
         {
             int n = int.Parse(nStr);
             var entries = Bench.Entries(n, seed, facets: true);
-            foreach (var (presetName, preset0, queries) in new[]
+            foreach (var (presetName, preset0, queries) in (a.Opt("preset") is { } onlyPreset ? new[]
                      {
                          ("Default", SearchTokenization.Default, DefaultQueries),
                          ("FileMask", SearchTokenization.FileMask, FileMaskQueries),
-                     })
+                     }.Where(x => x.Item1 == onlyPreset) : new[]
+                     {
+                         ("Default", SearchTokenization.Default, DefaultQueries),
+                         ("FileMask", SearchTokenization.FileMask, FileMaskQueries),
+                     }))
             {
                 var preset = preset0;
 #if UNICODEOPT
@@ -128,6 +132,8 @@ static class QueryPaths
                 var engine = new SearchEngineSharp(new Bench.Fixed(snap));
                 foreach (var q in queries)
                 {
+                    if (a.Opt("only") is { } only && !q.Name.Contains(only, StringComparison.Ordinal))
+                        continue;
                     if (q.Sort == SearchSortMode.NaturalSortAscending)
                     {
                         // Cold: first natural-sort query on a fresh snapshot (one sample).
