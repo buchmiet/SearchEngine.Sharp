@@ -185,4 +185,18 @@ public class FileMaskTokenizationTests
         });
         return (engine, provider, updater);
     }
+
+    [Fact]
+    public void LowercaseWholeNameToken_ReusesTheEntryString_UppercaseNameIsLowercasedCopy()
+    {
+        string lower = string.Concat("x", "report-final.pdf"); // runtime instance, not an interned literal
+        string mixed = "Report-Final.PDF";
+        var snapshot = SearchEngine.Snapshots.IndexSnapshotBuilder.Build(
+            new Dictionary<int, string> { [1] = lower, [2] = mixed },
+            SearchTokenization.FileMask);
+
+        Assert.Contains(snapshot.ExactPostings.Keys, key => ReferenceEquals(key, lower));
+        Assert.Contains("report-final.pdf", snapshot.ExactPostings.Keys); // lowercased copy of the mixed-case name
+        Assert.DoesNotContain(snapshot.ExactPostings.Keys, key => ReferenceEquals(key, mixed));
+    }
 }

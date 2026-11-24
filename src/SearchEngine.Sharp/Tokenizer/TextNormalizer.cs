@@ -58,7 +58,7 @@ public static class TextNormalizer
         {
             if (separators.Contains(span[i]))
             {
-                EmitWordIfUnique(span, wordStart, i, uniqueWords, lookup, ref state, action);
+                EmitWordIfUnique(text, wordStart, i, uniqueWords, lookup, ref state, action);
                 wordStart = -1;
             }
             else if (wordStart < 0)
@@ -67,11 +67,11 @@ public static class TextNormalizer
             }
         }
 
-        EmitWordIfUnique(span, wordStart, span.Length, uniqueWords, lookup, ref state, action);
+        EmitWordIfUnique(text, wordStart, span.Length, uniqueWords, lookup, ref state, action);
     }
 
     private static void EmitWordIfUnique<TState>(
-        ReadOnlySpan<char> text,
+        string text,
         int wordStart,
         int wordEnd,
         HashSet<string> uniqueWords,
@@ -82,11 +82,15 @@ public static class TextNormalizer
         if (wordStart < 0)
             return;
 
-        var wordSpan = text[wordStart..wordEnd];
+        var wordSpan = text.AsSpan(wordStart, wordEnd - wordStart);
         if (lookup.Contains(wordSpan))
             return;
 
-        var word = CreateNormalizedWord(wordSpan);
+        // The whole text is one token (always so under SearchTokenization.FileMask) and is already
+        // lowercase: reuse the caller's string instead of allocating an identical copy.
+        var word = wordStart == 0 && wordEnd == text.Length && IsNormalized(wordSpan)
+            ? text
+            : CreateNormalizedWord(wordSpan);
         uniqueWords.Add(word);
         action(ref state, word);
     }
@@ -98,6 +102,20 @@ public static class TextNormalizer
             for (int i = 0; i < state.Length; i++)
                 destination[i] = ToLowerInvariantFast(state[i]);
         });
+    }
+
+    private static bool IsNormalized(ReadOnlySpan<char> word)
+    {
+        if (System.Text.Ascii.IsValid(word))
+            return !word.ContainsAnyInRange('A', 'Z');
+
+        foreach (char ch in word)
+        {
+            if (ToLowerInvariantFast(ch) != ch)
+                return false;
+        }
+
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -10,6 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Changed
+
+- **Snapshot build allocations:** when the whole `SearchText` is a single token (always under `SearchTokenization.FileMask`) and is already lowercase, the builder reuses that string instead of allocating a lowercased copy.
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed
