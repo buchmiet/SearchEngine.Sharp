@@ -53,10 +53,12 @@ internal static class QueryMatcher
         // For queries of length >= 2 use the bigram index to prune candidates.
         // The bigram maps to word indices already in length-descending order,
         // so the early-exit on length is preserved exactly as in the linear scan.
-        if (wordLength >= 2 && snapshot.BigramWordIndices.Count > 0)
+        bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
+        var bigramWordIndices = wordLength >= 2 ? snapshot.BigramWordIndices : null;
+        if (bigramWordIndices is { Count: > 0 })
         {
             int firstBigram = (word[0] << 16) | word[1];
-            if (!snapshot.BigramWordIndices.TryGetValue(firstBigram, out var candidates))
+            if (!bigramWordIndices.TryGetValue(firstBigram, out var candidates))
                 return result;
 
             foreach (int wordIndex in candidates)
@@ -76,7 +78,7 @@ internal static class QueryMatcher
                     snapshot.PostingCounts[wordIndex],
                     searchStart,
                     searchEnd,
-                    snapshot.Tokenization.GraphemeBoundaries);
+                    graphemeBoundaries);
             }
 
             return result;
@@ -97,7 +99,7 @@ internal static class QueryMatcher
                 snapshot.PostingCounts[wordIndex],
                 searchStart,
                 searchEnd,
-                snapshot.Tokenization.GraphemeBoundaries);
+                graphemeBoundaries);
         }
 
         return result;
@@ -166,10 +168,15 @@ internal static class QueryMatcher
         return result;
     }
 
-    // Slides a window of width target.Length across wordsArray[searchStart..searchEnd).
-    // On a match, all documents that contain the indexed word are added to result.
-    // Only one match is possible per word (a word either contains the substring or not),
-    // so the loop breaks immediately after the first match.
+    // Only called on a candidate match when UnicodeMatching.GraphemeBoundaries is set.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool IsOnGraphemeBoundaries(ReadOnlySpan<char> word, int start, int length)
+        => Ascii.IsValid(word) || TextFolder.IsOnGraphemeBoundaries(word, start, length);
+
+    // Finds target inside wordsArray[searchStart..searchEnd) with one vectorized IndexOf (instead of comparing
+    // a sliding window at every position). On a match, all documents that contain the indexed word are added to
+    // result; one match per word is enough. With UnicodeMatching.GraphemeBoundaries a match must start and end on
+    // grapheme cluster boundaries, so later occurrences are tried when the first one splits a cluster.
     private static void MatchSubstring(
         FastBitSet result,
         ReadOnlySpan<char> target,
@@ -181,22 +188,22 @@ internal static class QueryMatcher
         int searchEnd,
         bool graphemeBoundaries)
     {
-        int targetLength = target.Length;
-        int wordStart = searchStart;
-
-        while (searchStart + targetLength <= searchEnd)
+        var word = wordsArray[searchStart..searchEnd];
+        int from = 0;
+        while (true)
         {
-            if (wordsArray.Slice(searchStart, targetLength).SequenceEqual(target)
-                && (!graphemeBoundaries
-                    || Ascii.IsValid(wordsArray[wordStart..searchEnd])
-                    || TextFolder.IsOnGraphemeBoundaries(wordsArray[wordStart..searchEnd], searchStart - wordStart, targetLength)))
-            {
-                for (int k = 0; k < postingCount; k++)
-                    result.Add(postingDocIds[postingOffset + k]);
-                break;
-            }
+            int index = word[from..].IndexOf(target);
+            if (index < 0)
+                return;
 
-            searchStart++;
+            index += from;
+            if (!graphemeBoundaries || IsOnGraphemeBoundaries(word, index, target.Length))
+                break;
+
+            from = index + 1;
         }
+
+        for (int k = 0; k < postingCount; k++)
+            result.Add(postingDocIds[postingOffset + k]);
     }
 }
