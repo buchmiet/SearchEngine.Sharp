@@ -60,6 +60,21 @@ Theoretical amplification for growth-aware series: `(2+4+8+16+32+64+100)/100 = *
 
 All gates from the performance audit met: amplification **< 10×** (target **< 5×** exceeded), staleness **≤ 1 s**.
 
+## 0.6.0 — 1 million paths (staleness back-off)
+
+Measured 2026-11-24 on Linux x64 (Intel i7-10750H, one pinned core, .NET 11), Commander-style scan of a synthetic
+tree of 1,000,000 files, default `Adaptive` options, query `*.pdf` re-run after every publish:
+
+| Version | Publishes | Total time | Allocated | Gen2 GCs |
+|---------|----------:|-----------:|----------:|---------:|
+| 0.5.6 | 57–74 | 114–127 s | 29–36 GB | 41–54 |
+| 0.6.0 | 13–16 | ~20 s | ~2.7 GB | ~15 |
+
+Cause in 0.5.6: once one rebuild exceeds `MaxStaleness`, every buffered batch is stale when the rebuild ends, so
+the publisher rebuilt every `ChannelCapacity` (10k) entries. 0.6.0 also waits `AdaptiveMultiplier` × the last
+rebuild before a staleness publish (`StrictMaxStaleness = true` restores the old behaviour). For one-shot searches a
+plain scan is still much faster (1.3 s for the same tree): see [file-search-guide.md](file-search-guide.md#index-or-plain-scan).
+
 ## Historical baseline — pre-0.5.6 (fixed 2k adaptive)
 
 Before `GrowthAwareBatchCap`, adaptive behaved like fixed-2k on fast scans:
