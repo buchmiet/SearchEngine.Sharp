@@ -196,24 +196,20 @@ public class ProgressiveIndexIngestionTests
         var filter = FacetFilter.Range("size", 50_000, long.MaxValue);
         var sawPartialHits = false;
 
-        var ingestTask = ingestion.IngestAsync(
+        // Query from the publish callback: every intermediate snapshot is observed, independent of timing.
+        var result = await ingestion.IngestAsync(
             FacetedPathFeed.EnumerateAsync(count, seed: 17),
             new IngestPublishOptions
             {
                 Policy = IngestPublishPolicy.FixedBatch,
                 FixedBatchSize = 300,
+            },
+            onPublished: _ =>
+            {
+                int hits = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count;
+                if (hits > 0 && hits < count - 500)
+                    sawPartialHits = true;
             });
-
-        while (!ingestTask.IsCompleted)
-        {
-            int hits = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count;
-            if (hits > 0 && hits < count)
-                sawPartialHits = true;
-
-            await Task.Delay(5);
-        }
-
-        var result = await ingestTask;
 
         Assert.True(result.CompletedSuccessfully);
         Assert.True(sawPartialHits, "Expected filter-only queries to return partial results during ingestion.");
