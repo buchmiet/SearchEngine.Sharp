@@ -229,6 +229,9 @@ public class ProgressiveIndexIngestionTests
                 Policy = IngestPublishPolicy.Adaptive,
                 FixedBatchSize = 2_000,
                 GrowthAwareBatchCap = true,
+                // Only the batch cap may publish: timer publishes depend on machine load.
+                MaxStaleness = TimeSpan.FromHours(1),
+                MinTimerPublishBatch = int.MaxValue,
             });
 
         var (_, _, ingestionFixed) = Create();
@@ -239,12 +242,17 @@ public class ProgressiveIndexIngestionTests
                 Policy = IngestPublishPolicy.Adaptive,
                 FixedBatchSize = 2_000,
                 GrowthAwareBatchCap = false,
+                // Only the batch cap may publish: timer publishes depend on machine load.
+                MaxStaleness = TimeSpan.FromHours(1),
+                MinTimerPublishBatch = int.MaxValue,
             });
 
         Assert.True(growth.CompletedSuccessfully);
         Assert.True(fixedBatch.CompletedSuccessfully);
         Assert.True(growth.PublishCount < fixedBatch.PublishCount,
             $"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
+        Assert.Equal(5, growth.PublishCount);      // 2k, 4k, 8k, 16k, final 20k
+        Assert.Equal(10, fixedBatch.PublishCount); // every 2k
         Assert.True(growth.TotalRebuildCpu < fixedBatch.TotalRebuildCpu);
     }
 
