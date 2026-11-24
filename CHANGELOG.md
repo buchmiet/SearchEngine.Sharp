@@ -6,46 +6,68 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-24
+
+Public API changes are additive only (reflection comparison against 0.5.6); the platform moves to .NET 11.
+
+### Breaking (platform)
+
+- Target framework `net10.0` → `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` 10.0.11 → 11.0.0.
+  Consumers on .NET 10 stay on 0.5.6; no source changes are needed when moving to .NET 11.
+
 ### Added
 
-- `NameMatcher`: evaluates a query against one name with exactly the semantics of `Find` on an index holding only that name (same `SearchTokenization`, operators, globs, regex, Unicode options) — for one-shot searches that filter names during a directory scan instead of indexing them. Equivalence with the index is tested on random names and queries for both presets.
-
-### Documentation
-
-- `docs/file-search-guide.md`: new section *Index or plain scan?* with measured numbers; the recommended scan uses one `FileSystemEnumerable` pass (no `Directory.Exists` + `FileInfo`), does not follow directory symlinks or junctions, keeps the id → path map in a `ConcurrentDictionary`, and describes files that vanish during the scan.
-
-### Changed
-
-- **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
+- `NameMatcher`: evaluates a query against one name with exactly the semantics of `Find` on an index that holds
+  only that name (same `SearchTokenization`, operators, globs, regex, Unicode options). Use it for one-shot
+  searches that filter names during a directory scan instead of building an index.
+- `UnicodeMatching` flags and `SearchTokenization.WithUnicodeMatching(...)` (opt-in; default unchanged): NFC
+  composition, case folding beyond per-character lowercase (`ß`→`ss`, `ς`→`σ`, `İ`→`i`, …), accent folding, and
+  grapheme-cluster boundaries for `Within`. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
+- `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` — a facet bag without an intermediate
+  dictionary. Duplicate names throw `ArgumentException`.
+- `IngestPublishOptions.StrictMaxStaleness` (default `false`) — restores the 0.5.6 staleness behaviour (see Fixed).
 
 ### Fixed
 
-- `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting with `NOT AND` or `NOT OR` (for example `NOT AND *.pdf`). The dangling operators are now dropped like any other leading binary operator.
+- **Progressive ingestion at scale:** under `Adaptive`, once one full rebuild took longer than `MaxStaleness`
+  (about 0.4–0.5 million file names on a laptop-class CPU), every batch was already stale when the previous
+  rebuild finished and the publisher rebuilt back to back every `ChannelCapacity` (10k) entries. A 1M-file scan
+  made 57–74 full rebuilds, allocated ~30 GB and took ~2 minutes on one core. A staleness-triggered publish now
+  also waits `AdaptiveMultiplier` × the last rebuild duration (13–16 rebuilds, ~20 s). Unchanged while rebuilds
+  are faster than `MaxStaleness / AdaptiveMultiplier`.
+- `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
+  with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
+
 ### Changed
 
-- **Within / bigram index:** the bigram index is no longer built in `IndexSnapshotBuilder.Build`; it is built on the first `WordMatchMethod.Within` query against a snapshot and cached (same lazy pattern as the natural-sort permutation). Exact, glob and regex queries never need it, so snapshot builds are cheaper; the first Within query after each publish pays the bigram build instead.
-### Added
+- **Bigram index is lazy:** built on the first `WordMatchMethod.Within` query against a snapshot instead of in
+  every `Build` (16–25% of build time; Exact, glob and regex never use it). The first `Within` query after a
+  publish pays it (1M names: ~0.3 s once per snapshot).
+- **Within:** a candidate word is searched with one vectorized `IndexOf` instead of comparing a sliding window at
+  every position: 1.3–5× faster at 1M names on x64 (`within-3` 1.78 → 0.75 ms, one-character queries 12.7 → 3.4 ms).
+- **Glob leaves** `abc*`, `*abc`, `*abc*`, `ab*cd` (no `?`) use vectorized span primitives: 4–6× faster for
+  suffix/infix patterns on whole-file-name indexes (`*.pdf` over 1M names: 42 → 8 ms). Results unchanged.
+- **Snapshot build allocations:** `FacetValues` stores arrays instead of a copied dictionary; facet values go
+  straight into their columns when the entry count is known; an already-lowercase whole-text token reuses the
+  caller's string. 1M file names with facets: build allocations 812 → 343 MB, peak RSS 1345 → 796 MB.
 
-- `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` — builds a facet bag without an intermediate dictionary (one per indexed file in scan workloads). Duplicate names throw `ArgumentException`.
+### Documentation
 
-### Changed
+- `docs/file-search-guide.md`: *Index or plain scan?* with measured numbers; scan recipes use one
+  `FileSystemEnumerable` pass, do not follow directory symlinks or junctions, keep id → path in a
+  `ConcurrentDictionary`, and describe files that vanish during a scan.
 
-- `FacetValues` stores its pairs in two small arrays instead of a copied `Dictionary`; `FromDictionary` no longer allocates a second dictionary.
-### Changed
+### Tests
 
-- **Glob leaves:** patterns of the form `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) are matched with vectorized span primitives (`StartsWith`/`EndsWith`/`IndexOf`) instead of the general backtracking matcher. Results are unchanged (randomized equivalence test).
-- **Progressive ingestion at scale:** under `Adaptive`, once one full rebuild took longer than `MaxStaleness` (about 400–500k file-name entries on a laptop-class x64 CPU), every batch was already stale when the previous rebuild ended, so the publisher rebuilt back to back every `ChannelCapacity` (10k) entries: a 1M-file scan made ~60–75 publishes and spent ~100 s rebuilding instead of ~10 s. A staleness-triggered publish now also waits `AdaptiveMultiplier` × the last rebuild duration. Behaviour is unchanged while rebuilds are faster than `MaxStaleness / AdaptiveMultiplier`.
+- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); leading `NOT AND`/`NOT OR`; lazy bigram index vs brute
+  force with concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
+  columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
+  `NameMatcher` vs index (20 queries × 4 presets).
 
-### Added
+### Benchmarks
 
-- `IngestPublishOptions.StrictMaxStaleness` (default `false`) restores the previous behaviour.
-- Snapshot build writes facet values straight into their columns when the entry count is known up front (dictionaries, `IndexUpdater`), instead of buffering one `(ordinal, name, value)` record per facet value.
-### Changed
-
-- **Snapshot build allocations:** when the whole `SearchText` is a single token (always under `SearchTokenization.FileMask`) and is already lowercase, the builder reuses that string instead of allocating a lowercased copy.
-### Added
-
-- `UnicodeMatching` flags and `SearchTokenization.WithUnicodeMatching(...)`: optional NFC composition, case folding beyond per-character lowercase, accent folding, and grapheme-boundary checks for `Within`. Default (`None`) keeps the previous behaviour. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
+- `benchmarks/SearchEngine.Sharp.Profiling` (not part of the solution build): Commander-style file search harness,
+  corpus generator, query-path, scale, persistent-index and concurrency modes, scripts.
 
 ## [0.5.6] - 2026-08-16
 
@@ -137,6 +159,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Initial release: in-memory inverted index with exact/within token search, boolean operators, natural sort, snapshot-based concurrent reads, and DI registration.
 
+[0.6.0]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.6...v0.6.0
+[0.5.6]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.4...v0.5.5
 [0.5.3]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.1...v0.5.2
