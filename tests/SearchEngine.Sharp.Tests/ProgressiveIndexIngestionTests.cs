@@ -299,4 +299,72 @@ public class ProgressiveIndexIngestionTests
             }
         }
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Adaptive_WhenRebuildExceedsMaxStaleness_BacksOffUnlessStrict(bool strict)
+    {
+        // Every rebuild takes 120 ms, longer than MaxStaleness (30 ms): each new batch is stale
+        // as soon as the previous rebuild ends.
+        var updater = new SlowUpdater(new IndexUpdater(new IndexSnapshotProvider()), TimeSpan.FromMilliseconds(120));
+        var ingestion = new ProgressiveIndexIngestion(updater);
+        var publishEnds = new List<(long End, TimeSpan Rebuild)>();
+
+        await ingestion.IngestAsync(
+            SlowFeed(count: 600, every: 10, delay: TimeSpan.FromMilliseconds(15)),
+            new IngestPublishOptions
+            {
+                Policy = IngestPublishPolicy.Adaptive,
+                FixedBatchSize = 1_000_000,
+                MaxStaleness = TimeSpan.FromMilliseconds(30),
+                MinInterval = TimeSpan.Zero,
+                MinTimerPublishBatch = 1,
+                StrictMaxStaleness = strict,
+            },
+            onPublished: e => publishEnds.Add((System.Diagnostics.Stopwatch.GetTimestamp(), e.RebuildDuration)));
+
+        // Gap between the end of one publish and the start of the next.
+        var gaps = new List<TimeSpan>();
+        for (int i = 1; i < publishEnds.Count - 1; i++) // the last publish is the final flush
+        {
+            long nextStart = publishEnds[i].End - publishEnds[i].Rebuild.Ticks * System.Diagnostics.Stopwatch.Frequency / TimeSpan.TicksPerSecond;
+            gaps.Add(System.Diagnostics.Stopwatch.GetElapsedTime(publishEnds[i - 1].End, nextStart));
+        }
+
+        Assert.NotEmpty(gaps);
+        if (strict)
+            Assert.True(gaps.Min() < TimeSpan.FromMilliseconds(60), $"strict: smallest gap {gaps.Min().TotalMilliseconds} ms");
+        else
+            Assert.True(gaps.Min() >= TimeSpan.FromMilliseconds(200), $"backoff: smallest gap {gaps.Min().TotalMilliseconds} ms (expected >= 2 x 120 ms)");
+    }
+
+    private static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> SlowFeed(int count, int every, TimeSpan delay)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (i % every == 0)
+                await Task.Delay(delay);
+            yield return new(i, new IndexedEntry($"file-{i}.txt", $"file-{i}.txt"));
+        }
+    }
+
+    private sealed class SlowUpdater(IndexUpdater inner, TimeSpan delay) : IIndexUpdater
+    {
+        public int EntryCount => inner.EntryCount;
+        public bool ContainsEntry(int id) => inner.ContainsEntry(id);
+        public void RebuildFrom(IDictionary<int, string> entries) => inner.RebuildFrom(entries);
+        public void RebuildFrom(IDictionary<int, IndexedEntry> entries) => inner.RebuildFrom(entries);
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => inner.RebuildFromAsync(entries, progress, ct);
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => inner.RebuildFromAsync(entries, progress, ct);
+        public void AddEntry(int id, string text) => inner.AddEntry(id, text);
+        public void AddEntry(int id, IndexedEntry entry) => inner.AddEntry(id, entry);
+        public bool RemoveEntry(int id) => inner.RemoveEntry(id);
+        public bool RefreshEntry(int id, string text) => inner.RefreshEntry(id, text);
+        public bool RefreshEntry(int id, IndexedEntry entry) => inner.RefreshEntry(id, entry);
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries) { Thread.Sleep(delay); inner.AddOrUpdateEntries(entries); }
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries) { Thread.Sleep(delay); inner.AddOrUpdateEntries(entries); }
+        public int RemoveEntries(IEnumerable<int> ids) => inner.RemoveEntries(ids);
+        public void Clear() => inner.Clear();
+    }
 }

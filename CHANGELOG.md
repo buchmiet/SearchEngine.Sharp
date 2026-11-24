@@ -10,6 +10,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Fixed
+
+- **Progressive ingestion at scale:** under `Adaptive`, once one full rebuild took longer than `MaxStaleness` (about 400–500k file-name entries on a laptop-class x64 CPU), every batch was already stale when the previous rebuild ended, so the publisher rebuilt back to back every `ChannelCapacity` (10k) entries: a 1M-file scan made ~60–75 publishes and spent ~100 s rebuilding instead of ~10 s. A staleness-triggered publish now also waits `AdaptiveMultiplier` × the last rebuild duration. Behaviour is unchanged while rebuilds are faster than `MaxStaleness / AdaptiveMultiplier`.
+
+### Added
+
+- `IngestPublishOptions.StrictMaxStaleness` (default `false`) restores the previous behaviour.
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed
