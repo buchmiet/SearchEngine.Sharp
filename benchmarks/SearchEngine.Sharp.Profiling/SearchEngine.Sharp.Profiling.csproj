@@ -12,6 +12,10 @@
     <DefineConstants Condition="'$(UnicodeOpt)' != 'false'">$(DefineConstants);UNICODEOPT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <!-- scripts/ holds stand-alone file-based programs (apidiff.cs), not part of this project -->
+    <Compile Remove="scripts/**" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 </Project>
