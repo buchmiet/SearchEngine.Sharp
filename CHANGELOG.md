@@ -10,6 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Fixed
+
+- `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting with `NOT AND` or `NOT OR` (for example `NOT AND *.pdf`). The dangling operators are now dropped like any other leading binary operator.
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed

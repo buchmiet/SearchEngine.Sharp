@@ -484,4 +484,28 @@ public class SearchEngineOperatorTests
 
         Assert.Equal(results.Count, count);
     }
+
+    [Theory]
+    [InlineData("NOT AND digital")]
+    [InlineData("NOT OR digital")]
+    [InlineData("NOT AND NOT OR digital")]
+    public void LeadingNotFollowedByBinaryOperator_DoesNotThrow_AndDropsTheDanglingOperators(string expression)
+    {
+        var (engine, _) = CreateWatchIndex();
+
+        var result = engine.Find(expression, WordMatchMethod.Exact, enableOperators: true);
+
+        Assert.Equal(engine.Find("digital", WordMatchMethod.Exact, enableOperators: true), result);
+    }
+
+    [Fact]
+    public void LeadingNotAnd_FileMaskPreset_DoesNotThrow()
+    {
+        var provider = new IndexSnapshotProvider();
+        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = "report.pdf", [2] = "notes.txt" });
+        var engine = new SearchEngineSharp(provider);
+
+        Assert.Equal([1], engine.Find("NOT AND *.pdf", WordMatchMethod.Exact, enableOperators: true));
+    }
 }

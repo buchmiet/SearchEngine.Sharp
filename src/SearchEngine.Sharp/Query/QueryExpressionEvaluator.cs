@@ -174,6 +174,15 @@ internal static class QueryExpressionEvaluator
         for (int i = 0; i < tokens.Count - 1; i++)
         {
             CorrectOperationSequence(tokens, ref i);
+            if (i < 0)
+            {
+                // A leading "NOT AND" / "NOT OR" collapsed into a leading binary operator:
+                // strip it like any other leading binary operator (rule 1).
+                while (tokens.Count > 0 && tokens[0].Operation is WordOperations.Or or WordOperations.And)
+                    tokens.RemoveAt(0);
+                continue;
+            }
+
             InsertDefaultAnd(tokens, i);
         }
     }
