@@ -35,6 +35,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Snapshot build allocations:** when the whole `SearchText` is a single token (always under `SearchTokenization.FileMask`) and is already lowercase, the builder reuses that string instead of allocating a lowercased copy.
+### Added
+
+- `UnicodeMatching` flags and `SearchTokenization.WithUnicodeMatching(...)`: optional NFC composition, case folding beyond per-character lowercase, accent folding, and grapheme-boundary checks for `Within`. Default (`None`) keeps the previous behaviour. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
 
 ## [0.5.6] - 2026-08-16
 

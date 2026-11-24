@@ -38,6 +38,14 @@ queries always use `snapshot.Tokenization.QuerySeparators`.
 static SearchTokenization Default { get; }   // token-level (legacy behavior)
 static SearchTokenization FileMask { get; }  // whole-name index; whitespace query split
 static SearchTokenization Create(string indexSeparators, string querySeparators);
+UnicodeMatching UnicodeMatching { get; }                              // None for built-in presets
+SearchTokenization WithUnicodeMatching(UnicodeMatching options);      // same separators + options
+```
+
+### `UnicodeMatching` (flags)
+
+```csharp
+None = 0, Compose = 1 /* NFC */, CaseFold = 2, RemoveDiacritics = 4 /* implies Compose */, GraphemeBoundaries = 8 /* Within only */
 
 string IndexSeparators { get; }
 string QuerySeparators { get; }

@@ -23,8 +23,9 @@ public sealed class SearchTokenization
     /// </summary>
     public static SearchTokenization FileMask { get; } = new(string.Empty, FileMaskQuerySeparators);
 
-    private SearchTokenization(string indexSeparators, string querySeparators)
+    private SearchTokenization(string indexSeparators, string querySeparators, UnicodeMatching unicodeMatching = UnicodeMatching.None)
     {
+        UnicodeMatching = unicodeMatching;
         IndexSeparators = indexSeparators;
         QuerySeparators = querySeparators;
         IndexSeparatorValues = SearchValues.Create(indexSeparators);
@@ -40,6 +41,24 @@ public sealed class SearchTokenization
     internal SearchValues<char> IndexSeparatorValues { get; }
 
     internal SearchValues<char> QuerySeparatorValues { get; }
+
+    /// <summary>Unicode matching options of this preset (<see cref="UnicodeMatching.None"/> for the built-in presets).</summary>
+    public UnicodeMatching UnicodeMatching { get; }
+
+    /// <summary>
+    /// Returns a preset with the same separators and the given Unicode matching options, for example
+    /// <c>SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold)</c>.
+    /// The options are stored in each snapshot, so indexed text and queries are always folded alike.
+    /// </summary>
+    public SearchTokenization WithUnicodeMatching(UnicodeMatching options)
+        => new(IndexSeparators, QuerySeparators, options);
+
+    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching, isRegex: false);
+
+    internal string FoldQuery(string expression, WordMatchMethod method)
+        => TextFolder.Fold(expression, UnicodeMatching, isRegex: method == WordMatchMethod.Regex);
+
+    internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 
     /// <summary>Creates a custom preset from explicit separator strings.</summary>
     public static SearchTokenization Create(string indexSeparators, string querySeparators)
