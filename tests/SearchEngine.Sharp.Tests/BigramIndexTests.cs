@@ -27,4 +27,38 @@ public class BigramIndexTests
         Assert.Equal(1, anList!.Count(i => i == wordIndex));
         Assert.Equal(1, naList!.Count(i => i == wordIndex));
     }
+
+    [Fact]
+    public void LazyBigramIndex_WithinMatchesBruteForceSubstringScan_AndIsSharedAcrossConcurrentFirstCallers()
+    {
+        var rng = new Random(5);
+        var entries = new Dictionary<int, string>();
+        for (int id = 0; id < 2_000; id++)
+        {
+            var chars = new char[rng.Next(1, 12)];
+            for (int c = 0; c < chars.Length; c++) chars[c] = "abcdeéx1"[rng.Next(8)];
+            entries[id] = new string(chars) + " " + new string(chars, 0, chars.Length / 2 + 1);
+        }
+
+        var provider = new IndexSnapshotProvider();
+        new IndexUpdater(provider).RebuildFrom(entries);
+        var engine = new SearchEngineSharp(provider);
+        string[] queries = ["ab", "ba", "e", "éx", "x1", "abc", "dd", "1"];
+
+        // First Within queries race to build the lazy index; all must agree with a brute-force scan.
+        var results = new List<int>[queries.Length];
+        Parallel.For(0, queries.Length, q => results[q] = engine.Find(queries[q], WordMatchMethod.Within));
+
+        for (int q = 0; q < queries.Length; q++)
+        {
+            var expected = entries
+                .Where(e => e.Value.Split(' ').Any(token => token.Contains(queries[q], StringComparison.Ordinal)))
+                .Select(e => e.Key)
+                .Order()
+                .ToList();
+            Assert.Equal(expected, results[q].Order().ToList());
+        }
+
+        Assert.Same(provider.Current.BigramWordIndices, provider.Current.BigramWordIndices);
+    }
 }

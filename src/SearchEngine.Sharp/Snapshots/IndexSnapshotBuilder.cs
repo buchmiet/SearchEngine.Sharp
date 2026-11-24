@@ -28,11 +28,12 @@ namespace SearchEngine.Snapshots;
 //   let the query engine navigate both flat arrays without pointer indirection.
 //   This improves cache locality significantly for large indexes.
 //
-// Phase 4 — Build bigram index.
+// Phase 4 — Bigram index (lazy, see IndexSnapshot.BigramWordIndices).
 //   For every pair of consecutive characters in each word, record the word's
 //   ordinal under that bigram key. At query time, MatchWithin looks up only
 //   the candidate words that share the query's first bigram, cutting the
-//   search space from O(vocab) to O(avg bigram list length).
+//   search space from O(vocab) to O(avg bigram list length). Built on the first
+//   Within query against a snapshot, not during Build.
 
 /// <summary>
 /// Builds immutable IndexSnapshot instances.
@@ -229,30 +230,8 @@ public static class IndexSnapshotBuilder
             progress?.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
         }
 
-        // Phase 4: build bigram index.
-        // Bigram key = (word[j] << 16) | word[j+1] — two chars packed into one int.
-        // Because wordDescSpan is already length-descending, iterating i = 0..N-1
-        // adds word indices in the right order so each candidate list is also
-        // length-descending. MatchWithin can then break on the same early-exit condition.
-        var bigramLists = new Dictionary<int, List<int>>();
-        for (int i = 0; i < wordDescSpan.Length; i++)
-        {
-            var word = wordDescSpan[i].Word;
-            int prev = -1;
-            for (int j = 0; j + 1 < word.Length; j++)
-            {
-                int bigram = (word[j] << 16) | word[j + 1];
-                if (bigram == prev) continue; // skip duplicate bigrams within same word
-                prev = bigram;
-                if (!bigramLists.TryGetValue(bigram, out var list))
-                    bigramLists[bigram] = list = [];
-                if (list.Count == 0 || list[^1] != i)
-                    list.Add(i);
-            }
-        }
-        var bigramWordIndices = new Dictionary<int, int[]>(bigramLists.Count);
-        foreach (var (bigram, list) in bigramLists)
-            bigramWordIndices[bigram] = list.ToArray();
+        // Phase 4 (bigram index) is built lazily by IndexSnapshot on the first Within query:
+        // Exact, glob and regex queries never read it, and it is the largest build phase.
 
         var recordIdsArr = recordIds.ToArray();
         var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues);
@@ -266,7 +245,7 @@ public static class IndexSnapshotBuilder
             wordEnds: wordEnds,
             wordLengths: wordLengths,
             postingCounts: postingCounts,
-            bigramWordIndices: bigramWordIndices,
+            bigramWordIndices: null,
             sortTexts: [.. sortTexts],
             sortedPermutation: null,
             facetColumns: facetColumns,

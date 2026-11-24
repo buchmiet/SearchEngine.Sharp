@@ -89,7 +89,12 @@ public sealed class IndexSnapshot
     // Bigram index: first two characters of query packed as (char0 << 16 | char1)
     // → int[] of word indices that contain that bigram, in length-descending order.
     // Used by MatchWithin to skip words that cannot possibly match (pruning).
-    internal readonly Dictionary<int, int[]> BigramWordIndices;
+    // Built lazily on first use (only Within queries need it); concurrent first callers may
+    // both build it, Interlocked.CompareExchange keeps one result, as for the sort permutation.
+    private Dictionary<int, int[]>? _bigramWordIndices;
+
+    internal Dictionary<int, int[]> BigramWordIndices
+        => Volatile.Read(ref _bigramWordIndices) ?? BuildBigramWordIndices();
 
     // Original sort texts parallel to RecordIds, used to build the sorted permutation on demand.
     private readonly string[] _sortTexts;
@@ -118,7 +123,7 @@ public sealed class IndexSnapshot
         int[] wordEnds,
         int[] wordLengths,
         int[] postingCounts,
-        Dictionary<int, int[]> bigramWordIndices,
+        Dictionary<int, int[]>? bigramWordIndices,
         string[] sortTexts,
         int[]? sortedPermutation,
         Dictionary<string, long[]> facetColumns,
@@ -134,13 +139,43 @@ public sealed class IndexSnapshot
         WordEnds = wordEnds;
         WordLengths = wordLengths;
         PostingCounts = postingCounts;
-        BigramWordIndices = bigramWordIndices;
+        _bigramWordIndices = bigramWordIndices;
         _sortTexts = sortTexts;
         _sortedPermutation = sortedPermutation;
         FacetColumns = facetColumns;
         Tokenization = tokenization;
         DocumentCount = documentCount;
         UniqueWordCount = uniqueWordCount;
+    }
+
+    // Words are stored in descending length order, so iterating i = 0..N-1 adds word indices in
+    // the same order to every list: each candidate list is length-descending and MatchWithin can
+    // stop at the first word shorter than the query.
+    private Dictionary<int, int[]> BuildBigramWordIndices()
+    {
+        var bigramLists = new Dictionary<int, List<int>>();
+        var words = WordsArray.AsSpan();
+        for (int i = 0; i < WordLengths.Length; i++)
+        {
+            var word = words.Slice(WordEnds[i] - WordLengths[i], WordLengths[i]);
+            int prev = -1;
+            for (int j = 0; j + 1 < word.Length; j++)
+            {
+                int bigram = (word[j] << 16) | word[j + 1];
+                if (bigram == prev) continue; // skip duplicate bigrams within same word
+                prev = bigram;
+                if (!bigramLists.TryGetValue(bigram, out var list))
+                    bigramLists[bigram] = list = [];
+                if (list.Count == 0 || list[^1] != i)
+                    list.Add(i);
+            }
+        }
+
+        var built = new Dictionary<int, int[]>(bigramLists.Count);
+        foreach (var (bigram, list) in bigramLists)
+            built[bigram] = list.ToArray();
+
+        return Interlocked.CompareExchange(ref _bigramWordIndices, built, null) ?? built;
     }
 
     // Returns (or lazily builds) an array of document ordinals sorted by natural sort key.

@@ -13,6 +13,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting with `NOT AND` or `NOT OR` (for example `NOT AND *.pdf`). The dangling operators are now dropped like any other leading binary operator.
+### Changed
+
+- **Within / bigram index:** the bigram index is no longer built in `IndexSnapshotBuilder.Build`; it is built on the first `WordMatchMethod.Within` query against a snapshot and cached (same lazy pattern as the natural-sort permutation). Exact, glob and regex queries never need it, so snapshot builds are cheaper; the first Within query after each publish pays the bigram build instead.
 
 ## [0.5.6] - 2026-08-16
 
