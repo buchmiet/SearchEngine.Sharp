@@ -32,6 +32,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `IngestPublishOptions.StrictMaxStaleness` (default `false`) restores the previous behaviour.
 - Snapshot build writes facet values straight into their columns when the entry count is known up front (dictionaries, `IndexUpdater`), instead of buffering one `(ordinal, name, value)` record per facet value.
+### Changed
+
+- **Snapshot build allocations:** when the whole `SearchText` is a single token (always under `SearchTokenization.FileMask`) and is already lowercase, the builder reuses that string instead of allocating a lowercased copy.
 
 ## [0.5.6] - 2026-08-16
 
