@@ -10,6 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Added
+
+- `UnicodeMatching` flags and `SearchTokenization.WithUnicodeMatching(...)`: optional NFC composition, case folding beyond per-character lowercase, accent folding, and grapheme-boundary checks for `Within`. Default (`None`) keeps the previous behaviour. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed

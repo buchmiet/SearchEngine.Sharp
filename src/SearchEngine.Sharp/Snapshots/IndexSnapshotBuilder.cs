@@ -138,7 +138,7 @@ public static class IndexSnapshotBuilder
                 totalPostings);
 
             TextNormalizer.ForEachUniqueWord(
-                getSearchText(entry),
+                tokenization.FoldIndexText(getSearchText(entry)),
                 uniqueWords,
                 indexSeparators,
                 ref buildState,

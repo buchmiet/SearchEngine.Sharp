@@ -81,6 +81,26 @@ FileMask behavioral notes (by design — not bugs):
 Switching presets requires a full `RebuildFrom` from the application's file table; the
 preset is fixed per snapshot.
 
+### Unicode matching
+
+By default text is lowercased one UTF-16 code unit at a time with `char.ToLowerInvariant`; there is no
+normalization. Consequences: a decomposed name (`e` + U+0301, common on macOS) is not found by a composed
+query and vice versa; `ß` ≠ `ss`, final `ς` ≠ `σ`, and `İ` stays `İ`; `Within` can match inside a grapheme
+cluster (`cafe` inside a decomposed `café`, one emoji inside a ZWJ family sequence).
+
+`SearchTokenization.WithUnicodeMatching(UnicodeMatching)` opts in per preset (stored in each snapshot,
+applied to indexed `SearchText` and to queries; ASCII text is never touched):
+
+| Flag | Effect |
+|------|--------|
+| `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
+| `CaseFold` | `ß`/`ẞ`→`ss`, `ς`→`σ`, `İ`→`i`, `ſ`→`s`, `µ`→`μ`, Greek symbol variants, ligatures U+FB00–FB06. Not applied to regex patterns |
+| `RemoveDiacritics` | drops combining marks after decomposition (`é`→`e`), plus `ł ø đ ħ ı` → `l o d h i`; implies `Compose` |
+| `GraphemeBoundaries` | `Within` matches must start and end on extended grapheme cluster boundaries (UAX #29) |
+
+Regex patterns are composed (and stripped of diacritics with `RemoveDiacritics`) but not case-folded,
+because folding would change character classes; write `ss` for a folded `ß`. `SortText` is never folded.
+
 ## Index-side tokenization (Default preset)
 
 Separator characters (`SearchTokenization.Default.IndexSeparators`):

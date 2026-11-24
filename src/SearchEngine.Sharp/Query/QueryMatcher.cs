@@ -1,3 +1,4 @@
+using System.Text;
 using SearchEngine;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
@@ -74,7 +75,8 @@ internal static class QueryMatcher
                     snapshot.PostingOffsets[wordIndex],
                     snapshot.PostingCounts[wordIndex],
                     searchStart,
-                    searchEnd);
+                    searchEnd,
+                    snapshot.Tokenization.GraphemeBoundaries);
             }
 
             return result;
@@ -94,7 +96,8 @@ internal static class QueryMatcher
                 snapshot.PostingOffsets[wordIndex],
                 snapshot.PostingCounts[wordIndex],
                 searchStart,
-                searchEnd);
+                searchEnd,
+                snapshot.Tokenization.GraphemeBoundaries);
         }
 
         return result;
@@ -144,13 +147,18 @@ internal static class QueryMatcher
         int postingOffset,
         int postingCount,
         int searchStart,
-        int searchEnd)
+        int searchEnd,
+        bool graphemeBoundaries)
     {
         int targetLength = target.Length;
+        int wordStart = searchStart;
 
         while (searchStart + targetLength <= searchEnd)
         {
-            if (wordsArray.Slice(searchStart, targetLength).SequenceEqual(target))
+            if (wordsArray.Slice(searchStart, targetLength).SequenceEqual(target)
+                && (!graphemeBoundaries
+                    || Ascii.IsValid(wordsArray[wordStart..searchEnd])
+                    || TextFolder.IsOnGraphemeBoundaries(wordsArray[wordStart..searchEnd], searchStart - wordStart, targetLength)))
             {
                 for (int k = 0; k < postingCount; k++)
                     result.Add(postingDocIds[postingOffset + k]);
