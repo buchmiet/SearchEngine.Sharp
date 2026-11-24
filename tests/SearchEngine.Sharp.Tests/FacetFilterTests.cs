@@ -251,4 +251,25 @@ public class FacetFilterTests
         Assert.Throws<ArgumentException>(() => FacetValues.Create([new("size", 1L), new("size", 2L)]));
         Assert.Same(FacetValues.Empty, FacetValues.Create(ReadOnlySpan<KeyValuePair<string, long>>.Empty));
     }
+
+    [Fact]
+    public void FacetColumns_SameWhetherEntryCountIsKnownUpFrontOrNot()
+    {
+        var entries = new Dictionary<int, IndexedEntry>();
+        for (int id = 0; id < 500; id++)
+            entries[id * 3] = new($"f{id}.pdf", $"f{id}.pdf", id % 7 == 0 ? null : FacetValues.Create([new("size", id * 10L), new("attrs", id % 4)]));
+
+        var known = new SearchEngineSharp(new FixedProvider(SearchEngine.Snapshots.IndexSnapshotBuilder.Build(entries)));
+        var streamed = new SearchEngineSharp(new FixedProvider(SearchEngine.Snapshots.IndexSnapshotBuilder.Build(entries.Select(e => e))));
+        var filter = FacetFilter.Combine(FacetFilter.Range("size", 1000, 3000), FacetFilter.Mask("attrs", 0x1));
+
+        var expected = entries.Where(e => e.Value.Facets is not null && e.Key / 3 * 10 is >= 1000 and <= 3000 && (e.Key / 3 % 4 & 1) == 1).Select(e => e.Key).Order();
+        Assert.Equal(expected, known.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order());
+        Assert.Equal(expected, streamed.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order());
+    }
+
+    private sealed class FixedProvider(SearchEngine.Snapshots.IndexSnapshot snapshot) : IIndexSnapshotProvider
+    {
+        public SearchEngine.Snapshots.IndexSnapshot Current => snapshot;
+    }
 }

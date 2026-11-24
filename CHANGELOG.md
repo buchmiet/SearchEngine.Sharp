@@ -17,6 +17,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `FacetValues` stores its pairs in two small arrays instead of a copied `Dictionary`; `FromDictionary` no longer allocates a second dictionary.
+- Snapshot build writes facet values straight into their columns when the entry count is known up front (dictionaries, `IndexUpdater`), instead of buffering one `(ordinal, name, value)` record per facet value.
 
 ## [0.5.6] - 2026-08-16
 

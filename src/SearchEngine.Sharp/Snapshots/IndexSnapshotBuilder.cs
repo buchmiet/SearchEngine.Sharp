@@ -116,6 +116,7 @@ public static class IndexSnapshotBuilder
         var uniqueWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var facetKeys = new HashSet<string>(StringComparer.Ordinal);
         var pendingFacetValues = new List<PendingFacetValue>();
+        var directFacetColumns = new Dictionary<string, long[]>(StringComparer.Ordinal);
 
         int totalWordsLength = 0;
         int totalPostings = 0;
@@ -171,6 +172,18 @@ public static class IndexSnapshotBuilder
                 for (int f = 0; f < facets.Count; f++)
                 {
                     string facetName = facets.NameAt(f);
+                    if (entryCount > 0)
+                    {
+                        // Count known up front: write straight into the column (no pending list).
+                        ref long[]? column = ref CollectionsMarshal.GetValueRefOrAddDefault(directFacetColumns, facetName, out _);
+                        column ??= new long[entryCount];
+                        if (documentIndex < column.Length)
+                        {
+                            column[documentIndex] = facets.ValueAt(f);
+                            continue;
+                        }
+                    }
+
                     facetKeys.Add(facetName);
                     pendingFacetValues.Add(new PendingFacetValue(documentIndex, facetName, facets.ValueAt(f)));
                 }
@@ -256,7 +269,7 @@ public static class IndexSnapshotBuilder
             bigramWordIndices[bigram] = list.ToArray();
 
         var recordIdsArr = recordIds.ToArray();
-        var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues);
+        var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues, directFacetColumns);
 
         return new IndexSnapshot(
             recordIds: recordIdsArr,
@@ -280,14 +293,26 @@ public static class IndexSnapshotBuilder
     private static Dictionary<string, long[]> BuildFacetColumns(
         int documentCount,
         HashSet<string> facetKeys,
-        List<PendingFacetValue> pendingFacetValues)
+        List<PendingFacetValue> pendingFacetValues,
+        Dictionary<string, long[]> directFacetColumns)
     {
-        if (facetKeys.Count == 0)
+        if (facetKeys.Count == 0 && directFacetColumns.Count == 0)
             return [];
 
-        var facetColumns = new Dictionary<string, long[]>(facetKeys.Count, StringComparer.Ordinal);
+        var facetColumns = new Dictionary<string, long[]>(facetKeys.Count + directFacetColumns.Count, StringComparer.Ordinal);
+        foreach (var (facetName, column) in directFacetColumns)
+        {
+            var sized = column;
+            if (sized.Length != documentCount)
+                Array.Resize(ref sized, documentCount); // the enumerated count differed from the reported count
+            facetColumns[facetName] = sized;
+        }
+
         foreach (string facetName in facetKeys)
-            facetColumns[facetName] = new long[documentCount];
+        {
+            if (!facetColumns.ContainsKey(facetName))
+                facetColumns[facetName] = new long[documentCount];
+        }
 
         foreach (var pending in pendingFacetValues)
             facetColumns[pending.FacetName][pending.DocumentIndex] = pending.Value;
