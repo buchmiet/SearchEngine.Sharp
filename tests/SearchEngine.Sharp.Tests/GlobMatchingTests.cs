@@ -167,4 +167,22 @@ public class GlobMatchingTests
         var within = engine.Find("report*", WordMatchMethod.Within).OrderBy(x => x);
         Assert.Equal(exact, within);
     }
+
+    [Fact]
+    public void ShapeFastPaths_AgreeWithGeneralMatcher_OnRandomPatterns()
+    {
+        var rng = new Random(123);
+        const string patternAlphabet = "ab.**?";
+        const string wordAlphabet = "ab.";
+        for (int n = 0; n < 50_000; n++)
+        {
+            var pattern = new string(Enumerable.Range(0, rng.Next(1, 7)).Select(_ => patternAlphabet[rng.Next(patternAlphabet.Length)]).ToArray());
+            var word = new string(Enumerable.Range(0, rng.Next(0, 8)).Select(_ => wordAlphabet[rng.Next(wordAlphabet.Length)]).ToArray());
+
+            bool expected = SearchEngine.Query.GlobMatcher.IsWholeWordMatch(pattern, word);
+            bool actual = new SearchEngine.Query.GlobMatcher.Shape(pattern).IsMatch(word);
+
+            Assert.True(expected == actual, $"pattern '{pattern}' word '{word}': expected {expected}");
+        }
+    }
 }

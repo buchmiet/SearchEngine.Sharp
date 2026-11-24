@@ -93,4 +93,74 @@ internal static class GlobMatcher
 
         return patternIndex == pattern.Length;
     }
+
+    /// <summary>
+    /// Pre-classified glob: the common shapes (<c>abc*</c>, <c>*abc</c>, <c>*abc*</c>, <c>ab*cd</c>,
+    /// no <c>?</c>) are matched with span primitives (vectorized StartsWith/EndsWith/IndexOf);
+    /// everything else falls back to <see cref="IsWholeWordMatch"/>. Results are identical.
+    /// </summary>
+    internal readonly ref struct Shape
+    {
+        private readonly ReadOnlySpan<char> _pattern;
+        private readonly ReadOnlySpan<char> _head;
+        private readonly ReadOnlySpan<char> _tail;
+        private readonly Kind _kind;
+
+        private enum Kind { General, Prefix, Suffix, Contains, PrefixSuffix }
+
+        internal Shape(ReadOnlySpan<char> pattern)
+        {
+            _pattern = pattern;
+            _kind = Kind.General;
+            if (pattern.IndexOf('?') >= 0)
+                return;
+
+            int first = pattern.IndexOf('*');
+            int last = pattern.LastIndexOf('*');
+            if (first < 0)
+                return;
+
+            bool leading = first == 0;
+            bool trailing = last == pattern.Length - 1;
+            int innerStart = leading ? 1 : 0;
+            int innerEnd = trailing ? pattern.Length - 1 : pattern.Length;
+            if (innerEnd <= innerStart)
+            {
+                _kind = Kind.Contains; // "*" or "**": matches every word
+                return;
+            }
+
+            var inner = pattern[innerStart..innerEnd];
+            if (leading && trailing && inner.IndexOf('*') < 0)
+            {
+                _kind = Kind.Contains;
+                _head = inner;
+            }
+            else if (leading && !trailing && inner.IndexOf('*') < 0)
+            {
+                _kind = Kind.Suffix;
+                _tail = inner;
+            }
+            else if (!leading && trailing && inner.IndexOf('*') < 0)
+            {
+                _kind = Kind.Prefix;
+                _head = inner;
+            }
+            else if (!leading && !trailing && first == last)
+            {
+                _kind = Kind.PrefixSuffix;
+                _head = pattern[..first];
+                _tail = pattern[(first + 1)..];
+            }
+        }
+
+        internal bool IsMatch(ReadOnlySpan<char> word) => _kind switch
+        {
+            Kind.Prefix => word.StartsWith(_head),
+            Kind.Suffix => word.EndsWith(_tail),
+            Kind.Contains => word.IndexOf(_head) >= 0,
+            Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail),
+            _ => IsWholeWordMatch(_pattern, word),
+        };
+    }
 }
