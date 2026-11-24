@@ -198,7 +198,14 @@ Full signatures: [docs/api.md](docs/api.md).
 | `SearchSortMode.NaturalSortAscending` | Sort by natural key derived from `SortText` |
 | `FacetValues` | Optional per-document facet bag (`long` values) |
 | `FacetFilter` | Post-query AND filter (range / bitmask) |
-| `SearchTokenization` | Index/query separator presets (`Default`, `FileMask`) |
+| `SearchTokenization` | Index/query separator presets (`Default`, `FileMask`), optional `WithUnicodeMatching` |
+| `NameMatcher` | Query semantics for one name without an index (plain-scan searches) |
+
+## Index or plain scan?
+
+For a **one-shot** search of a directory tree, do not build an index: enumerate once and filter names with
+`NameMatcher` (same query language). Build an index when it is **kept and queried many times**.
+Measured trade-offs and both recipes: [docs/file-search-guide.md](docs/file-search-guide.md#index-or-plain-scan).
 
 ## Index updates
 

@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `NameMatcher`: evaluates a query against one name with exactly the semantics of `Find` on an index holding only that name (same `SearchTokenization`, operators, globs, regex, Unicode options) — for one-shot searches that filter names during a directory scan instead of indexing them. Equivalence with the index is tested on random names and queries for both presets.
+
+### Documentation
+
+- `docs/file-search-guide.md`: new section *Index or plain scan?* with measured numbers; the recommended scan uses one `FileSystemEnumerable` pass (no `Directory.Exists` + `FileInfo`), does not follow directory symlinks or junctions, keeps the id → path map in a `ConcurrentDictionary`, and describes files that vanish during the scan.
+
 ### Changed
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.

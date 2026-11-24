@@ -29,6 +29,15 @@ int UniqueWordCount { get; }
   which case all documents passing the filter are returned.
 - A `filter` naming a facet that no indexed document carries throws `ArgumentException`.
 
+### `NameMatcher`
+
+Matches one text against a query without an index; same answer as `Find` on an index holding only that text.
+
+```csharp
+static NameMatcher Create(string expression, WordMatchMethod method, bool enableOperators = false, SearchTokenization? tokenization = null);
+bool IsMatch(ReadOnlySpan<char> text);   // immutable, thread-safe; no facet criteria
+```
+
 ### `SearchTokenization`
 
 Configurable index-side and query-side separator sets. Stored in each `IndexSnapshot`;

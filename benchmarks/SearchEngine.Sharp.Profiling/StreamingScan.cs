@@ -180,6 +180,19 @@ public static class StreamingScan
         };
     }
 
+    /// <summary>F: as C, but names are matched by the package's public <see cref="NameMatcher"/> (FileMask).</summary>
+    public static IEnumerable<string> FindWithNameMatcher(FindRequest r)
+    {
+        var (expr, method, ops) = CommanderPattern.BuildQuery(r);
+        var name = NameMatcher.Create(expr, method, ops, SearchTokenization.FileMask);
+        var facets = new EntryFacets(r);
+        return new FileSystemEnumerable<string>(Path.GetFullPath(r.Root), static (ref FileSystemEntry e) => e.ToFullPath(), Recursive)
+        {
+            ShouldIncludePredicate = (ref FileSystemEntry e) => !e.IsDirectory && name.IsMatch(e.FileName) && facets.Matches(ref e),
+            ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
+        };
+    }
+
     /// <summary>D: directories processed by <paramref name="threads"/> workers; hits streamed through a channel.</summary>
     public static async IAsyncEnumerable<string> FindParallel(FindRequest r, int threads)
     {

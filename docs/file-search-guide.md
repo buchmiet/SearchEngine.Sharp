@@ -70,17 +70,86 @@ SearchTokenization.FileMask)`).
 Attach every facet to every document. A missing facet value reads as `0` and silently
 satisfies any range that includes `0`.
 
-## Scanning with live indexing
+## Index or plain scan?
 
-Do not call `AddEntry` per file — each call rebuilds the whole index and total work grows
-O(N²). Stream the scan through `ProgressiveIndexIngestion`:
+Decide this first; it matters more than any tuning below.
+
+| Situation | Use | Why (measured, x64 laptop CPU, one core, warm cache) |
+|-----------|-----|-------------------------------------------------------|
+| **One-shot search** of a tree ("find files named `*.pdf` under this folder"), index thrown away afterwards | **Plain scan + `NameMatcher`** | Every name has to be read from disk once anyway; matching it while it is read is cheaper than indexing it. 100k files: **0.13 s, ~2 MB allocated**, first hit after ~11 ms, vs **~2.0 s, ~370 MB** for scan + progressive index + requery. 1M files: **1.3 s** vs **20 s** (0.6.0) / **114–127 s** (0.5.6). |
+| **Persistent index** queried many times over the same tree (type-as-you-go filter, "search this drive" kept in memory) | `IndexUpdater` + `SearchEngineSharp` | A query over 1M names takes 0.1–15 ms (`package.json`: ~0.15 ms, `*.pdf`: ~8 ms) instead of a 1.3 s rescan. Building it from disk costs about as much as 5–9 rescans, so it pays off after ~5–9 queries **if the tree does not change in between**. |
+| Persistent index with frequent file changes | Index only if changes are rare or batched | Every `AddEntry` / `RemoveEntry` / `RefreshEntry` rebuilds the whole index: ~0.2 s at 100k, ~1.7–2.7 s at 1M names. With one change per query the index loses to rescanning. Batch changes with `AddOrUpdateEntries` / `RemoveEntries`. |
+
+Numbers: profiling report of November 2026 (`benchmarks/SearchEngine.Sharp.Profiling`, synthetic trees of 10k/100k/1M files).
+
+## Plain scan (one-shot search)
+
+`NameMatcher` evaluates a query against one name with exactly the semantics of `Find` on an index built with the
+same `SearchTokenization` (same boolean grammar, globs, regex, Unicode options), without building anything:
 
 ```csharp
+using System.IO.Enumeration;
+using SearchEngine;
+
+static IEnumerable<string> FindFiles(string root, string query, long minSize, CancellationToken ct)
+{
+    var matcher = NameMatcher.Create(query, WordMatchMethod.Exact, enableOperators: true, SearchTokenization.FileMask);
+    var options = new EnumerationOptions
+    {
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = true,              // skip folders we may not read
+        AttributesToSkip = FileAttributes.None, // default skips Hidden|System
+    };
+
+    var files = new FileSystemEnumerable<string>(root, static (ref FileSystemEntry e) => e.ToFullPath(), options)
+    {
+        // Name first: entries that do not match never cost a stat call.
+        ShouldIncludePredicate = (ref FileSystemEntry e) =>
+            !e.IsDirectory && matcher.IsMatch(e.FileName) && e.Length >= minSize,
+        // Do not follow directory symlinks / junctions: loops (/usr/bin/X11 -> .) and duplicates.
+        ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
+    };
+
+    foreach (string path in files)
+    {
+        ct.ThrowIfCancellationRequested();
+        yield return path;
+    }
+}
+```
+
+- One enumeration pass: the directory listing already says whether an entry is a directory; size, time and
+  attributes are read from the same entry (one `lstat` on Unix, none on Windows) and only for names that match.
+  Do **not** call `Directory.Exists(path)` and `new FileInfo(path)` per entry — that is two extra system calls per
+  file (100k files: 540k system calls instead of 53k) and `Directory.Exists` is true for a symlink to a directory.
+- Recursive enumeration in .NET follows directory symlinks unless `ShouldRecursePredicate` says otherwise; on a
+  stock Ubuntu `/usr` that never ends, on Homebrew it returns every file several times.
+- A file that disappears during the scan does not throw from `FileSystemEntry` (measured: on Linux it reports size 0
+  and time 1601-01-01, i.e. `DateTimeOffset.FromFileTime(0)`; on macOS the values read with the listing). Skip such
+  entries if it matters; the `FileInfo` pattern instead throws from `Length` and, outside a `try`, ends the scan.
+- For many cores, run one non-recursive `FileSystemEnumerable` per directory on a few workers (measured 1.8× on
+  4 x64 cores, 2.5–4× on an 8-core Mac; slower on a single core).
+- On macOS file names may be decomposed (NFD); use `SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose)`
+  for the matcher (and the index) so a composed query finds them.
+
+## Scanning into a persistent index
+
+Do not call `AddEntry` per file — each call rebuilds the whole index and total work grows
+O(N²). Stream the scan through `ProgressiveIndexIngestion`. The scanner owns the id → path table and hands
+each path to the consumer through a thread-safe map; do not share a plain `List<string>` between the scanner
+(which runs on the ingestion's producer task) and the code that reads results:
+
+```csharp
+using System.Collections.Concurrent;
+using System.IO.Enumeration;
 using System.Runtime.CompilerServices;
+using SearchEngine;
+using SearchEngine.Filters;
+using SearchEngine.Ingestion;
 
 static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> ScanAsync(
     string root,
-    List<string> paths, // id → full path, owned by the caller
+    ConcurrentDictionary<int, string> paths, // id → full path; safe to read while the scan runs
     [EnumeratorCancellation] CancellationToken ct = default)
 {
     await Task.Yield();
@@ -89,33 +158,37 @@ static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> ScanAsync(
     {
         RecurseSubdirectories = true,
         IgnoreInaccessible = true,
-        AttributesToSkip = FileAttributes.None, // default skips Hidden|System
+        AttributesToSkip = FileAttributes.None,
     };
 
-    foreach (string path in Directory.EnumerateFileSystemEntries(root, "*", options))
+    var files = new FileSystemEnumerable<(string Path, int NameStart, long Size, long Modified, long Attrs)>(
+        root,
+        static (ref FileSystemEntry e) =>
+        {
+            string path = e.ToFullPath();
+            return (path, path.Length - e.FileName.Length, e.Length, e.LastWriteTimeUtc.UtcTicks, (long)e.Attributes);
+        },
+        options)
+    {
+        ShouldIncludePredicate = static (ref FileSystemEntry e) => !e.IsDirectory,
+        ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
+    };
+
+    int id = 0;
+    foreach (var f in files)
     {
         ct.ThrowIfCancellationRequested();
+        string name = f.Path[f.NameStart..];
+        var facets = FacetValues.Create([new("size", f.Size), new("modified", f.Modified), new("attrs", f.Attrs)]);
 
-        var info = new FileInfo(path);
-        bool isDirectory = (info.Attributes & FileAttributes.Directory) != 0;
-
-        var facets = FacetValues.Create(
-        [
-            new("size", isDirectory ? 0 : info.Length),
-            new("modified", info.LastWriteTimeUtc.Ticks),
-            new("attrs", (long)info.Attributes),
-        ]);
-
-        int id = paths.Count;
-        paths.Add(path);
-
-        yield return new(id, new IndexedEntry(info.Name, info.Name, facets));
+        paths[id] = f.Path;
+        yield return new(id++, new IndexedEntry(name, name, facets));
     }
 }
 ```
 
 ```csharp
-var paths = new List<string>();
+var paths = new ConcurrentDictionary<int, string>();
 
 IngestionResult result = await ingestion.IngestAsync(
     ScanAsync(root, paths, ct),
@@ -123,11 +196,13 @@ IngestionResult result = await ingestion.IngestAsync(
     cancellationToken: ct);
 ```
 
-Defaults (`IngestPublishPolicy.Adaptive`, `GrowthAwareBatchCap = true`) target under 1 s between a file being scanned
-and becoming searchable, at roughly **7 index publishes per 100k files** on a fast scan (was ~50 before growth-aware batch cap). Tunables:
-[ingestion-policy-report.md](ingestion-policy-report.md).
+Defaults (`IngestPublishPolicy.Adaptive`, `GrowthAwareBatchCap = true`) give roughly **8 index publishes per
+100k files** on a fast scan and about 13–16 for 1M files. While one rebuild is faster than `MaxStaleness / AdaptiveMultiplier`
+an entry becomes searchable within `MaxStaleness` (1 s); for larger indexes a staleness publish waits
+`AdaptiveMultiplier` × the last rebuild (since 0.6.0; `StrictMaxStaleness = true` restores the old, quadratic
+behaviour). Tunables: [ingestion-policy-report.md](ingestion-policy-report.md).
 
-Starting a new search scope: `updater.Clear()`, reset the `paths` table, start a new
+Starting a new search scope: `updater.Clear()`, a new `paths` map, start a new
 ingest. Ids must be unique within one scope — reusing an id replaces the entry.
 
 ## Live requery loop
@@ -139,7 +214,7 @@ a publish lands (`onPublished` above). Both events converge on the same code pat
 void Requery()
 {
     List<int> ids = Search(engine, criteria);
-    // map ids → paths[id] and update the result list
+    // map ids → paths[id] (ConcurrentDictionary) and update the result list
 }
 ```
 

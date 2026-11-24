@@ -232,6 +232,65 @@ internal static class QueryExpressionEvaluator
 
     // Evaluates the token list using the shunting-yard algorithm (Dijkstra, 1961).
     // Operators are held in a stack and applied in precedence order as values arrive.
+    /// <summary>
+    /// Parses an expression exactly as <see cref="Evaluate"/> does and returns it in postfix order
+    /// (operands as words, operators applied in the order EvaluateTokens applies them).
+    /// Returns <see langword="null"/> when the expression has no operand or is malformed in a way
+    /// that makes <see cref="Evaluate"/> return no result. Used by <see cref="NameMatcher"/>.
+    /// </summary>
+    internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchValues<char> separators)
+    {
+        var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
+        if (tokens.Count == 0)
+            return null;
+
+        CorrectTokens(tokens);
+        if (tokens.Count == 0)
+            return null;
+
+        var output = new List<QueryToken>(tokens.Count);
+        var operators = new List<WordOperations>(tokens.Count);
+        foreach (var token in tokens)
+        {
+            switch (token.Operation)
+            {
+                case WordOperations.None:
+                    output.Add(token);
+                    break;
+                case WordOperations.OpenParenthesis:
+                    operators.Add(token.Operation);
+                    break;
+                case WordOperations.CloseParenthesis:
+                    while (operators.Count > 0 && operators[^1] != WordOperations.OpenParenthesis)
+                    {
+                        output.Add(QueryToken.CreateOperation(operators[^1]));
+                        operators.RemoveAt(operators.Count - 1);
+                    }
+
+                    if (operators.Count > 0)
+                        operators.RemoveAt(operators.Count - 1);
+                    break;
+                default:
+                    while (operators.Count > 0 && HasHigherOrEqualPrecedence(operators[^1], token.Operation))
+                    {
+                        output.Add(QueryToken.CreateOperation(operators[^1]));
+                        operators.RemoveAt(operators.Count - 1);
+                    }
+
+                    operators.Add(token.Operation);
+                    break;
+            }
+        }
+
+        for (int i = operators.Count - 1; i >= 0; i--)
+        {
+            if (operators[i] != WordOperations.OpenParenthesis)
+                output.Add(QueryToken.CreateOperation(operators[i]));
+        }
+
+        return output;
+    }
+
     private static FastBitSet? EvaluateTokens(
         List<QueryToken> tokens,
         WordMatchMethod method,
@@ -404,7 +463,7 @@ internal static class QueryExpressionEvaluator
         return true;
     }
 
-    private readonly record struct QueryToken(string Word, WordOperations Operation)
+    internal readonly record struct QueryToken(string Word, WordOperations Operation)
     {
         public static QueryToken CreateWord(string word) => new(word, WordOperations.None);
         public static QueryToken CreateOperation(WordOperations operation) => new(string.Empty, operation);
