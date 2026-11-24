@@ -31,6 +31,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - `IngestPublishOptions.StrictMaxStaleness` (default `false`) restores the previous behaviour.
+- Snapshot build writes facet values straight into their columns when the entry count is known up front (dictionaries, `IndexUpdater`), instead of buffering one `(ordinal, name, value)` record per facet value.
 
 ## [0.5.6] - 2026-08-16
 
