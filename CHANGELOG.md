@@ -10,6 +10,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Changed
+
+- **Within / bigram index:** the bigram index is no longer built in `IndexSnapshotBuilder.Build`; it is built on the first `WordMatchMethod.Within` query against a snapshot and cached (same lazy pattern as the natural-sort permutation). Exact, glob and regex queries never need it, so snapshot builds are cheaper; the first Within query after each publish pays the bigram build instead.
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed
