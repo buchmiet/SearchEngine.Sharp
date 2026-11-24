@@ -229,4 +229,26 @@ public class FacetFilterTests
 
         Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
     }
+
+    [Fact]
+    public void CreateFromPairs_IndexesLikeFromDictionary()
+    {
+        var (engine, updater) = CreateEngine();
+        updater.RebuildFrom(new Dictionary<int, IndexedEntry>
+        {
+            [1] = new("a.pdf", "a.pdf", FacetValues.Create([new("size", 10L), new("attrs", 0x1L)])),
+            [2] = new("b.pdf", "b.pdf", FacetValues.FromDictionary(new Dictionary<string, long> { ["size"] = 20, ["attrs"] = 0x2 })),
+            [3] = new("c.pdf", "c.pdf", FacetValues.Create("size", 30)),
+        });
+
+        Assert.Equal([1, 2], engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("size", 0, 25)));
+        Assert.Equal([2], engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Mask("attrs", 0x2)));
+    }
+
+    [Fact]
+    public void CreateFromPairs_RejectsDuplicateNames_AndEmptyIsEmpty()
+    {
+        Assert.Throws<ArgumentException>(() => FacetValues.Create([new("size", 1L), new("size", 2L)]));
+        Assert.Same(FacetValues.Empty, FacetValues.Create(ReadOnlySpan<KeyValuePair<string, long>>.Empty));
+    }
 }

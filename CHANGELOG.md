@@ -10,6 +10,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Breaking (platform):** target framework moved from `net10.0` to `net11.0` (C# 15). `Microsoft.Extensions.DependencyInjection` updated to 11.0.0. Consumers on .NET 10 must stay on 0.5.6. No public API change.
 
+### Added
+
+- `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` — builds a facet bag without an intermediate dictionary (one per indexed file in scan workloads). Duplicate names throw `ArgumentException`.
+
+### Changed
+
+- `FacetValues` stores its pairs in two small arrays instead of a copied `Dictionary`; `FromDictionary` no longer allocates a second dictionary.
+
 ## [0.5.6] - 2026-08-16
 
 ### Changed

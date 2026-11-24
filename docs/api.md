@@ -128,6 +128,7 @@ Immutable per-document facet bag; values are `long`. Facet names compare ordinal
 static FacetValues Empty { get; }
 static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values); // null when empty
 static FacetValues Create(string facet, long value);
+static FacetValues Create(params ReadOnlySpan<KeyValuePair<string, long>> values); // Empty when empty; no intermediate dictionary; duplicate names throw
 ```
 
 ### `FacetFilter`

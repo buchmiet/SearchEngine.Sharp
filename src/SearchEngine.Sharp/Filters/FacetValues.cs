@@ -3,21 +3,25 @@ namespace SearchEngine.Filters;
 /// <summary>
 /// Immutable facet name/value pairs attached to an indexed document.
 /// </summary>
+/// <remarks>
+/// Stored as two small parallel arrays rather than a dictionary: a document carries a handful of
+/// facets, the index builder only enumerates them, and one instance is created per indexed entry,
+/// so per-entry allocation matters more than lookup speed.
+/// </remarks>
 public sealed class FacetValues
 {
-    private static readonly IReadOnlyDictionary<string, long> EmptyDictionary =
-        new Dictionary<string, long>();
-
     /// <summary>
     /// Empty facet bag with no entries.
     /// </summary>
-    public static FacetValues Empty { get; } = new(EmptyDictionary);
+    public static FacetValues Empty { get; } = new([], []);
 
-    private readonly Dictionary<string, long> _values;
+    private readonly string[] _names;
+    private readonly long[] _values;
 
-    private FacetValues(IReadOnlyDictionary<string, long> values)
+    private FacetValues(string[] names, long[] values)
     {
-        _values = new Dictionary<string, long>(values, StringComparer.Ordinal);
+        _names = names;
+        _values = values;
     }
 
     /// <summary>
@@ -28,16 +32,60 @@ public sealed class FacetValues
         if (values is null || values.Count == 0)
             return null;
 
-        return new FacetValues(values);
+        var names = new string[values.Count];
+        var longs = new long[values.Count];
+        int i = 0;
+        foreach (var (name, value) in values)
+        {
+            names[i] = name;
+            longs[i] = value;
+            i++;
+        }
+
+        return new FacetValues(names, longs);
     }
 
     /// <summary>
     /// Creates facet values from a single pair.
     /// </summary>
     public static FacetValues Create(string facet, long value)
-        => new(new Dictionary<string, long>(1, StringComparer.Ordinal) { [facet] = value });
+    {
+        ArgumentNullException.ThrowIfNull(facet);
+        return new([facet], [value]);
+    }
 
-    internal IReadOnlyDictionary<string, long> Values => _values;
+    /// <summary>
+    /// Creates facet values from name/value pairs without an intermediate dictionary.
+    /// Returns <see cref="Empty"/> when <paramref name="values"/> is empty.
+    /// </summary>
+    /// <exception cref="ArgumentException">A facet name is null or appears more than once.</exception>
+    public static FacetValues Create(params ReadOnlySpan<KeyValuePair<string, long>> values)
+    {
+        if (values.IsEmpty)
+            return Empty;
 
-    internal bool IsEmpty => _values.Count == 0;
+        var names = new string[values.Length];
+        var longs = new long[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            string name = values[i].Key
+                ?? throw new ArgumentException("Facet names must not be null.", nameof(values));
+            if (Array.IndexOf(names, name, 0, i) >= 0)
+                throw new ArgumentException($"Duplicate facet '{name}'.", nameof(values));
+
+            names[i] = name;
+            longs[i] = values[i].Value;
+        }
+
+        return new FacetValues(names, longs);
+    }
+
+    /// <summary>Number of facet pairs.</summary>
+    internal int Count => _names.Length;
+
+    internal string NameAt(int index) => _names[index];
+
+    internal long ValueAt(int index) => _values[index];
+
+    internal bool IsEmpty => _names.Length == 0;
 }

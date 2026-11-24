@@ -99,12 +99,12 @@ static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> ScanAsync(
         var info = new FileInfo(path);
         bool isDirectory = (info.Attributes & FileAttributes.Directory) != 0;
 
-        var facets = FacetValues.FromDictionary(new Dictionary<string, long>
-        {
-            ["size"] = isDirectory ? 0 : info.Length,
-            ["modified"] = info.LastWriteTimeUtc.Ticks,
-            ["attrs"] = (long)info.Attributes,
-        });
+        var facets = FacetValues.Create(
+        [
+            new("size", isDirectory ? 0 : info.Length),
+            new("modified", info.LastWriteTimeUtc.Ticks),
+            new("attrs", (long)info.Attributes),
+        ]);
 
         int id = paths.Count;
         paths.Add(path);
