@@ -17,30 +17,14 @@ internal static class FacetFilterEvaluator
         if (filter.IsEmpty)
             return;
 
-        ReadOnlySpan<FacetPredicate> predicates = filter.Predicates;
-        if (predicates.Length == 0)
-            return;
-
         int hitCount = results.GetTrueCount();
         if (hitCount == 0)
             return;
 
         if (SelectivityThresholds.UseFacetOnHitsPath(hitCount, snapshot.DocumentCount))
-        {
             ApplyOnHitsInPlace(results, filter, snapshot, hitCount);
-            return;
-        }
-
-        var resolved = ResolvePredicates(predicates, snapshot);
-        var matching = qc.RentEmptyBitSet();
-
-        for (int ordinal = 0; ordinal < matching.Length; ordinal++)
-        {
-            if (MatchesAll(resolved, ordinal))
-                matching.Add(ordinal);
-        }
-
-        results.IntersectWith(matching);
+        else
+            results.IntersectWith(BuildMatchingBitSet(filter, snapshot, qc));
     }
 
     private static void ApplyOnHitsInPlace(
