@@ -35,6 +35,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   made 57–74 full rebuilds, allocated ~30 GB and took ~2 minutes on one core. A staleness-triggered publish now
   also waits `AdaptiveMultiplier` × the last rebuild duration (13–16 rebuilds, ~20 s). Unchanged while rebuilds
   are faster than `MaxStaleness / AdaptiveMultiplier`.
+- Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own copy of the sort
+  permutation (8 at once at 1M names: 2.3 s each, 1.1 GB allocated); they now share one build (0.8 s, 161 MB).
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
   with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
 
@@ -42,7 +44,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 
 - **Bigram index is lazy:** built on the first `WordMatchMethod.Within` query against a snapshot instead of in
   every `Build` (16–25% of build time; Exact, glob and regex never use it). The first `Within` query after a
-  publish pays it (1M names: ~0.3 s once per snapshot).
+  publish pays it (1M names: ~0.3 s once per snapshot). Concurrent first `Within` queries share that one build
+  and wait for it (8 at once at 1M names: 0.17 s each, 214 MB allocated in total).
 - **Within:** a candidate word is searched with one vectorized `IndexOf` instead of comparing a sliding window at
   every position: 1.3–5× faster at 1M names on x64 (`within-3` 1.78 → 0.75 ms, one-character queries 12.7 → 3.4 ms).
 - **Glob leaves** `abc*`, `*abc`, `*abc*`, `ab*cd` (no `?`) use vectorized span primitives: 4–6× faster for
@@ -60,7 +63,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 ### Tests
 
 - Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); leading `NOT AND`/`NOT OR`; lazy bigram index vs brute
-  force with concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
+  force with concurrent first callers; one build of the bigram index and of the sort permutation for 8
+  concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
   columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
   `NameMatcher` vs index (20 queries × 4 presets).
 
