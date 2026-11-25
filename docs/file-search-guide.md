@@ -103,18 +103,18 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
 
     var files = new FileSystemEnumerable<string>(root, static (ref FileSystemEntry e) => e.ToFullPath(), options)
     {
+        // Every entry passes through here, so cancellation is observed even when nothing matches.
         // Name first: entries that do not match never cost a stat call.
         ShouldIncludePredicate = (ref FileSystemEntry e) =>
-            !e.IsDirectory && matcher.IsMatch(e.FileName) && e.Length >= minSize,
+        {
+            ct.ThrowIfCancellationRequested();
+            return !e.IsDirectory && matcher.IsMatch(e.FileName) && e.Length >= minSize;
+        },
         // Do not follow directory symlinks / junctions: loops (/usr/bin/X11 -> .) and duplicates.
         ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
     };
 
-    foreach (string path in files)
-    {
-        ct.ThrowIfCancellationRequested();
-        yield return path;
-    }
+    return files;
 }
 ```
 
@@ -166,15 +166,15 @@ static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> ScanAsync(
         static (ref FileSystemEntry e) =>
         {
             string path = e.ToFullPath();
-            return (path, path.Length - e.FileName.Length, e.Length, e.LastWriteTimeUtc.UtcTicks, (long)e.Attributes);
+            return (path, path.Length - e.FileName.Length, e.IsDirectory ? 0 : e.Length, e.LastWriteTimeUtc.UtcTicks, (long)e.Attributes);
         },
         options)
     {
-        ShouldIncludePredicate = static (ref FileSystemEntry e) => !e.IsDirectory,
+        // Files and directories are indexed; the `attrs` facet tells them apart.
         ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
     };
 
-    int id = 0;
+    int id = paths.Count; // continue after the ids of earlier scans into the same scope
     foreach (var f in files)
     {
         ct.ThrowIfCancellationRequested();

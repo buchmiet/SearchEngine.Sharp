@@ -62,12 +62,12 @@ def breakdown(rows):
     for (lab, q), rs in sorted(g.items()):
         print(f"| {lab} | `{q}` | {med(rs,'totalMs'):.0f} | {med(rs,'enumMs'):.0f} | {med(rs,'existsMs'):.0f} | {med(rs,'statMs'):.0f} | {med(rs,'facetEntryMs'):.0f} | {med(rs,'rebuildMs'):.0f} | {med(rs,'publishes'):.0f} | {med(rs,'queryMs'):.0f} | {med(rs,'dedupMs'):.1f} | {med(rs,'gcPauseMs'):.0f} | {med(rs,'allocMB'):.0f} |")
     print()
-    print('| drzewo | zapytanie | pliki | enumeracja | Exists (wszystkie) | FileInfo | FSE nazwy | FSE + metadane | wpisy [ms / MB] | przebudowy idealne [ms / MB] | zapytania | faza 1 (słownik) | w tym tokenizacja | faza 2 sort | faza 3 pakowanie | faza 4 bigramy | faza 5 fakty | alok. 1 budowy [MB] |')
-    print('|---|---|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+    print('| drzewo | zapytanie | pliki | enumeracja | Exists (wszystkie) | FileInfo | FSE nazwy | FSE + metadane | wpisy [ms / MB] | przebudowy idealne [ms / MB] | zapytania | budowa FileMask [ms] | w tym tokenizacja | pierwszy Within [ms] | drugi Within [ms] | alok. 1 budowy [MB] |')
+    print('|---|---|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|')
     for r in rows:
         if r['mode'] != 'decompose':
             continue
-        print(f"| {r['label']} | `{r['query']}` | {r['files']} | {r['enumOnlyMs']} | {r['existsAllEntriesMs']} | {r['fileInfoStatMs']} | {r['fseNamesOnlyMs']} | {r['fseWithMetadataMs']} | {r['entryConstructionMs']} / {r['entryConstructionAllocMB']} | {r['buildsMs']} / {r['buildsAllocMB']} | {r['requeriesMs']} | {r['full_phase1_invertedMs']} | {r['full_phase1_tokenizeOnlyMs']} | {r['full_phase2_sortMs']} | {r['full_phase3_packMs']} | {r['full_phase4_bigramMs']} | {r['full_phase5_facetsMs']} | {r['full_allocMB']} |")
+        print(f"| {r['label']} | `{r['query']}` | {r['files']} | {r['enumOnlyMs']} | {r['existsAllEntriesMs']} | {r['fileInfoStatMs']} | {r['fseNamesOnlyMs']} | {r['fseWithMetadataMs']} | {r['entryConstructionMs']} / {r['entryConstructionAllocMB']} | {r['buildsMs']} / {r['buildsAllocMB']} | {r['requeriesMs']} | {r['full_buildMs']} | {r['full_tokenizeOnlyMs']} | {r['full_firstWithinMs']} | {r['full_secondWithinMs']} | {r['full_allocMB']} |")
 
 
 def querypaths(rows):

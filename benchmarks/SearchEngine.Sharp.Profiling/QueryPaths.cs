@@ -123,9 +123,7 @@ static class QueryPaths
                      }))
             {
                 var preset = preset0;
-#if UNICODEOPT
                 if (a.Int("unicode", 0) is var u and not 0) preset = preset.WithUnicodeMatching((UnicodeMatching)u);
-#endif
                 var sw = Stopwatch.StartNew();
                 var snap = IndexSnapshotBuilder.Build(entries, preset);
                 double buildMs = sw.Elapsed.TotalMilliseconds;

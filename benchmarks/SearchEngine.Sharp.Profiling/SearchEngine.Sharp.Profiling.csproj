@@ -8,8 +8,6 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
-    <DefineConstants Condition="'$(NewFacets)' != 'false'">$(DefineConstants);NEWFACETS</DefineConstants>
-    <DefineConstants Condition="'$(UnicodeOpt)' != 'false'">$(DefineConstants);UNICODEOPT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <!-- scripts/ holds stand-alone file-based programs (apidiff.cs), not part of this project -->

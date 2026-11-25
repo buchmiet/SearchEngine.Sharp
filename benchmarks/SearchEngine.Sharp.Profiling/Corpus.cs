@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace SearchEngine.Profiling;
 
@@ -187,7 +189,7 @@ public static class Corpus
 
     /// <summary>
     /// Writes the corpus to disk under <paramref name="root"/>: directories, empty files whose
-    /// logical size is set with SetLength (sparse, no data written) and the modification time.
+    /// logical size is set as a sparse length (no data written) and the modification time.
     /// Duplicate names in one directory are suffixed so every synthetic file exists once.
     /// </summary>
     public static (int Files, int Dirs) Materialize(string root, int count, int seed, bool setSizeAndTime)
@@ -212,11 +214,30 @@ public static class Corpus
                 path = Path.Combine(dirPaths[f.DirectoryIndex], $"{written}_{f.Name}");
             using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
             {
-                if (setSizeAndTime && f.Size > 0) fs.SetLength(f.Size);
+                if (setSizeAndTime && f.Size > 0) SetSparseLength(fs, f.Size);
             }
             if (setSizeAndTime) File.SetLastWriteTimeUtc(path, new DateTime(f.ModifiedTicks, DateTimeKind.Utc));
             written++;
         }
         return (written, dirPaths.Length);
     }
+
+    /// <summary>
+    /// Gives the file its logical size without allocating it. ftruncate is sparse on Unix file systems;
+    /// NTFS allocates the whole length unless the file is marked sparse first (sizes reach 4 GB, so a
+    /// million-file tree would otherwise need hundreds of GB).
+    /// </summary>
+    static void SetSparseLength(FileStream fs, long length)
+    {
+        if (OperatingSystem.IsWindows()
+            && !DeviceIoControl(fs.SafeFileHandle, FsctlSetSparse, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
+            throw new IOException("The file system does not support sparse files; run gen-tree with --no-meta.", Marshal.GetLastWin32Error());
+
+        fs.SetLength(length);
+    }
+
+    const uint FsctlSetSparse = 0x000900C4;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr input, uint inputSize, IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
 }

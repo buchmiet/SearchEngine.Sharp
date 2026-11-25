@@ -34,17 +34,33 @@ static class UnicodeProbe
         ("ﬁle", NormalizationForm.FormC, "file", "ligature fi (compatibility, expected miss)"),
     ];
 
+    /// <summary>The only directory the mode touches: a fresh subdirectory of <c>--dir</c>.</summary>
+    public const string ProbeDirectoryName = "leith-unicode-probe";
+
     public static void Run(Args a)
     {
-        string dir = Path.GetFullPath(a.Str("dir"));
+        string dir = Path.Combine(Path.GetFullPath(a.Str("dir")), ProbeDirectoryName);
+        if (Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any())
+            throw new InvalidOperationException($"'{dir}' already exists and is not empty; remove it or choose another --dir.");
+
+        // The directory is empty or created here, so deleting it removes only what this run wrote.
         Directory.CreateDirectory(dir);
-        foreach (var f in Directory.EnumerateFiles(dir)) File.Delete(f);
-        var created = new List<string>();
+        try
+        {
+            Probe(dir);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    static void Probe(string dir)
+    {
         foreach (var c in Cases)
         {
             string name = (c.Disk is { } form ? c.Stem.Normalize(form) : c.Stem) + ".txt";
             File.WriteAllBytes(Path.Combine(dir, name), []);
-            created.Add(name);
         }
 
         var onDisk = Directory.EnumerateFiles(dir).Select(Path.GetFileName).ToList();
@@ -91,7 +107,6 @@ static class UnicodeProbe
             exactIx_foundInDocWithBothDotlessAndDotted_doc2 = ge.Find("ix", WordMatchMethod.Exact).Contains(2),
             exactDotlessIx_doc2 = ge.Find("ıx", WordMatchMethod.Exact).Contains(2),
         }, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
-        foreach (var f in Directory.EnumerateFiles(dir)) File.Delete(f);
     }
 }
 

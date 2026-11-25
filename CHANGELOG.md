@@ -39,6 +39,12 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   permutation (8 at once at 1M names: 2.3 s each, 1.1 GB allocated); they now share one build (0.8 s, 161 MB).
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
   with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
+- `FacetValues.FromDictionary` enumerates the source once into a buffer, so a concurrently mutated dictionary can no
+  longer produce a bag with trailing null names or an `IndexOutOfRangeException`, and it rejects null and duplicate
+  names with `ArgumentException` exactly like `FacetValues.Create(span)`.
+- `IndexUpdater` mutations are atomic: when building the new snapshot throws (for example for an invalid facet bag), the
+  stored entries and the published snapshot stay as they were and later calls work. `Clear` and removing the last
+  entry keep the tokenization and Unicode options of the updater instead of publishing a default-preset empty snapshot.
 
 ### Changed
 
