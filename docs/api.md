@@ -118,7 +118,8 @@ bool ContainsEntry(int id);
 - `tokenization` defaults to `SearchTokenization.Default` and applies to every snapshot this updater publishes,
   including the empty one after `Clear`.
 - A `string` entry is indexed as `new IndexedEntry(text, text)`.
-- `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id.
+- `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
+  input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
   `RefreshEntry` returns whether the id existed before (it adds the entry either way).
 - `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither rebuilds then.
   `RemoveEntries` returns the number of ids removed.
@@ -212,7 +213,8 @@ SearchTokenization Tokenization { get; }
 
 ### `IndexSnapshotBuilder`
 
-Builds a snapshot without an updater, for example for the DI overload that takes a snapshot factory.
+Builds a snapshot without an updater. To query it, return it from your own `IIndexSnapshotProvider` and pass that
+provider to `SearchEngineSharp`.
 
 ```csharp
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries);
@@ -224,6 +226,10 @@ static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress);
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization, IProgress<float>? progress);
 ```
+
+- The entries are enumerated once, in the order that becomes `SnapshotOrder`.
+- An id that occurs twice throws `ArgumentException` naming the id. Dictionaries are not checked, because their
+  keys are unique.
 
 ## Namespace `SearchEngine.Ingestion`
 

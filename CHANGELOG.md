@@ -45,6 +45,10 @@ Changed.
   (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
+- `IndexSnapshotBuilder.Build` throws `ArgumentException` naming the id when an id occurs more than once in the
+  entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
+  because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the
+  last value wins.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
 - `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
   IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text
