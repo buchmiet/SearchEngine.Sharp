@@ -9,9 +9,10 @@ namespace SearchEngine.Sharp.MicroBenchmarks;
 /// </summary>
 /// <remarks>
 /// Each document keeps its file name as the sort text. Its search text adds the word of every density whose
-/// random sample contains the document, so an Exact or Within query for <see cref="WordFor"/> of a density matches exactly
-/// that share of the documents. The filter keeps the documents modified at or after the median time; which
-/// documents pass is unrelated to the density words, so a query at density d keeps about d/2 after the filter.
+/// random sample contains the document, so an Exact or Within query for <see cref="WordFor"/> of a density
+/// matches exactly that share of the documents. The filter keeps the documents modified at or after the median
+/// time; which documents pass is unrelated to the density words, so a query at density d keeps about d/2 after
+/// the filter.
 /// </remarks>
 internal sealed class SelectivityCorpus
 {
