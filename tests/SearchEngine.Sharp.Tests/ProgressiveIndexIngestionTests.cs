@@ -5,9 +5,11 @@ using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
 
-// Several tests here measure wall-clock gaps between publishes or cancel after a fixed delay. They run one at a
-// time, as they did as one xunit test collection; tests of other classes still run beside them.
-[NotInParallel(nameof(ProgressiveIndexIngestionTests))]
+// Several tests here measure wall-clock time: gaps between publishes, cancellation after a fixed delay, and the
+// rebuild time of two batch policies compared with each other. They run one at a time and with no other test
+// beside them: TUnit runs every other test in parallel, and that load was enough to reverse the rebuild time
+// comparison of Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale.
+[NotInParallel]
 public class ProgressiveIndexIngestionTests
 {
     private static (SearchEngineSharp engine, IIndexUpdater updater, ProgressiveIndexIngestion ingestion) Create()
