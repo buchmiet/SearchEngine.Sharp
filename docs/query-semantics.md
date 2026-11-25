@@ -103,10 +103,12 @@ Regex patterns are not folded by any option, because folding would change charac
 would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so
 write it in folded form: `ss` for `ß` under `CaseFold`, `e` for `é` under `RemoveDiacritics`, precomposed letters
 under `Compose`. `SortText` is never folded.
+
 `Compose` and `RemoveDiacritics` need the Unicode normalization data of ICU (or NLS). Globalization-invariant mode
 (`<InvariantGlobalization>true</InvariantGlobalization>` or `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`, common in
 trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
 for them there; `CaseFold` and `GraphemeBoundaries` work in every mode.
+
 Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and U+FFFE cannot be normalized: those code
 units are kept as they are and the text around them is folded, so such a name still matches itself.
 
