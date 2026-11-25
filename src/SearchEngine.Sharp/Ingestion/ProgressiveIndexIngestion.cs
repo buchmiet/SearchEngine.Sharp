@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Threading.Channels;
 
 namespace SearchEngine.Ingestion;
@@ -36,7 +35,18 @@ namespace SearchEngine.Ingestion;
 public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 {
     private readonly IIndexUpdater _updater = updater;
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
     private int _isRunning;
+
+    /// <summary>
+    /// Creates an instance whose clock and timers come from <paramref name="timeProvider"/>.
+    /// Tests use this to drive staleness and pacing deterministically.
+    /// </summary>
+    internal ProgressiveIndexIngestion(IIndexUpdater updater, TimeProvider timeProvider)
+        : this(updater)
+    {
+        _timeProvider = timeProvider;
+    }
 
     /// <summary>
     /// Raised after each successful index publish. Optional; use for UI or diagnostics.
@@ -105,7 +115,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 SingleWriter = true,
             });
 
-            var state = new IngestionState();
+            var state = new IngestionState(_timeProvider);
 
             Task producer = ProduceAsync(entries, toIndexedEntry, channel.Writer, state, cancellationToken);
             Task consumer = ConsumeAsync(channel.Reader, options, state, progress, onPublished, cancellationToken);
@@ -132,7 +142,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         }
     }
 
-    private static async Task ProduceAsync<TEntry>(
+    private async Task ProduceAsync<TEntry>(
         IAsyncEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<KeyValuePair<int, TEntry>, IndexedEntry> toIndexedEntry,
         ChannelWriter<BufferedEntry> writer,
@@ -144,7 +154,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             await foreach (var pair in entries.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
                 var indexed = toIndexedEntry(pair);
-                var buffered = new BufferedEntry(pair.Key, indexed, Stopwatch.GetTimestamp());
+                var buffered = new BufferedEntry(pair.Key, indexed, _timeProvider.GetTimestamp());
                 await writer.WriteAsync(buffered, cancellationToken).ConfigureAwait(false);
                 state.IncrementAccepted();
             }
@@ -174,16 +184,21 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         var buffer = new List<KeyValuePair<int, IndexedEntry>>();
         var bufferedAt = new List<long>();
 
-        long lastPublishTimestamp = Stopwatch.GetTimestamp();
+        long lastPublishTimestamp = _timeProvider.GetTimestamp();
         TimeSpan lastRebuildDuration = TimeSpan.Zero;
         bool flushOnCancel = options.FlushOnCancellation;
         int batchCap = options.FixedBatchSize;
+
+        // One outstanding read survives timer wake-ups, so a timer publish never leaves an orphaned waiter behind.
+        Task<bool>? pendingRead = null;
 
         try
         {
             while (true)
             {
-                if (buffer.Count > 0 && ShouldPublishForTimer(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt, buffer.Count))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) == TimeSpan.Zero)
                 {
                     PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                 }
@@ -205,26 +220,25 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                     continue;
                 }
 
-                TimeSpan delay = ComputeDelay(options, lastRebuildDuration, lastPublishTimestamp, buffer.Count);
-                if (delay > TimeSpan.Zero)
-                {
-                    Task<bool> readTask = WaitForEntryAsync(reader, cancellationToken);
-                    Task winner = await Task.WhenAny(readTask, Task.Delay(delay, cancellationToken)).ConfigureAwait(false);
-                    if (winner != readTask
-                        && buffer.Count > 0
-                        && ShouldPublishForTimer(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt, buffer.Count))
-                    {
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
-                        continue;
-                    }
+                pendingRead ??= WaitForEntryAsync(reader, cancellationToken);
 
-                    if (!await readTask.ConfigureAwait(false))
-                        continue;
-                }
-                else if (!await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                // While entries are buffered under a timer-driven policy, never wait for the scanner
+                // alone: a timer that wakes before its publish is due (Task.Delay truncates to whole
+                // milliseconds) is re-armed for the remaining time by the next pass of this loop.
+                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) is { } wait)
                 {
-                    continue;
+                    using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    Task timer = Task.Delay(ToTimerDelay(wait), _timeProvider, timerCts.Token);
+                    if (await Task.WhenAny(pendingRead, timer).ConfigureAwait(false) != pendingRead)
+                        continue;
+
+                    await timerCts.CancelAsync().ConfigureAwait(false);
                 }
+
+                bool entriesAvailable = await pendingRead.ConfigureAwait(false);
+                pendingRead = null;
+                if (!entriesAvailable)
+                    continue;
 
                 while (reader.TryRead(out BufferedEntry entry))
                 {
@@ -253,10 +267,16 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         ChannelReader<BufferedEntry> reader,
         CancellationToken cancellationToken)
     {
-        if (await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
-            return true;
-
-        return false;
+        try
+        {
+            return await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (reader.Completion.IsCompleted && !cancellationToken.IsCancellationRequested)
+        {
+            // The scanner failed and the channel is drained. The failure surfaces from the producer
+            // task; the publisher must still flush its buffer first.
+            return false;
+        }
     }
 
     private static async Task AwaitConsumerAfterCancelAsync(Task consumer)
@@ -289,14 +309,14 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         if (buffer.Count == 0)
             return;
 
-        long publishStarted = Stopwatch.GetTimestamp();
+        long publishStarted = _timeProvider.GetTimestamp();
         state.ObserveStaleness(bufferedAt, publishStarted);
 
         _updater.AddOrUpdateEntries(buffer);
 
-        var rebuildDuration = Stopwatch.GetElapsedTime(publishStarted);
+        var rebuildDuration = _timeProvider.GetElapsedTime(publishStarted);
         lastRebuildDuration = rebuildDuration;
-        lastPublishTimestamp = Stopwatch.GetTimestamp();
+        lastPublishTimestamp = _timeProvider.GetTimestamp();
         UpdateBatchCap(options, ref batchCap);
 
         int publishedCount = buffer.Count;
@@ -356,57 +376,45 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         batchCap = Math.Max(options.FixedBatchSize, indexedCount);
     }
 
-    private static bool ShouldPublishForTimer(
+    /// <summary>
+    /// Time until a timer-driven publish is due: <see cref="TimeSpan.Zero"/> when it is due now,
+    /// <see langword="null"/> when no timer should be armed (nothing buffered, or a policy that
+    /// publishes by batch size only and is not yet stale).
+    /// </summary>
+    private TimeSpan? TimeUntilTimerPublish(
         IngestPublishOptions options,
         TimeSpan lastRebuildDuration,
         long lastPublishTimestamp,
-        List<long> bufferedAt,
-        int bufferCount)
+        List<long> bufferedAt)
     {
-        if (bufferCount == 0 || bufferedAt.Count == 0)
-            return false;
+        if (bufferedAt.Count == 0)
+            return null;
 
-        if (Stopwatch.GetElapsedTime(bufferedAt[0]) >= options.MaxStaleness)
+        TimeSpan sinceLastPublish = ElapsedSince(lastPublishTimestamp);
+        TimeSpan untilStale = options.MaxStaleness - ElapsedSince(bufferedAt[0]);
+
+        // Once one rebuild takes longer than MaxStaleness, every batch is already stale when the
+        // previous rebuild finishes; publishing on staleness alone then rebuilds back to back every
+        // ChannelCapacity entries and total work becomes quadratic. Under Adaptive, staleness may
+        // not publish sooner than AdaptiveMultiplier x the last rebuild duration after that rebuild.
+        if (options.Policy == IngestPublishPolicy.Adaptive && !options.StrictMaxStaleness)
+            untilStale = Max(untilStale, lastRebuildDuration * options.AdaptiveMultiplier - sinceLastPublish);
+
+        if (untilStale <= TimeSpan.Zero)
+            return TimeSpan.Zero;
+
+        TimeSpan? untilPace = options.Policy switch
         {
-            // Once one rebuild takes longer than MaxStaleness, every batch is already stale when
-            // the previous rebuild finishes; publishing on staleness alone then rebuilds back to
-            // back every ChannelCapacity entries and total work becomes quadratic. Under Adaptive,
-            // staleness may not publish sooner than AdaptiveMultiplier x the last rebuild duration.
-            if (options.Policy == IngestPublishPolicy.Adaptive
-                && !options.StrictMaxStaleness
-                && ElapsedSince(lastPublishTimestamp) < lastRebuildDuration * options.AdaptiveMultiplier)
-                return false;
-
-            return true;
-        }
-
-        if (ElapsedSince(lastPublishTimestamp) < ComputeInterval(options, lastRebuildDuration))
-            return false;
-
-        return options.Policy switch
-        {
-            IngestPublishPolicy.TimeDebounce => true,
-            IngestPublishPolicy.Adaptive => bufferCount >= options.MinTimerPublishBatch,
-            _ => false,
+            IngestPublishPolicy.TimeDebounce => options.MinInterval - sinceLastPublish,
+            IngestPublishPolicy.Adaptive when bufferedAt.Count >= options.MinTimerPublishBatch =>
+                ComputeInterval(options, lastRebuildDuration) - sinceLastPublish,
+            _ => null,
         };
-    }
 
-    private static TimeSpan ComputeDelay(
-        IngestPublishOptions options,
-        TimeSpan lastRebuildDuration,
-        long lastPublishTimestamp,
-        int bufferCount)
-    {
-        if (bufferCount == 0)
-            return Timeout.InfiniteTimeSpan;
+        if (options.Policy is not (IngestPublishPolicy.TimeDebounce or IngestPublishPolicy.Adaptive))
+            return null;
 
-        return options.Policy switch
-        {
-            IngestPublishPolicy.PerEntry or IngestPublishPolicy.FixedBatch => Timeout.InfiniteTimeSpan,
-            IngestPublishPolicy.TimeDebounce or IngestPublishPolicy.Adaptive =>
-                Max(TimeSpan.Zero, ComputeInterval(options, lastRebuildDuration) - ElapsedSince(lastPublishTimestamp)),
-            _ => Timeout.InfiniteTimeSpan,
-        };
+        return untilPace is { } pace ? Max(TimeSpan.Zero, Min(untilStale, pace)) : untilStale;
     }
 
     private static TimeSpan ComputeInterval(IngestPublishOptions options, TimeSpan lastRebuildDuration)
@@ -421,15 +429,24 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         };
     }
 
-    private static TimeSpan ElapsedSince(long timestamp)
-        => Stopwatch.GetElapsedTime(timestamp);
+    private TimeSpan ElapsedSince(long timestamp)
+        => _timeProvider.GetElapsedTime(timestamp);
 
     private static TimeSpan Max(TimeSpan a, TimeSpan b)
         => a >= b ? a : b;
 
+    private static TimeSpan Min(TimeSpan a, TimeSpan b)
+        => a <= b ? a : b;
+
+    // Timers have millisecond resolution and truncate: rounding up keeps a re-armed wait from
+    // degenerating into a spin over the last fraction of a millisecond. The cap keeps very large
+    // options within what Task.Delay accepts; the loop simply re-arms.
+    private static TimeSpan ToTimerDelay(TimeSpan value)
+        => TimeSpan.FromMilliseconds(Math.Ceiling(Min(value, TimeSpan.FromDays(1)).TotalMilliseconds));
+
     private readonly record struct BufferedEntry(int Id, IndexedEntry Entry, long BufferedAtTimestamp);
 
-    private sealed class IngestionState
+    private sealed class IngestionState(TimeProvider timeProvider)
     {
         private long _worstStalenessTicks;
 
@@ -451,7 +468,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             foreach (long buffered in bufferedAt)
             {
-                TimeSpan staleness = Stopwatch.GetElapsedTime(buffered, publishStarted);
+                TimeSpan staleness = timeProvider.GetElapsedTime(buffered, publishStarted);
                 long stalenessTicks = staleness.Ticks;
                 long currentWorst = Volatile.Read(ref _worstStalenessTicks);
                 while (stalenessTicks > currentWorst)

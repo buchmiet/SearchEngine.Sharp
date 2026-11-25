@@ -45,12 +45,17 @@ public sealed class IngestPublishOptions
     /// publish is forced. Defaults to 1 second.
     /// </summary>
     /// <remarks>
-    /// Under <see cref="IngestPublishPolicy.Adaptive"/> (unless <see cref="StrictMaxStaleness"/> is set)
-    /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last
-    /// rebuild duration has passed since the previous publish. While rebuilds are faster than
-    /// <c>MaxStaleness / AdaptiveMultiplier</c> nothing changes; for larger indexes the observed
-    /// staleness grows to about <c>(1 + AdaptiveMultiplier)</c> × one rebuild instead of the scan
-    /// degrading to back-to-back full rebuilds.
+    /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish
+    /// that contains it starts (see <see cref="IngestionResult.WorstCaseStaleness"/>); that publish's own
+    /// rebuild comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
+    /// <para>Under <see cref="IngestPublishPolicy.Adaptive"/> (unless <see cref="StrictMaxStaleness"/> is set)
+    /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last rebuild
+    /// duration has passed since the previous publish finished. An entry handed over just as a rebuild
+    /// starts therefore waits that rebuild plus the gap, so with <c>k = AdaptiveMultiplier</c> and a rebuild
+    /// of duration <c>R</c> the worst staleness is <c>max(MaxStaleness, (1 + k) × R)</c>. Nothing changes
+    /// while <c>R</c> stays below <c>MaxStaleness / (1 + k)</c> (333 ms with the defaults); beyond that
+    /// the bound grows with the index (a 400 ms rebuild gives 1.2 s instead of 1.0 s) instead of the scan
+    /// degrading to back-to-back full rebuilds.</para>
     /// </remarks>
     public TimeSpan MaxStaleness { get; init; } = TimeSpan.FromSeconds(1);
 

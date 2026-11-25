@@ -33,8 +33,13 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   (about 0.4–0.5 million file names on a laptop-class CPU), every batch was already stale when the previous
   rebuild finished and the publisher rebuilt back to back every `ChannelCapacity` (10k) entries. A 1M-file scan
   made 57–74 full rebuilds, allocated ~30 GB and took ~2 minutes on one core. A staleness-triggered publish now
-  also waits `AdaptiveMultiplier` × the last rebuild duration (13–16 rebuilds, ~20 s). Unchanged while rebuilds
-  are faster than `MaxStaleness / AdaptiveMultiplier`.
+  also waits `AdaptiveMultiplier` (`k`) × the last rebuild duration after that rebuild (13–16 rebuilds, ~20 s).
+  Worst staleness is `max(MaxStaleness, (1 + k) × rebuild)` (1.2 s at a 400 ms rebuild instead of 1.0 s);
+  unchanged while rebuilds are faster than `MaxStaleness / (1 + k)`.
+- Progressive ingestion no longer leaves buffered entries unpublished while the scanner is idle: a timer that woke
+  slightly before its publish was due, or a buffer below `MinTimerPublishBatch` that reached `MaxStaleness`, waited
+  for the next scanner entry instead of publishing. The publisher now always re-arms a timer while entries are
+  buffered.
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
   with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
 

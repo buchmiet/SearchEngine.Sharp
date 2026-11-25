@@ -197,10 +197,12 @@ IngestionResult result = await ingestion.IngestAsync(
 ```
 
 Defaults (`IngestPublishPolicy.Adaptive`, `GrowthAwareBatchCap = true`) give roughly **8 index publishes per
-100k files** on a fast scan and about 13–16 for 1M files. While one rebuild is faster than `MaxStaleness / AdaptiveMultiplier`
-an entry becomes searchable within `MaxStaleness` (1 s); for larger indexes a staleness publish waits
-`AdaptiveMultiplier` × the last rebuild (since 0.6.0; `StrictMaxStaleness = true` restores the old, quadratic
-behaviour). Tunables: [ingestion-policy-report.md](ingestion-policy-report.md).
+100k files** on a fast scan and about 13–16 for 1M files. While one rebuild (`R`) takes less than
+`MaxStaleness / (1 + AdaptiveMultiplier)` (333 ms with the defaults) the publish containing an entry starts within
+`MaxStaleness` (1 s) of the scanner handing it over; for larger indexes a staleness publish waits
+`AdaptiveMultiplier` × the last rebuild after that rebuild finished (since 0.6.0), so the worst case is
+`max(MaxStaleness, (1 + AdaptiveMultiplier) × R)` (`StrictMaxStaleness = true` restores the old, quadratic
+behaviour and the plain `MaxStaleness` bound). Tunables: [ingestion-policy-report.md](ingestion-policy-report.md).
 
 Starting a new search scope: `updater.Clear()`, a new `paths` map, start a new
 ingest. Ids must be unique within one scope — reusing an id replaces the entry.

@@ -26,7 +26,9 @@ public sealed class IngestionResult
     public required TimeSpan TotalRebuildCpu { get; init; }
 
     /// <summary>
-    /// Longest observed delay between an entry entering the buffer and becoming searchable.
+    /// Longest observed delay between the scanner handing an entry over and the start of the publish
+    /// that makes it searchable (that publish's rebuild, <see cref="IngestionPublishEvent.RebuildDuration"/>,
+    /// comes on top).
     /// </summary>
     public required TimeSpan WorstCaseStaleness { get; init; }
 
