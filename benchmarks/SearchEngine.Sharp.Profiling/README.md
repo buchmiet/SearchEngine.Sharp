@@ -1,7 +1,9 @@
 # SearchEngine.Sharp.Profiling
 
-Console harness used for the November 2026 profiling of the Commander find-name pattern.
-Not part of the solution build; build it explicitly against the library in this repository:
+Measures file search end to end on a generated directory tree (the "find files" dialog of a file manager), every
+query path of the library, build cost and memory. [docs/performance.md](../../docs/performance.md) shows the
+results and the commands that produced them. The project is not part of the solution build; build it against the
+library in this repository:
 
 ```bash
 dotnet build benchmarks/SearchEngine.Sharp.Profiling -c Release
