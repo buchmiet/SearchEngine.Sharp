@@ -13,6 +13,10 @@ public class SyntheticPathFeedTests
     }
 
     [Fact]
+    public void CreateDictionary_names_count_for_a_negative_count()
+        => Assert.Equal("count", Assert.Throws<ArgumentOutOfRangeException>(() => SyntheticPathFeed.CreateDictionary(-1)).ParamName);
+
+    [Fact]
     public async Task EnumerateAsync_with_zero_count_yields_nothing()
     {
         int yielded = 0;

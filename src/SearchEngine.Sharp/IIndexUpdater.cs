@@ -46,7 +46,9 @@ public interface IIndexUpdater
     /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled while the stream was read.
     /// The index is unchanged.</exception>
     /// <remarks>The stream is read before the updater's lock is taken, so other changes are not blocked while it
-    /// is read. A change made by another call in the meantime is replaced by this rebuild.</remarks>
+    /// is read. A change made by another call in the meantime is replaced by this rebuild. The method does not
+    /// resume on the caller's synchronization context: after the stream completes a step asynchronously, the
+    /// reading and the rebuild continue on a thread-pool thread.</remarks>
     Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 
     /// <inheritdoc cref="RebuildFromAsync(IAsyncEnumerable{KeyValuePair{int, string}}, IProgress{float}?, CancellationToken)"/>

@@ -134,7 +134,9 @@ bool ContainsEntry(int id);
   `RefreshEntry` returns whether the id existed before (it adds the entry either way).
 - `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither rebuilds then.
   `RemoveEntries` returns the number of ids removed.
-- The async methods read the whole input before taking the updater's lock.
+- The async methods read the whole input before taking the updater's lock. They do not resume on the caller's
+  synchronization context: when the stream completes a step asynchronously, the reading and the rebuild
+  continue on a thread-pool thread, and a UI thread is not blocked by the rebuild.
 - The updater keeps its own copy of every entry, and that copy is the source of each rebuild.
 
 ### `IIndexSnapshotProvider`, `IndexSnapshotProvider`

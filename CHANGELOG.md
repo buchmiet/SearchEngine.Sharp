@@ -45,6 +45,15 @@ Changed.
   (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
+- `NaturalSortAscending` compares sort texts part by part: text parts with text parts, numbers by value at any
+  length, and digits of other scripts with their value. It used to compare a text part with the separator that
+  followed a shorter part, so `ab` sorted before `a 2`, `xa` before `x1` and `reports` before `report final`, and
+  `a999999999999` sorted after `a1000000000000`. `NaturalSortKeyBuilder.Build` returns keys in a new, shorter
+  layout; keys stored by an earlier version do not compare with new ones. The order is described in
+  [Result ordering](docs/query-semantics.md#result-ordering).
+- `NaturalSortAscending` returns entries with equal sort texts in ascending id order. They used to come in an
+  unspecified order when the query matched at most 80% of the documents and in id order otherwise, so the same
+  entries could come out in a different order from one query to the next.
 - `SearchTokenization.Default` splits queries at a tab too, like indexed text. A query pasted with a tab
   between its words used to be one term that could never match. `FileMask` is unchanged: a tab stays part of the
   mask.
@@ -99,17 +108,10 @@ Changed.
 - `FacetValues.FromDictionary` reads the dictionary once, so a dictionary that changes during the call can no
   longer produce a broken bag or `IndexOutOfRangeException`. It rejects null and duplicate names with
   `ArgumentException`, like `FacetValues.Create`.
+- `SyntheticPathFeed.CreateDictionary` names `count` in the `ArgumentOutOfRangeException` for a negative count. It
+  used to name `capacity`, a parameter of the dictionary it creates.
 - Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own sort permutation; they
   now share one build.
-- `NaturalSortAscending` compared a text part with the separator that followed a shorter part, so `ab` sorted
-  before `a 2`, `xa` before `x1` and `reports` before `report final`. Text parts now compare with text parts as
-  documented, numbers of any length compare by value (`a999999999999` used to sort after `a1000000000000`), and
-  digits of other scripts count with their value. `NaturalSortKeyBuilder.Build` returns keys in a new, shorter
-  layout; keys stored by an earlier version do not compare with new ones. The order is described in
-  [Result ordering](docs/query-semantics.md#result-ordering).
-- `NaturalSortAscending` returned entries with equal sort texts in an unspecified order when the query matched at
-  most 80% of the documents, and in id order otherwise, so the same entries could come out in a different order
-  from one query to the next. Equal sort texts now always come in ascending id order.
 - `AddSearchEngine(initialEntries, ...)` and `AddKeyedSearchEngine(key, initialEntries, ...)` published a first
   snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
   or batch update published an index without them. The updater now starts from the same entries and the same

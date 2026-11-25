@@ -224,4 +224,47 @@ public class IndexUpdaterTests
 
         Assert.Same(SearchEngine.Snapshots.IndexSnapshot.Empty, provider.Current);
     }
+
+    [Fact]
+    public async Task RebuildFromAsync_DoesNotResumeOnTheCallersSynchronizationContext()
+    {
+        var (engine, updater, _) = Create();
+        var context = new CountingSynchronizationContext();
+        Task rebuild;
+
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            rebuild = updater.RebuildFromAsync(SlowStream());
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        await rebuild;
+
+        Assert.Equal(0, context.PostCount);
+        Assert.Equal([1], Ids(engine, "alpha"));
+    }
+
+    // Completes asynchronously without capturing a context of its own, so only the updater could post to one.
+    private static async IAsyncEnumerable<KeyValuePair<int, string>> SlowStream()
+    {
+        await Task.Delay(1).ConfigureAwait(false);
+        yield return new(1, "alpha");
+    }
+
+    private sealed class CountingSynchronizationContext : SynchronizationContext
+    {
+        private int _postCount;
+
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            base.Post(d, state);
+        }
+    }
 }
