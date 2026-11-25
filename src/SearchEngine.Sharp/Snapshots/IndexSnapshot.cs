@@ -27,13 +27,19 @@ namespace SearchEngine.Snapshots;
 //
 // ── Thread safety ─────────────────────────────────────────────────────────────
 //
-// IndexSnapshot is fully immutable after construction. Any number of threads
-// may read it concurrently. IndexSnapshotProvider swaps the reference atomically
-// (Interlocked.Exchange) so readers always see a consistent snapshot.
+// IndexSnapshot is immutable after construction except for two derived structures built on
+// first use: the bigram index and the natural-sort permutation. Each is built at most once per
+// snapshot: the first caller builds it under a per-structure lock while concurrent first callers
+// wait on that lock (they block instead of spinning or building a copy). A build that throws
+// publishes nothing, so the next caller builds again. Nothing is built at publish time: progressive
+// ingestion publishes many snapshots that never serve a Within or natural-sort query, and a
+// background build would add that cost to every one of them. Any number of threads may read a snapshot
+// concurrently. IndexSnapshotProvider swaps the reference atomically (Interlocked.Exchange) so
+// readers always see a consistent snapshot.
 
 /// <summary>
 /// Immutable snapshot of the search index.
-/// Thread-safe for concurrent reads. Never modified after construction.
+/// Thread-safe for concurrent reads. Its content never changes after construction.
 /// </summary>
 public sealed class IndexSnapshot
 {
@@ -89,21 +95,30 @@ public sealed class IndexSnapshot
     // Bigram index: first two characters of query packed as (char0 << 16 | char1)
     // → int[] of word indices that contain that bigram, in length-descending order.
     // Used by MatchWithin to skip words that cannot possibly match (pruning).
-    // Built lazily on first use (only Within queries need it); concurrent first callers may
-    // both build it, Interlocked.CompareExchange keeps one result, as for the sort permutation.
+    // Built once on first use (only Within queries need it), see Thread safety above.
     private Dictionary<int, int[]>? _bigramWordIndices;
+    private object? _bigramBuildLock;
+    private int _bigramBuildCount;
 
     internal Dictionary<int, int[]> BigramWordIndices
-        => Volatile.Read(ref _bigramWordIndices) ?? BuildBigramWordIndices();
+        => Volatile.Read(ref _bigramWordIndices)
+           ?? LazyInitializer.EnsureInitialized(ref _bigramWordIndices, ref _bigramBuildLock, BuildBigramWordIndices);
+
+    // Number of times the bigram index was built on this snapshot (tests: at most once).
+    internal int BigramBuildCount => Volatile.Read(ref _bigramBuildCount);
 
     // Original sort texts parallel to RecordIds, used to build the sorted permutation on demand.
     private readonly string[] _sortTexts;
     internal ReadOnlySpan<string> SortTexts => _sortTexts;
     internal string[] SortTextArray => _sortTexts;
 
-    // Lazily computed index permutation for NaturalSortAscending.
-    // Computed once on first use via Interlocked.CompareExchange (see GetSortedPermutation).
+    // Index permutation for NaturalSortAscending, built once on first use (see GetSortedPermutation).
     private int[]? _sortedPermutation;
+    private object? _sortedPermutationBuildLock;
+    private int _sortedPermutationBuildCount;
+
+    // Number of times the sort permutation was built on this snapshot (tests: at most once).
+    internal int SortedPermutationBuildCount => Volatile.Read(ref _sortedPermutationBuildCount);
 
     // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
     internal readonly Dictionary<string, long[]> FacetColumns;
@@ -175,18 +190,18 @@ public sealed class IndexSnapshot
         foreach (var (bigram, list) in bigramLists)
             built[bigram] = list.ToArray();
 
-        return Interlocked.CompareExchange(ref _bigramWordIndices, built, null) ?? built;
+        Interlocked.Increment(ref _bigramBuildCount);
+        return built;
     }
 
-    // Returns (or lazily builds) an array of document ordinals sorted by natural sort key.
-    // Sorted ordinals are computed once and cached — Interlocked.CompareExchange ensures
-    // that concurrent first callers produce the same result and only one wins the write.
+    // Returns an array of document ordinals sorted by natural sort key, built once on first use.
     // The array is an index permutation: sortedPermutation[rank] = ordinal in RecordIds.
     internal int[] GetSortedPermutation()
-    {
-        if (_sortedPermutation is not null)
-            return _sortedPermutation;
+        => Volatile.Read(ref _sortedPermutation)
+           ?? LazyInitializer.EnsureInitialized(ref _sortedPermutation, ref _sortedPermutationBuildLock, BuildSortedPermutation);
 
+    private int[] BuildSortedPermutation()
+    {
         var computed = new int[RecordIds.Length];
         for (int i = 0; i < computed.Length; i++)
             computed[i] = i;
@@ -201,7 +216,7 @@ public sealed class IndexSnapshot
             return cmp != 0 ? cmp : RecordIds[a].CompareTo(RecordIds[b]); // stable tie-break by ID
         });
 
-        Interlocked.CompareExchange(ref _sortedPermutation, computed, null);
-        return _sortedPermutation!;
+        Interlocked.Increment(ref _sortedPermutationBuildCount);
+        return computed;
     }
 }
