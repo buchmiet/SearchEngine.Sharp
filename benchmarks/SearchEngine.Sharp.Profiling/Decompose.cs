@@ -140,7 +140,7 @@ static class BuildPhases
         long a0 = GC.GetTotalAllocatedBytes(true);
         var pool = new Dictionary<string, string>(StringComparer.Ordinal);
         var inverted = new Dictionary<string, List<int>>(entries.Count, StringComparer.Ordinal);
-        var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new HashSet<string>(StringComparer.Ordinal);
         var sortTexts = new List<string>(entries.Count);
         var facetKeys = new HashSet<string>(StringComparer.Ordinal);
         var pending = new List<(int, string, long)>();

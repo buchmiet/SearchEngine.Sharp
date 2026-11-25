@@ -114,7 +114,7 @@ public static class IndexSnapshotBuilder
             : new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var recordIds = entryCount > 0 ? new List<int>(entryCount) : [];
         var sortTexts = entryCount > 0 ? new List<string>(entryCount) : [];
-        var uniqueWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var uniqueWords = new HashSet<string>(StringComparer.Ordinal);
         var facetKeys = new HashSet<string>(StringComparer.Ordinal);
         var pendingFacetValues = new List<PendingFacetValue>();
         var directFacetColumns = new Dictionary<string, long[]>(StringComparer.Ordinal);

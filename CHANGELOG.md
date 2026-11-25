@@ -39,6 +39,12 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   with `NOT AND` or `NOT OR`, and returned nothing for misplaced operators elsewhere (`a NOT AND b`, `(AND a)`,
   `(a OR) b`, `a () b`). Malformed operator sequences are now corrected by the documented rules at the start and
   end of the expression and of every parenthesised group.
+- Indexing compared raw tokens case-insensitively but stored them lowercased: a document whose tokens become equal
+  only after lowercasing (`Straße STRAẞE`, `k` and the Kelvin sign) was posted twice, so `Find` returned its id
+  twice and `CountMatches` counted it twice; the second of two tokens that are equal only under case-insensitive
+  comparison (`ς σ`, `µ μ`, Greek symbol variants such as `β ϐ`) was never indexed. Tokens are now deduplicated on
+  their lowercase form with ordinal comparison. `TextNormalizer.ForEachUniqueWord` requires an ordinal set and
+  throws `ArgumentException` otherwise.
 
 ### Changed
 

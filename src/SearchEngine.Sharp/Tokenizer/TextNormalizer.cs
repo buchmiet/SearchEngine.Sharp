@@ -10,6 +10,7 @@ public static class TextNormalizer
 
     private static readonly SearchValues<char> DefaultSeparatorValues = SearchSeparators.IndexText;
     private static readonly char[] AsciiLowercaseMap = BuildAsciiLowercaseMap();
+    private const int MaxStackWordLength = 256;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSeparator(char ch) => IsSeparator(ch, DefaultSeparatorValues);
@@ -23,7 +24,7 @@ public static class TextNormalizer
     public static List<string> GetWordsFromString(string text, SearchValues<char> separators)
     {
         var words = new List<string>();
-        var uniqueWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var uniqueWords = new HashSet<string>(StringComparer.Ordinal);
         ForEachUniqueWord(text, uniqueWords, separators, ref words, static (ref List<string> list, string word) => list.Add(word));
 
         CollectionsMarshal.AsSpan(words).Sort(static (a, b) => b.Length.CompareTo(a.Length));
@@ -45,6 +46,9 @@ public static class TextNormalizer
         ref TState state,
         UniqueWordAction<TState> action)
     {
+        if (uniqueWords.Comparer != StringComparer.Ordinal && uniqueWords.Comparer != EqualityComparer<string>.Default)
+            throw new ArgumentException("The set must compare words ordinally (StringComparer.Ordinal).", nameof(uniqueWords));
+
         uniqueWords.Clear();
         if (string.IsNullOrEmpty(text))
             return;
@@ -82,15 +86,38 @@ public static class TextNormalizer
         if (wordStart < 0)
             return;
 
+        // Look up the lowercase form, as it is stored: a case-insensitive comparison of the raw token would
+        // treat tokens that stay distinct after lowercasing (final and medial sigma, micro sign and mu) as one,
+        // and miss tokens that only become equal by lowercasing (ẞ and ß, Kelvin sign and k).
         var wordSpan = text.AsSpan(wordStart, wordEnd - wordStart);
-        if (lookup.Contains(wordSpan))
-            return;
+        string word;
+        if (IsNormalized(wordSpan))
+        {
+            if (lookup.Contains(wordSpan))
+                return;
 
-        // The whole text is one token (always so under SearchTokenization.FileMask) and is already
-        // lowercase: reuse the caller's string instead of allocating an identical copy.
-        var word = wordStart == 0 && wordEnd == text.Length && IsNormalized(wordSpan)
-            ? text
-            : CreateNormalizedWord(wordSpan);
+            // The whole text is one token (always so under SearchTokenization.FileMask) and is already
+            // lowercase: reuse the caller's string instead of allocating an identical copy.
+            word = wordStart == 0 && wordEnd == text.Length ? text : wordSpan.ToString();
+        }
+        else if (wordSpan.Length <= MaxStackWordLength)
+        {
+            Span<char> lower = stackalloc char[wordSpan.Length];
+            for (int i = 0; i < wordSpan.Length; i++)
+                lower[i] = ToLowerInvariantFast(wordSpan[i]);
+
+            if (lookup.Contains(lower))
+                return;
+
+            word = lower.ToString();
+        }
+        else
+        {
+            word = CreateNormalizedWord(wordSpan);
+            if (uniqueWords.Contains(word))
+                return;
+        }
+
         uniqueWords.Add(word);
         action(ref state, word);
     }

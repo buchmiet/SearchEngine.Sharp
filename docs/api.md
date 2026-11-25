@@ -299,6 +299,8 @@ static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, 
 static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, SearchValues<char> separators, ref TState state, UniqueWordAction<TState> action);
 ```
 
+`ForEachUniqueWord` calls `action` once per distinct lowercase token; `uniqueWords` must compare ordinally
+(`StringComparer.Ordinal` or the default comparer), otherwise it throws `ArgumentException`.
 Overloads without a separator set use the `SearchTokenization.Default` index separators.
 To use a preset's characters, create the set with
 `SearchValues.Create(tokenization.IndexSeparators)`.
