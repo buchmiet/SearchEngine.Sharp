@@ -27,7 +27,8 @@ namespace SearchEngine.Ingestion;
 ///   <item>When the <c>cancellationToken</c> passed to <c>IngestAsync</c> is cancelled, the scan stops. With
 ///         <see cref="IngestPublishOptions.FlushOnCancellation"/> set (the default), every accepted entry that is
 ///         not yet published, including entries still in the channel, is published before the task completes;
-///         otherwise those entries are discarded. Entries already published stay in the index. The task completes
+///         otherwise those entries are discarded. The entries that have arrived are published at once; entries the
+///         scan hands over before it stops follow in one more publish. Entries already published stay in the index. The task completes
 ///         with <see cref="IngestionResult.WasCancelled"/> set and does not throw.</item>
 /// </list>
 /// <para>Failures</para>
@@ -325,8 +326,14 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             if (flushOnCancel)
             {
-                // The scanner is cancelled too. Entries it already handed over may still sit in the
-                // channel; read until it has completed the channel so every accepted entry is published.
+                // Publish what has arrived at once: the scanner may take long to observe its cancellation.
+                while (reader.TryRead(out BufferedEntry entry))
+                    AppendEntry(buffer, bufferedAt, entry);
+
+                PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+
+                // The scanner is cancelled too. It may still hand over entries before it stops; read until it
+                // has completed the channel so every accepted entry is published.
                 while (await WaitForEntryAsync(reader, CancellationToken.None).ConfigureAwait(false))
                 {
                     while (reader.TryRead(out BufferedEntry entry))

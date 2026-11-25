@@ -286,7 +286,8 @@ Task<IngestionResult> IngestAsync(
   then the task faults with the scanner's exception.
 - Cancellation stops the scan. With `FlushOnCancellation` (default) every accepted entry that is not yet published,
   including entries still in the channel, is published before the task completes; otherwise they are discarded.
-  Entries already published stay in the index. The task then completes with `WasCancelled = true`.
+  The entries that have arrived are published at once, without waiting for the scanner to stop; entries it hands
+  over before it stops follow in one more publish. Entries already published stay in the index. The task then completes with `WasCancelled = true`.
 - When the updater, a `Published` or `onPublished` handler, or `progress` throws, the publisher stops, the scan is
   cancelled through the token passed to its enumerator, the enumerator is disposed, and the task faults with that
   exception (with the scanner's exception if both failed). Entries already published stay; buffered ones are not

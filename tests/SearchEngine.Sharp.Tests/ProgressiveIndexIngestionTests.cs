@@ -593,6 +593,47 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
+    public async Task Ingest_Cancelled_PublishesTheBufferWithoutWaitingForTheScannerToStop()
+    {
+        // The scanner ignores the token and stays silent after 5 entries. Cancelling must publish them at once,
+        // not when the scanner stops. The entry it yields after the cancellation is not accepted.
+        var (_, updater, ingestion) = Create();
+        using var cts = new CancellationTokenSource();
+        var scannerSilent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseScanner = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstPublish = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Feed()
+        {
+            for (int i = 0; i < 5; i++)
+                yield return new(i, new IndexedEntry($"file-{i}.txt", $"file-{i}.txt"));
+
+            scannerSilent.SetResult();
+            await releaseScanner.Task;
+            yield return new(5, new IndexedEntry("file-5.txt", "file-5.txt"));
+        }
+
+        var ingest = ingestion.IngestAsync(
+            Feed(),
+            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 },
+            onPublished: e => firstPublish.TrySetResult(e.IndexedDocumentCount),
+            cancellationToken: cts.Token);
+
+        await scannerSilent.Task.WaitAsync(TestTimeout);
+        cts.Cancel();
+        int indexedAfterCancel = await firstPublish.Task.WaitAsync(TestTimeout);
+        releaseScanner.SetResult();
+        var result = await ingest.WaitAsync(TestTimeout);
+
+        await Assert.That(indexedAfterCancel).IsEqualTo(5);
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesAccepted).IsEqualTo(5);
+        await Assert.That(result.EntriesPublished).IsEqualTo(5);
+        await Assert.That(result.PublishCount).IsEqualTo(1);
+        await Assert.That(updater.EntryCount).IsEqualTo(5);
+    }
+
+    [Test]
     public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then
