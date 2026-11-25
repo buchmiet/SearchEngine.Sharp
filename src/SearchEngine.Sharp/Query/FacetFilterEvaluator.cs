@@ -177,7 +177,7 @@ internal static class FacetFilterEvaluator
         var resolved = new ResolvedPredicate[predicates.Length];
         for (int i = 0; i < predicates.Length; i++)
         {
-            ref readonly FacetPredicate predicate = ref predicates[i];
+            FacetPredicate predicate = predicates[i];
             if (!snapshot.FacetColumns.TryGetValue(predicate.Facet, out long[]? column))
             {
                 throw new ArgumentException($"Unknown facet '{predicate.Facet}'.");
@@ -200,18 +200,12 @@ internal static class FacetFilterEvaluator
         return true;
     }
 
-    private static bool Matches(in FacetPredicate predicate, long value)
+    // FacetPredicate is closed: this switch is exhaustive, and a new kind is a compile error here until it is handled.
+    private static bool Matches(FacetPredicate predicate, long value) => predicate switch
     {
-        return predicate.Kind switch
-        {
-            FacetPredicateKind.Range =>
-                value >= predicate.MinInclusive && value <= predicate.MaxInclusive,
-            FacetPredicateKind.Mask =>
-                (value & predicate.MustHave) == predicate.MustHave
-                && (value & predicate.MustNot) == 0,
-            _ => false,
-        };
-    }
+        FacetRange range => value >= range.MinInclusive && value <= range.MaxInclusive,
+        FacetMask mask => (value & mask.MustHave) == mask.MustHave && (value & mask.MustNot) == 0,
+    };
 
     internal readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
 }
