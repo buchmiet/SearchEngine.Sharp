@@ -32,7 +32,7 @@ jobs:
         run: dotnet build SearchEngine.Sharp.sln --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test SearchEngine.Sharp.sln --configuration Release --no-build
+        run: dotnet test --project tests/SearchEngine.Sharp.Tests --configuration Release --no-build
 
       - name: Show package version
         run: echo "Package version $PACKAGE_VERSION"
