@@ -95,4 +95,4 @@ Exact+Filter previously lost the posting fast path and scanned all ordinals for 
 ## Follow-ups
 
 - Bigram pruning for `MatchGlob` if profiling shows word scan as bottleneck.
-- BDN coverage for `FastBitSet`, general facet evaluator on non-exact paths, allocation rate (`C-01`).
+- BDN coverage for `FastBitSet`, general facet evaluator on non-exact paths, allocation rate.

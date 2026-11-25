@@ -1,7 +1,7 @@
 namespace SearchEngine.Query;
 
 /// <summary>
-/// Density thresholds for hybrid selectivity paths (BDN x64 @ 100k, pass 3.1).
+/// Density thresholds for hybrid selectivity paths (BenchmarkDotNet, x64 @ 100k, corrected third measurement round).
 /// </summary>
 internal static class SelectivityThresholds
 {

@@ -121,7 +121,7 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - **Single-operand fast path with `enableOperators:true`:** expressions that tokenize to one word (no `AND`/`OR`/`NOT`/parentheses) now use posting-span fast paths for Exact and Exact+Facet, matching `enableOperators:false` behaviour.
 - **Bigram index:** skip duplicate ordinal entries per bigram list (e.g. `banana` no longer registers twice under `an` / `na`).
 - **`WithinBigramQueryMatcher` (benchmark assembly only):** A/B legacy first-bigram vs experimental rarest-bigram — rarest **~1.07× slower** on x64 (`tion`, file corpus); **not shipped**. Production `QueryMatcher` uses direct first-bigram path unchanged except ordinal dedupe in builder.
-- **`NaturalSortBenchmark` / `ProgressiveNaturalSortBenchmark`:** `IterationSetup` yields true cold NaturalSort (see committed CSV). x64 @ 100k: cold **23.4 ms**, warm **77 μs**, progressive 7× cold **48.4 ms** vs SnapshotOrder **134.5 μs** (~360×) — [`artifacts/pass2-x64-win/`](audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/pass2-x64-win/README.md).
+- **`NaturalSortBenchmark` / `ProgressiveNaturalSortBenchmark`:** `IterationSetup` yields true cold NaturalSort (see committed CSV). x64 @ 100k: cold **23.4 ms**, warm **77 μs**, progressive 7× cold **48.4 ms** vs SnapshotOrder **134.5 μs** (~360×) — [second-round x64 Windows measurements](audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/pass2-x64-win/README.md).
 - Benchmark reports and audit evidence updated with post-fix measurements on x64 and ARM64.
 - **MicroBenchmarks fingerprint CLI:** `--fingerprint` now accepts a directory or `.json` file path (fixes nested `environment-fingerprint.json/environment-fingerprint.json` output bug).
 - **`docs/file-search-guide.md`:** updated publish count (~7), facet fast-path semantics, operator guidance, and NaturalSort cold/warm requery cost (x64 measured).
@@ -133,9 +133,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - `NaturalSortCrossoverBenchmark` — empirical sort-K vs global permutation crossover (precomputed keys).
 - `SelectivityPipelineCounts` — records measured `textHitCount` / `postFacetHitCount` for E2E benchmarks.
 - `FileSearchDataFactory` — realistic file-name corpus for product-shaped benchmarks.
-- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (pass 1 ExactFacet per platform; pass 2 on x64 + ARM64; pass 3 selectivity on x64 + ARM64 including post-implementation SelectivityPipeline CSV).
+- BDN CSV evidence under `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/` (first round: ExactFacet per platform; second round: x64 + ARM64; third round: selectivity on x64 + ARM64, including the SelectivityPipeline CSV measured after the implementation).
 - `benchmarks/SearchEngine.CompetitorBenchmarks/` — library benchmark harness (SearchEngine.Sharp version comparison + Tantivy 0.22, MiniSearch 7, Bleve 2.4 adapters with verified hit counts). CSV evidence under `audits/.../artifacts/competitor-benchmarks/`.
-- [`docs/0.5.6-selectivity-research.md`](docs/0.5.6-selectivity-research.md) — pass 3 research closure and 0.5.6 implementation scope.
+- [`docs/0.5.6-selectivity-research.md`](docs/0.5.6-selectivity-research.md) — research closure of the third measurement round and 0.5.6 implementation scope.
 
 ### Tests
 

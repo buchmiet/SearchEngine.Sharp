@@ -37,7 +37,7 @@ public static class StreamingScan
         RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = 0, ReturnSpecialDirectories = false,
     };
 
-    /// <summary>C: one FileSystemEnumerable pass; name first, stat-backed facets only for name matches.</summary>
+    /// <summary>Single-threaded scan: one FileSystemEnumerable pass; name first, stat-backed facets only for name matches.</summary>
     public static IEnumerable<string> Find(FindRequest r)
     {
         var name = CreateNameMatcher(r);
@@ -56,7 +56,7 @@ public static class StreamingScan
         return NameMatcher.Create(expr, method, ops, SearchTokenization.FileMask);
     }
 
-    /// <summary>D: directories processed by <paramref name="threads"/> workers; hits streamed through a channel.</summary>
+    /// <summary>Parallel scan: directories processed by <paramref name="threads"/> workers; hits streamed through a channel.</summary>
     public static async IAsyncEnumerable<string> FindParallel(FindRequest r, int threads)
     {
         var name = CreateNameMatcher(r);
