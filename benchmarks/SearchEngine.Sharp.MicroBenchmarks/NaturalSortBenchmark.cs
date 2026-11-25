@@ -58,7 +58,7 @@ public class NaturalSortBenchmark
             enableOperators: true,
             SearchSortMode.NaturalSortAscending).Count;
 
-    [Benchmark(Description = "SnapshotOrder baseline (no sort build)")]
+    [Benchmark(Description = "Snapshot order — no sort permutation to build")]
     public int SnapshotOrder()
         => _snapshotOrderEngine.Find(
             _query,

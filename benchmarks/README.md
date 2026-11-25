@@ -40,7 +40,8 @@ dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks --
 ```
 
 A BenchmarkDotNet suite that runs in process, with the memory diagnoser. The arguments are BenchmarkDotNet's
-(`--filter`, `--list`, `--job` and so on). Results go to `benchmarks/SearchEngine.Sharp.MicroBenchmarks/BenchmarkDotNet.Artifacts`
+(`--filter`, `--list`, `--warmupCount`, `--iterationCount` and so on; do not pass `--job`, it replaces the
+in-process toolchain this suite needs). Results go to `benchmarks/SearchEngine.Sharp.MicroBenchmarks/BenchmarkDotNet.Artifacts`
 as Markdown, CSV and HTML. `--fingerprint [DIR]` writes a JSON description of the machine and runtime instead of
 running benchmarks.
 
@@ -51,6 +52,8 @@ running benchmarks.
 | `FileSearchBenchmark` | typical file-search queries on a realistic file-name corpus |
 | `FileMaskGlobBenchmark` | `*.pdf` on whole names compared with the token preset |
 | `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark` | natural sort on a new snapshot and after each publish of a progressive scan |
-| `NaturalSortSelectivityBenchmark`, `NaturalSortCrossoverBenchmark` | sorting only the hits compared with the full permutation, over result sizes |
-| `FacetSelectivityBenchmark`, `SelectivityPipelineBenchmark`, `BitSetMaterializationBenchmark` | facet filters and result lists over result sizes |
+| `NaturalSortSelectivityBenchmark` | natural sort by sorting only the hits compared with walking the permutation of all documents, over result sizes (the basis of `SelectivityThresholds.NaturalSortSortKMaxFraction`) |
+| `FacetSelectivityBenchmark` | a facet filter on the text hits only compared with a scan of all documents, over result sizes (the basis of `SelectivityThresholds.FacetOnHitsMaxFraction`) |
+| `SelectivityPipelineBenchmark` | a query with no hits, and a `Within` query with a facet filter, with natural sort and in snapshot order |
+| `BitSetMaterializationBenchmark` | turning a result set into a list of ids, over result sizes |
 | `SnapshotBuildAllocationBenchmark` | time and allocations of a snapshot build |
