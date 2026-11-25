@@ -535,7 +535,7 @@ public class ProgressiveIndexIngestionTests
         var completion = callerCancelled ? Task.FromException(new IOException("scan failed")) : new TaskCompletionSource().Task;
         var reader = new FailedChannelReader(new IOException("scan failed"), completion);
 
-        bool entriesAvailable = await ProgressiveIndexIngestion.WaitForEntryAsync(reader, cts.Token);
+        bool entriesAvailable = await PublishLoop.WaitForEntryAsync(reader, cts.Token);
 
         await Assert.That(entriesAvailable).IsFalse();
     }
@@ -547,7 +547,7 @@ public class ProgressiveIndexIngestionTests
         cts.Cancel();
         var reader = new FailedChannelReader(new OperationCanceledException(cts.Token), new TaskCompletionSource().Task);
 
-        await Assert.That(() => ProgressiveIndexIngestion.WaitForEntryAsync(reader, cts.Token)).ThrowsExactly<OperationCanceledException>();
+        await Assert.That(() => PublishLoop.WaitForEntryAsync(reader, cts.Token)).ThrowsExactly<OperationCanceledException>();
     }
 
     /// <summary>A channel reader whose wait fails with <c>error</c>, as a channel completed with an error does.</summary>
@@ -853,109 +853,6 @@ public class ProgressiveIndexIngestionTests
 
         await Assert.That(publishes.ToArray()).IsEquivalentTo([20, 5], CollectionOrdering.Matching);
         await Assert.That(result.MaxObservedStaleness).IsEqualTo(TimeSpan.FromMilliseconds(expectedStalenessMs));
-    }
-
-    /// <summary>
-    /// A clock that moves only when a test or a simulated rebuild moves it. Timers fire when a test
-    /// calls <see cref="FireTimersUntilAsync"/>, optionally just before they are due, like a real
-    /// timer that wakes a fraction of a millisecond early.
-    /// </summary>
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private readonly Lock _gate = new();
-        private readonly List<ManualTimer> _timers = [];
-        private long _now;
-
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-        public override long GetTimestamp() => Volatile.Read(ref _now);
-
-        public void Advance(TimeSpan by) => Interlocked.Add(ref _now, by.Ticks);
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            var timer = new ManualTimer(this, callback, state);
-            timer.Change(dueTime, period);
-            return timer;
-        }
-
-        /// <summary>
-        /// Fires the earliest armed timer until <paramref name="done"/> holds. Only the first firing is
-        /// <paramref name="early"/> (before its due time): a timer re-armed for the remaining
-        /// sub-millisecond must fire on time or the clock would never get there.
-        /// </summary>
-        public async Task FireTimersUntilAsync(Func<bool> done, TimeSpan early, TimeSpan timeout)
-        {
-            var elapsed = global::System.Diagnostics.Stopwatch.StartNew();
-            while (!done())
-            {
-                await Assert.That(elapsed.Elapsed).IsLessThan(timeout).Because("Timed out: no timer was armed and the expected publish never happened.");
-                if (TryFireEarliest(early))
-                    early = TimeSpan.Zero;
-                else
-                    await Task.Delay(1);
-            }
-        }
-
-        private bool TryFireEarliest(TimeSpan early)
-        {
-            ManualTimer? next;
-            lock (_gate)
-            {
-                next = _timers.MinBy(static t => t.DueTimestamp);
-                if (next is null)
-                    return false;
-
-                _timers.Remove(next);
-                Volatile.Write(ref _now, Math.Max(Volatile.Read(ref _now), next.DueTimestamp - early.Ticks));
-            }
-
-            next.Fire(); // outside the lock: the publisher continues inline and may arm or dispose timers
-            return true;
-        }
-
-        private void Register(ManualTimer timer)
-        {
-            lock (_gate)
-            {
-                if (!_timers.Contains(timer))
-                    _timers.Add(timer);
-            }
-        }
-
-        private void Unregister(ManualTimer timer)
-        {
-            lock (_gate)
-                _timers.Remove(timer);
-        }
-
-        private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state) : ITimer
-        {
-            public long DueTimestamp { get; private set; }
-
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                if (dueTime == Timeout.InfiniteTimeSpan)
-                {
-                    owner.Unregister(this);
-                    return true;
-                }
-
-                DueTimestamp = owner.GetTimestamp() + dueTime.Ticks;
-                owner.Register(this);
-                return true;
-            }
-
-            public void Fire() => callback(state);
-
-            public void Dispose() => owner.Unregister(this);
-
-            public ValueTask DisposeAsync()
-            {
-                Dispose();
-                return ValueTask.CompletedTask;
-            }
-        }
     }
 
     private static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> SlowFeed(int count, int every, TimeSpan delay)
