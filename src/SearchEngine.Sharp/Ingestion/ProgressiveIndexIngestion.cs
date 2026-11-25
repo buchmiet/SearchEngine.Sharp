@@ -272,8 +272,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         Action<IngestionPublishEvent>? onPublished,
         CancellationToken cancellationToken)
     {
-        var buffer = new List<KeyValuePair<int, IndexedEntry>>();
-        var bufferedAt = new List<long>();
+        var batch = new PendingBatch();
 
         long lastPublishTimestamp = _timeProvider.GetTimestamp();
         TimeSpan lastRebuildDuration = TimeSpan.Zero;
@@ -290,25 +289,25 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) == TimeSpan.Zero)
+                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, batch) == TimeSpan.Zero)
                 {
-                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                    PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                 }
 
                 if (reader.Completion.IsCompleted)
                 {
                     while (reader.TryRead(out BufferedEntry entry))
-                        AppendEntry(buffer, bufferedAt, entry);
+                        batch.Add(entry);
 
-                    if (buffer.Count > 0)
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                    if (batch.Count > 0)
+                        PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
 
                     break;
                 }
 
-                if (buffer.Count > 0 && ShouldPublishForBatch(buffer.Count, options, batchCap))
+                if (batch.Count > 0 && ShouldPublishForBatch(batch.Count, options, batchCap))
                 {
-                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                    PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                     continue;
                 }
 
@@ -317,7 +316,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 // While entries are buffered under a timer-driven policy, never wait for the scanner
                 // alone: a timer that wakes before its publish is due (Task.Delay truncates to whole
                 // milliseconds) is re-armed for the remaining time by the next iteration of this loop.
-                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) is { } wait)
+                if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, batch) is { } wait)
                 {
                     Task timer = wakeTimer.Arm(ToTimerDelay(wait));
                     if (await Task.WhenAny(pendingRead, timer).ConfigureAwait(false) != pendingRead)
@@ -333,11 +332,11 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
                 while (reader.TryRead(out BufferedEntry entry))
                 {
-                    AppendEntry(buffer, bufferedAt, entry);
+                    batch.Add(entry);
 
-                    if (ShouldPublishForBatch(buffer.Count, options, batchCap))
+                    if (ShouldPublishForBatch(batch.Count, options, batchCap))
                     {
-                        PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                        PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
                         break;
                     }
                 }
@@ -349,20 +348,20 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             {
                 // Publish what has arrived at once: the scanner may take long to observe its cancellation.
                 while (reader.TryRead(out BufferedEntry entry))
-                    AppendEntry(buffer, bufferedAt, entry);
+                    batch.Add(entry);
 
-                PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
 
                 // The scanner is cancelled too. It may still hand over entries before it stops; read until it
                 // has completed the channel so every accepted entry is published.
                 while (await WaitForEntryAsync(reader, CancellationToken.None).ConfigureAwait(false))
                 {
                     while (reader.TryRead(out BufferedEntry entry))
-                        AppendEntry(buffer, bufferedAt, entry);
+                        batch.Add(entry);
                 }
 
-                if (buffer.Count > 0)
-                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                if (batch.Count > 0)
+                    PublishBatch(batch, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
             }
 
             throw;
@@ -387,8 +386,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     }
 
     private void PublishBatch(
-        List<KeyValuePair<int, IndexedEntry>> buffer,
-        List<long> bufferedAt,
+        PendingBatch batch,
         IngestionState state,
         IngestPublishOptions options,
         IProgress<IngestionProgress>? progress,
@@ -397,13 +395,13 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         ref TimeSpan lastRebuildDuration,
         ref int batchCap)
     {
-        if (buffer.Count == 0)
+        if (batch.Count == 0)
             return;
 
         long publishStarted = _timeProvider.GetTimestamp();
-        state.ObserveStaleness(bufferedAt, publishStarted);
+        state.ObserveStaleness(batch.OldestTimestamp, publishStarted);
 
-        _updater.AddOrUpdateEntries(buffer);
+        _updater.AddOrUpdateEntries(batch.Entries);
 
         var rebuildDuration = _timeProvider.GetElapsedTime(publishStarted);
         lastRebuildDuration = rebuildDuration;
@@ -412,11 +410,10 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
         // The batch is in the index: count it and empty the buffer before any handler runs, so a handler that
         // throws (for example after the caller cancelled) cannot make the flush publish the same entries again.
-        int publishedCount = buffer.Count;
+        int publishedCount = batch.Count;
         int publishSequence = state.PublishCount;
         state.AddPublished(publishedCount, rebuildDuration);
-        buffer.Clear();
-        bufferedAt.Clear();
+        batch.Clear();
 
         var publishEvent = new IngestionPublishEvent
         {
@@ -438,15 +435,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             PublishCount = state.PublishCount,
             PendingCount = accepted - published,
         });
-    }
-
-    private static void AppendEntry(
-        List<KeyValuePair<int, IndexedEntry>> buffer,
-        List<long> bufferedAt,
-        BufferedEntry entry)
-    {
-        buffer.Add(new KeyValuePair<int, IndexedEntry>(entry.Id, entry.Entry));
-        bufferedAt.Add(entry.BufferedAtTimestamp);
     }
 
     private static bool ShouldPublishForBatch(int bufferCount, IngestPublishOptions options, int batchCap)
@@ -479,13 +467,13 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         IngestPublishOptions options,
         TimeSpan lastRebuildDuration,
         long lastPublishTimestamp,
-        List<long> bufferedAt)
+        PendingBatch batch)
     {
-        if (bufferedAt.Count == 0)
+        if (batch.Count == 0)
             return null;
 
         TimeSpan sinceLastPublish = ElapsedSince(lastPublishTimestamp);
-        TimeSpan untilStale = options.MaxStaleness - ElapsedSince(bufferedAt[0]);
+        TimeSpan untilStale = options.MaxStaleness - ElapsedSince(batch.OldestTimestamp);
 
         // Once one rebuild takes longer than MaxStaleness, every batch is already stale when the
         // previous rebuild finishes; publishing on staleness alone then rebuilds back to back every
@@ -500,7 +488,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         TimeSpan? untilPace = options.Policy switch
         {
             IngestPublishPolicy.TimeDebounce => options.MinInterval - sinceLastPublish,
-            IngestPublishPolicy.Adaptive when bufferedAt.Count >= options.MinTimerPublishBatch =>
+            IngestPublishPolicy.Adaptive when batch.Count >= options.MinTimerPublishBatch =>
                 ComputeInterval(options, lastRebuildDuration) - sinceLastPublish,
             _ => null,
         };
@@ -539,6 +527,29 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         => TimeSpan.FromMilliseconds(Math.Ceiling(Min(value, TimeSpan.FromDays(1)).TotalMilliseconds));
 
     private readonly record struct BufferedEntry(int Id, IndexedEntry Entry, long BufferedAtTimestamp);
+
+    /// <summary>
+    /// The entries taken from the channel and not yet published. The scanner stamps entries in the order it hands
+    /// them over, so the first entry is the oldest and its timestamp alone decides the staleness of the batch.
+    /// </summary>
+    private sealed class PendingBatch
+    {
+        public List<KeyValuePair<int, IndexedEntry>> Entries { get; } = [];
+
+        public long OldestTimestamp { get; private set; }
+
+        public int Count => Entries.Count;
+
+        public void Add(BufferedEntry entry)
+        {
+            if (Entries.Count == 0)
+                OldestTimestamp = entry.BufferedAtTimestamp;
+
+            Entries.Add(new KeyValuePair<int, IndexedEntry>(entry.Id, entry.Entry));
+        }
+
+        public void Clear() => Entries.Clear();
+    }
 
     /// <summary>
     /// One timer for the whole ingestion, re-armed for each wait instead of a new delay and cancellation source per
@@ -581,7 +592,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
     private sealed class IngestionState(TimeProvider timeProvider)
     {
-        private long _worstStalenessTicks;
         private int _entriesAccepted;
 
         // The scanner writes this counter and the publisher reads it.
@@ -589,6 +599,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         public int EntriesPublished { get; private set; }
         public int PublishCount { get; private set; }
         public TimeSpan TotalRebuildDuration { get; private set; }
+        public TimeSpan MaxObservedStaleness { get; private set; }
 
         public void IncrementAccepted() => Interlocked.Increment(ref _entriesAccepted);
 
@@ -601,21 +612,12 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             TotalRebuildDuration += rebuildDuration;
         }
 
-        public void ObserveStaleness(List<long> bufferedAt, long publishStarted)
+        // Only the publisher calls this, and the result is read after the publisher has finished.
+        public void ObserveStaleness(long oldestTimestamp, long publishStarted)
         {
-            foreach (long buffered in bufferedAt)
-            {
-                TimeSpan staleness = timeProvider.GetElapsedTime(buffered, publishStarted);
-                long stalenessTicks = staleness.Ticks;
-                long currentWorst = Volatile.Read(ref _worstStalenessTicks);
-                while (stalenessTicks > currentWorst)
-                {
-                    long original = Interlocked.CompareExchange(ref _worstStalenessTicks, stalenessTicks, currentWorst);
-                    if (original == currentWorst)
-                        break;
-                    currentWorst = Volatile.Read(ref _worstStalenessTicks);
-                }
-            }
+            TimeSpan staleness = timeProvider.GetElapsedTime(oldestTimestamp, publishStarted);
+            if (staleness > MaxObservedStaleness)
+                MaxObservedStaleness = staleness;
         }
 
         public IngestionResult ToResult(bool completed, bool cancelled)
@@ -626,7 +628,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 EntriesPublished = EntriesPublished,
                 PublishCount = PublishCount,
                 TotalRebuildDuration = TotalRebuildDuration,
-                MaxObservedStaleness = new TimeSpan(Volatile.Read(ref _worstStalenessTicks)),
+                MaxObservedStaleness = MaxObservedStaleness,
                 CompletedSuccessfully = completed,
                 WasCancelled = cancelled,
             };
