@@ -459,6 +459,109 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Ingest_ScannerFaultsRightAfterItsEntries_AlwaysPublishesThemBeforeFaulting(bool callerCancelsRightAfter)
+    {
+        // The scan hands over 3 entries and fails at once; in one variant the caller cancels at the same moment.
+        // Each run races the scanner's failure against the publisher's wait, so the loop covers many orderings.
+        const int runs = 200;
+        int lostFlushes = 0;
+        int wrongExceptions = 0;
+
+        for (int run = 0; run < runs; run++)
+        {
+            var updater = new IndexUpdater(new IndexSnapshotProvider());
+            var ingestion = new ProgressiveIndexIngestion(updater);
+            using var cts = new CancellationTokenSource();
+            var scanFault = new IOException("scan failed");
+            var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Feed()
+            {
+                for (int i = 0; i < 3; i++)
+                    yield return new(i, new IndexedEntry($"file-{i}.txt", $"file-{i}.txt"));
+
+                await Task.Yield();
+                failing.SetResult();
+                throw scanFault;
+            }
+
+            var ingest = ingestion.IngestAsync(
+                Feed(),
+                new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 },
+                cancellationToken: cts.Token);
+
+            if (callerCancelsRightAfter)
+            {
+                await failing.Task.WaitAsync(TestTimeout);
+                cts.Cancel();
+            }
+
+            Exception? thrown = null;
+            try
+            {
+                await ingest.WaitAsync(TestTimeout);
+            }
+            catch (Exception ex)
+            {
+                thrown = ex;
+            }
+
+            if (!ReferenceEquals(thrown, scanFault))
+                wrongExceptions++;
+            if (updater.EntryCount != 3)
+                lostFlushes++;
+        }
+
+        await Assert.That(lostFlushes).IsEqualTo(0).Because($"{lostFlushes} of {runs} runs did not publish the 3 accepted entries.");
+        await Assert.That(wrongExceptions).IsEqualTo(0).Because($"{wrongExceptions} of {runs} runs did not fault with the scanner's exception.");
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task WaitForEntry_ReportsEndOfInputWhenTheScannerFailed(bool callerCancelled)
+    {
+        // A failed channel throws the scanner's exception from WaitToReadAsync. That can happen before the
+        // channel's Completion task is complete, and after the caller cancelled; neither may skip the final flush.
+        using var cts = new CancellationTokenSource();
+        if (callerCancelled)
+            cts.Cancel();
+        var completion = callerCancelled ? Task.FromException(new IOException("scan failed")) : new TaskCompletionSource().Task;
+        var reader = new FailedChannelReader(new IOException("scan failed"), completion);
+
+        bool entriesAvailable = await ProgressiveIndexIngestion.WaitForEntryAsync(reader, cts.Token);
+
+        await Assert.That(entriesAvailable).IsFalse();
+    }
+
+    [Test]
+    public async Task WaitForEntry_PropagatesTheCallersCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var reader = new FailedChannelReader(new OperationCanceledException(cts.Token), new TaskCompletionSource().Task);
+
+        await Assert.That(() => ProgressiveIndexIngestion.WaitForEntryAsync(reader, cts.Token)).ThrowsExactly<OperationCanceledException>();
+    }
+
+    /// <summary>A channel reader whose wait fails with <c>error</c>, as a channel completed with an error does.</summary>
+    private sealed class FailedChannelReader(Exception error, Task completion) : System.Threading.Channels.ChannelReader<int>
+    {
+        public override Task Completion => completion;
+
+        public override bool TryRead(out int item)
+        {
+            item = 0;
+            return false;
+        }
+
+        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromException<bool>(error);
+    }
+
+    [Test]
     public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then

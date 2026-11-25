@@ -341,18 +341,19 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         }
     }
 
-    private static async Task<bool> WaitForEntryAsync(
-        ChannelReader<BufferedEntry> reader,
+    internal static async Task<bool> WaitForEntryAsync<T>(
+        ChannelReader<T> reader,
         CancellationToken cancellationToken)
     {
         try
         {
             return await reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception) when (reader.Completion.IsCompleted && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // The scanner failed and the channel is drained. The failure surfaces from the producer
-            // task; the publisher must still flush its buffer first.
+            // The scanner failed: the channel throws its exception once it is drained, sometimes before its
+            // Completion task is complete. That is the end of the input. The failure surfaces from the producer
+            // task; the publisher must still flush its buffer first, also when the caller cancels meanwhile.
             return false;
         }
     }
