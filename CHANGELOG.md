@@ -89,13 +89,22 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 
 ### Tests
 
-- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); malformed
-  operator sequences at the start, middle and end of expressions and groups (52 cases); lazy bigram index vs brute
-  force with concurrent first callers; one build of the bigram index and of the sort permutation for 8
-  concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
-  columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
-  `NameMatcher` vs index (20 queries × 4 presets, and every combination of 20 texts × 43 queries × 3 methods ×
-  8 tokenizations, including empty text, custom separators and a regex timeout).
+324 tests in total.
+
+- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent).
+- Query operators: malformed operator sequences at the start, middle and end of expressions and groups (52 cases).
+- Snapshot: lazy bigram index vs brute force with concurrent first callers; one build of the bigram index and of
+  the sort permutation for 8 concurrent first callers.
+- Glob matching: 50,000 random glob/word pairs (fast paths vs general matcher).
+- Facets: columns with known and unknown entry count; `FacetValues` null, duplicate and concurrently mutated
+  input (7).
+- Ingestion: staleness back-off vs strict; timer and publisher-failure paths (19 in the class).
+- `IndexUpdater`: atomic mutations and `Clear` keeping the configuration (13).
+- Unicode matching (45 cases): lone surrogates, operators vs folded terms, grapheme boundaries for `Within` and
+  globs, unfolded regexes, accent-stripping scope, invariant globalization.
+- `TextNormalizer`: token de-duplication (15).
+- `NameMatcher` vs index: 20 queries × 4 presets, and every combination of 20 texts × 43 queries × 3 methods × 8
+  tokenizations, including empty text, custom separators and a regex timeout.
 
 ### Benchmarks
 
@@ -128,6 +137,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - [`docs/0.5.6-selectivity-research.md`](docs/0.5.6-selectivity-research.md) — pass 3 research closure and 0.5.6 implementation scope.
 
 ### Tests
+
+324 tests in total.
 
 - `Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale`
 - `ExactSingleTerm_WithFacetFilter_MatchesWithinPlusFilter`
@@ -183,6 +194,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - README section **Live indexing during scans**.
 
 ### Tests
+
+324 tests in total.
 
 - Progressive ingestion functional, cancellation, and read-while-write stress tests.
 
