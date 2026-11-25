@@ -35,6 +35,7 @@ public sealed class SearchTokenization
         QuerySeparators = querySeparators;
         IndexSeparatorValues = SearchValues.Create(indexSeparators);
         QuerySeparatorValues = SearchValues.Create(querySeparators);
+        ParenthesesGroup = querySeparators.Contains('(') && querySeparators.Contains(')');
     }
 
     /// <summary>Gets the characters that split indexed text into tokens.</summary>
@@ -46,6 +47,10 @@ public sealed class SearchTokenization
     internal SearchValues<char> IndexSeparatorValues { get; }
 
     internal SearchValues<char> QuerySeparatorValues { get; }
+
+    // Parentheses can group terms only when both are query separators; otherwise a separator parenthesis splits
+    // terms like a space and the other one is a character of its term.
+    internal bool ParenthesesGroup { get; }
 
     /// <summary>Gets the Unicode options of this preset. <see cref="UnicodeMatching.None"/> for <see cref="Default"/>,
     /// <see cref="FileMask"/> and presets made by <see cref="Create"/>.</summary>

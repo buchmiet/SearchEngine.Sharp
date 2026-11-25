@@ -71,6 +71,14 @@ public class OperatorCorrectionTests
         () => ("(()) alpha", [1, 2]),
         () => ("alpha AND (OR) beta", [1]),
         () => ("gamma OR (NOT)", [4]),
+        () => ("alpha () OR gamma", [1, 2, 4]),
+        () => ("alpha (OR) OR gamma", [1, 2, 4]),
+        () => ("alpha (NOT) OR gamma", [1, 2, 4]),
+        () => ("(alpha) () OR gamma", [1, 2, 4]),
+        () => ("alpha (()) OR gamma", [1, 2, 4]),
+        () => ("alpha OR () gamma", [1, 2, 4]),
+        () => ("alpha AND () OR gamma", []),
+        () => ("alpha NOT () OR gamma", []),
 
         // Unbalanced parentheses are plain separators.
         () => ("(alpha OR gamma", [1, 2, 4]),
@@ -97,6 +105,41 @@ public class OperatorCorrectionTests
         {
             await Assert.That(engine.Find(expression, method, enableOperators: true).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
             await Assert.That(engine.CountMatches(expression, method, enableOperators: true)).IsEqualTo(expected.Length);
+        }
+    }
+
+    // Parentheses group only when both are query separators. With one of them a separator and the other a token
+    // character, the separator splits terms like a space and the other stays part of its term.
+    // 1: "(a b", 2: "a b)", 3: "zzz", 4: "b)"
+    public static IEnumerable<Func<(string QuerySeparators, string Expression, int[] Expected)>> OneParenthesisCases() =>
+    [
+        () => (" )", "(a) b", [1]),
+        () => (" )", "(a b)", [1]),
+        () => (" )", "a (b)", []),
+        () => (" )", "NOT (a zzz)", [3]),
+        () => (" (", "(a b)", [2]),
+        () => (" (", "NOT (a b)", [4]),
+        () => (" (", "(a) b", []),
+        () => (" (", "zzz OR (a b)", [2, 3]),
+    ];
+
+    [Test]
+    [MethodDataSource(nameof(OneParenthesisCases))]
+    public async Task OneParenthesisAsQuerySeparator_IsAPlainSeparator(string querySeparators, string expression, int[] expected)
+    {
+        var tokenization = SearchTokenization.Create(" ", querySeparators);
+        var documents = new Dictionary<int, string> { [1] = "(a b", [2] = "a b)", [3] = "zzz", [4] = "b)" };
+        var (engine, updater, _) = TestIndex.Create(tokenization);
+        updater.RebuildFrom(documents);
+
+        foreach (var method in new[] { WordMatchMethod.Exact, WordMatchMethod.Within })
+        {
+            await Assert.That(engine.Find(expression, method, enableOperators: true).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
+            await Assert.That(engine.CountMatches(expression, method, enableOperators: true)).IsEqualTo(expected.Length);
+
+            var matcher = NameMatcher.Create(expression, method, enableOperators: true, tokenization);
+            int[] matched = [.. documents.Where(d => matcher.IsMatch(d.Value)).Select(d => d.Key).Order()];
+            await Assert.That(matched).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
     }
 }

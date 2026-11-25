@@ -155,8 +155,12 @@ Rules:
    - `not term` matches all documents in the snapshot except those matching `term`.
    - Precedence: `NOT` binds tighter than `AND`, which binds tighter than `OR`.
      Same-precedence operators evaluate left to right.
-   - Parentheses group subexpressions, but only when balanced across the whole
-     expression. If unbalanced, every parenthesis degrades to a plain separator.
+   - Parentheses group subexpressions when both `(` and `)` are query separators
+     (as in `Default`) and they balance across the whole expression. If they do not
+     balance, every parenthesis is a plain separator. A preset that has only one of
+     them among its query separators never groups: that one splits terms like a
+     space, and the other is a character of its term (`SearchTokenization.Create(" ", " )")`
+     reads `(a b)` as the terms `(a` and `b`).
 4. With `enableOperators: false` (the default), `and` / `or` / `not` are ordinary
    search terms and parentheses are plain separators.
 5. Malformed expressions are corrected, not rejected. The start and end of a
@@ -167,7 +171,8 @@ Rules:
      (`a AND NOT b`). Any other pair of adjacent operators collapses to `AND`,
      wherever it occurs: `a AND AND b`, `a OR OR b`, `a NOT AND b` and
      `a AND NOT AND b` all mean `a AND b`.
-   - An empty group `()` is dropped.
+   - An empty group `()` is dropped, and what follows it meets what came before
+     it: `a () OR b` = `a OR b`, `a AND () OR b` = `a AND OR b` = `a AND b`.
 6. An expression that is empty, whitespace, or reduces to nothing after correction
    returns no results unless a non-empty facet filter is supplied
    (see [filter-only queries](#filter-only-queries)).

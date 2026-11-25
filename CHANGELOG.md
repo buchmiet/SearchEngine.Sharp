@@ -86,6 +86,10 @@ Changed.
   nor the facet values of its entries, so the updater cannot start from one; the factory now returns the entries,
   and the index and the updater are both built from them. The index with initial entries is built when the
   provider is first resolved instead of when `AddSearchEngine` is called.
+- With `enableOperators: true`, parentheses group terms only when both `(` and `)` are query separators of the
+  preset. In a preset made by `SearchTokenization.Create` with only one of them, that one splits terms like a space
+  and the other is part of its term. Such presets used to throw `ArgumentOutOfRangeException` for `(a) b` or leave
+  `NOT` unapplied in `NOT (a b)`. `Default` and `FileMask` are unchanged.
 
 ### Fixed
 
