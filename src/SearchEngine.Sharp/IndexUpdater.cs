@@ -8,11 +8,12 @@ namespace SearchEngine;
 //
 // Why full rebuild on every mutation?
 //   The index data structures (flat arrays, sorted word list, bigram index) do not
-//   support incremental updates — inserting or removing a word would require
-//   re-sorting and re-packing all arrays. Full rebuild is simple, correct, and fast
-//   enough for the expected mutation rates (human-speed edits, not bulk streaming).
-//   For bulk loads, the Async variants allow streaming data in before acquiring the
-//   lock, so the lock is held only for the final in-memory copy + rebuild.
+//   support incremental updates: inserting or removing a word would require
+//   re-sorting and re-packing all arrays. A full rebuild is simple and correct, and it is
+//   fast enough for interactive edit rates. Bulk loads use the batch operations or
+//   ProgressiveIndexIngestion, which rebuild once per batch. The Async rebuild variants
+//   read the stream before acquiring the lock, so the lock is held only for the final
+//   in-memory copy and the rebuild.
 //
 // Thread safety:
 //   _rebuildGate serialises all writes to _entries and all calls to Publish.
@@ -26,8 +27,8 @@ namespace SearchEngine;
 //   throws; full rebuilds fill a new dictionary and only swap it in after the build succeeded.
 
 /// <summary>
-/// Handles index rebuilding with serialized concurrent access.
-/// Maintains source data for convenient add/remove/refresh operations.
+/// Keeps the entries of an index and publishes a new snapshot to the <see cref="IndexSnapshotProvider"/> after
+/// each mutation. Mutations are serialized; queries read the published snapshot without taking the lock.
 /// </summary>
 public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null) : IIndexUpdater
 {
@@ -66,7 +67,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public async Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default)
     {
-        // Consume the async stream outside the lock — awaiting while holding a lock
+        // Consume the async stream outside the lock: awaiting while holding a lock
         // would block the thread pool thread for the duration of the I/O.
         var buffer = new Dictionary<int, IndexedEntry>();
         await foreach (var (key, value) in entries.WithCancellation(ct))
@@ -280,7 +281,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
         return true;
     }
 
-    // Puts back what a failed mutation changed; the previously published snapshot was never replaced.
+    // Puts back what a failed mutation changed; the published snapshot is untouched because publishing is the last step.
     private void Rollback(List<Undo> undo)
     {
         for (int i = undo.Count - 1; i >= 0; i--)

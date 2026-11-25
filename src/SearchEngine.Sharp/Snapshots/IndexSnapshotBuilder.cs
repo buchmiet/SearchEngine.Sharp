@@ -8,27 +8,28 @@ namespace SearchEngine.Snapshots;
 
 // ── Build algorithm (four phases) ────────────────────────────────────────────
 //
-// Phase 1 — Build inverted index (word → list of document ordinals).
-//   Each document is tokenized; unique words per document are tracked via a
-//   per-call HashSet<string> so that duplicate words within one document do
-//   not generate duplicate postings (one entry per document, not per occurrence).
+// Phase 1: Build the inverted index (word → list of document ordinals).
+//   The text of each document is folded (SearchTokenization.FoldIndexText) and tokenized.
+//   One HashSet<string>, cleared for every document, tracks the unique words of the
+//   current document, so duplicate words within one document do not generate
+//   duplicate postings (one entry per document, not per occurrence).
 //   Words are canonicalized through WordStringPool so identical strings share
 //   the same heap instance, reducing memory when the same word appears across
 //   many documents.
 //
-// Phase 2 — Sort words by descending length.
+// Phase 2: Sort words by descending length.
 //   QueryMatcher.MatchWithin relies on being able to break early once it
 //   encounters a word shorter than the query. Descending length order makes
 //   this loop termination correct.
 //
-// Phase 3 — Pack into flat arrays.
+// Phase 3: Pack into flat arrays.
 //   All word characters are concatenated into a single char[] (WordsArray).
 //   All posting lists are concatenated into a single int[] (PostingDocIds).
 //   Parallel arrays (WordLengths, WordEnds, PostingOffsets, PostingCounts)
-//   let the query engine navigate both flat arrays without pointer indirection.
-//   This improves cache locality significantly for large indexes.
+//   let the query engine navigate both flat arrays without pointer indirection,
+//   which keeps the data contiguous in memory.
 //
-// Phase 4 — Bigram index (lazy, see IndexSnapshot.BigramWordIndices).
+// Phase 4: Bigram index (lazy, see IndexSnapshot.BigramWordIndices).
 //   For every pair of consecutive characters in each word, record the word's
 //   ordinal under that bigram key. At query time, MatchWithin looks up only
 //   the candidate words that share the query's first bigram, cutting the
@@ -203,7 +204,7 @@ public static class IndexSnapshotBuilder
 
         // Phase 2: sort descending by word length.
         // QueryMatcher.MatchWithin breaks as soon as it sees a word shorter than the
-        // query, so this ordering is load-bearing — not just cosmetic.
+        // query, so MatchWithin returns wrong results without this ordering.
         CollectionsMarshal.AsSpan(wordDescriptions).Sort(static (a, b) => b.Length.CompareTo(a.Length));
 
         var wordsArray = new char[totalWordsLength];

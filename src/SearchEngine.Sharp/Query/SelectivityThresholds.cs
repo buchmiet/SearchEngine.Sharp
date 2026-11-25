@@ -1,14 +1,18 @@
 namespace SearchEngine.Query;
 
 /// <summary>
-/// Density thresholds for hybrid selectivity paths (BDN x64 @ 100k, pass 3.1).
+/// Density thresholds that decide, from the share of documents a query matches, whether the sort and facet
+/// stages work on the hit list only or on the whole index. Measured on a corpus of 100,000 names.
 /// </summary>
 internal static class SelectivityThresholds
 {
-    /// <summary>Sort-K wins until ~90% density; use 80% conservative margin.</summary>
+    /// <summary>
+    /// Largest hit fraction for which sorting only the hits (sort-K) is used. Sort-K is faster up to about 90%
+    /// density; 80% leaves a margin.
+    /// </summary>
     internal const double NaturalSortSortKMaxFraction = 0.80;
 
-    /// <summary>Facet-on-K wins until ~50% density.</summary>
+    /// <summary>Largest hit fraction for which facet filtering runs on the hits only. Faster up to about 50% density.</summary>
     internal const double FacetOnHitsMaxFraction = 0.50;
 
     internal static bool UseSortKPath(int hitCount, int documentCount)

@@ -11,8 +11,10 @@ public sealed class IngestPublishOptions
     public IngestPublishPolicy Policy { get; init; } = IngestPublishPolicy.Adaptive;
 
     /// <summary>
-    /// Maximum pending entries before a publish is forced (all policies except
-    /// <see cref="IngestPublishPolicy.PerEntry"/>). Defaults to 2,000.
+    /// Batch size for <see cref="IngestPublishPolicy.FixedBatch"/>: a publish happens when this many entries are
+    /// pending. Under <see cref="IngestPublishPolicy.Adaptive"/> it is the initial batch cap and the lower bound
+    /// of the cap (see <see cref="GrowthAwareBatchCap"/>). <see cref="IngestPublishPolicy.PerEntry"/> and
+    /// <see cref="IngestPublishPolicy.TimeDebounce"/> ignore it. Defaults to 2,000.
     /// </summary>
     public int FixedBatchSize { get; init; } = 2_000;
 
@@ -56,10 +58,10 @@ public sealed class IngestPublishOptions
     /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last rebuild
     /// duration has passed since the previous publish finished. An entry handed over just as a rebuild
     /// starts therefore waits that rebuild plus the gap, so with <c>k = AdaptiveMultiplier</c> and a rebuild
-    /// of duration <c>R</c> the worst staleness is <c>max(MaxStaleness, (1 + k) × R)</c>. Nothing changes
-    /// while <c>R</c> stays below <c>MaxStaleness / (1 + k)</c> (333 ms with the defaults); beyond that
-    /// the bound grows with the index (a 400 ms rebuild gives 1.2 s instead of 1.0 s) instead of the scan
-    /// degrading to back-to-back full rebuilds.</para>
+    /// of duration <c>R</c> the worst staleness is <c>max(MaxStaleness, (1 + k) × R)</c>. While <c>R</c> stays
+    /// below <c>MaxStaleness / (1 + k)</c> (333 ms with the defaults) the bound is <see cref="MaxStaleness"/>;
+    /// beyond that it grows with the index (a 400 ms rebuild gives 1.2 s instead of 1.0 s), which keeps the scan
+    /// from running back-to-back full rebuilds.</para>
     /// </remarks>
     public TimeSpan MaxStaleness { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -73,16 +75,18 @@ public sealed class IngestPublishOptions
     /// <summary>
     /// When <see langword="true"/> (default) and <see cref="Policy"/> is
     /// <see cref="IngestPublishPolicy.Adaptive"/>, the batch cap grows after each publish to
-    /// <c>max(FixedBatchSize, indexed document count)</c> so fast scans avoid fixed-size
-    /// rebuild amplification.
+    /// <c>max(FixedBatchSize, indexed document count)</c>, so the number of full rebuilds stays low as the
+    /// index grows. When <see langword="false"/> the cap stays at <see cref="FixedBatchSize"/>.
     /// </summary>
     public bool GrowthAwareBatchCap { get; init; } = true;
 
     /// <summary>
     /// When <see langword="true"/>, <see cref="IngestPublishPolicy.Adaptive"/> publishes as soon as the
     /// oldest buffered entry exceeds <see cref="MaxStaleness"/>, even when that means starting a full
-    /// rebuild immediately after the previous one (0.5.6 behaviour; quadratic total rebuild work once a
-    /// rebuild takes longer than <see cref="MaxStaleness"/>). Defaults to <see langword="false"/>.
+    /// rebuild immediately after the previous one. Once a single rebuild takes longer than
+    /// <see cref="MaxStaleness"/>, every batch is stale when the previous rebuild ends, so rebuilds run back to
+    /// back and total rebuild work grows quadratically with the index size. Defaults to
+    /// <see langword="false"/>, which applies the pacing described under <see cref="MaxStaleness"/>.
     /// </summary>
     public bool StrictMaxStaleness { get; init; }
 

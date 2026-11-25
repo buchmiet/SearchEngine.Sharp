@@ -39,7 +39,7 @@ internal static class QueryExpressionEvaluator
     }
 
     /// <summary>
-    /// Returns true when the expression evaluates to a single word operand — with or without
+    /// Returns true when the expression evaluates to a single word operand, with or without
     /// <paramref name="enableOperators"/>. Multi-word, NOT, and parenthesized expressions return false.
     /// </summary>
     internal static bool TryGetSingleSemanticWord(
@@ -209,7 +209,7 @@ internal static class QueryExpressionEvaluator
         AddTerms(tokenization.FoldQueryTerm(wordSpan), tokenization.QuerySeparatorValues, tokens);
     }
 
-    // Operators were recognized on the word as typed; folding comes after, so a word that only folds to and/or/not
+    // Operators are recognized on the word as typed; folding comes after, so a word that only folds to and/or/not
     // (nöt, ånd) stays a term. A folded term can contain a query separator (U+037E GREEK QUESTION MARK composes to
     // ';'): it is split as the folded index text is, and the parts are joined by implicit AND like adjacent terms.
     private static void AddTerms(ReadOnlySpan<char> folded, SearchValues<char> separators, List<QueryToken> tokens)

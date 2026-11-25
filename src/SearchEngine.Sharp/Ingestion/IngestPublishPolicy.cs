@@ -23,10 +23,11 @@ public enum IngestPublishPolicy
     TimeDebounce,
 
     /// <summary>
-    /// Publishes when the pending buffer is non-empty and elapsed time since the last publish
-    /// is at least <c>max(MinInterval, AdaptiveMultiplier × lastRebuildDuration)</c>.
+    /// Publishes when at least <see cref="IngestPublishOptions.MinTimerPublishBatch"/> entries are pending and the
+    /// elapsed time since the last publish is at least <c>max(MinInterval, AdaptiveMultiplier × lastRebuildDuration)</c>.
     /// Also publishes when the buffer reaches the current batch cap (see
-    /// <see cref="IngestPublishOptions.GrowthAwareBatchCap"/>).
+    /// <see cref="IngestPublishOptions.GrowthAwareBatchCap"/>) and when the oldest pending entry exceeds
+    /// <see cref="IngestPublishOptions.MaxStaleness"/>.
     /// </summary>
     Adaptive,
 }

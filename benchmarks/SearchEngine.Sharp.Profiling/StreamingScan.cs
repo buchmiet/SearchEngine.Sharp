@@ -22,8 +22,8 @@ public readonly struct EntryFacets(FindRequest r)
 }
 
 /// <summary>
-/// Variant C (single-threaded) and D (parallel directories) streaming scans without an index. Names are matched by
-/// the package's <see cref="NameMatcher"/> with <see cref="SearchTokenization.FileMask"/>, so a hit is exactly what
+/// Streaming scans without an index: single-threaded (<c>scan</c>) and with parallel directory workers
+/// (<c>scan-parallel</c>). Names are matched by the package's <see cref="NameMatcher"/> with <see cref="SearchTokenization.FileMask"/>, so a hit is exactly what
 /// <c>Find</c> would return on an index of the same names.
 /// </summary>
 public static class StreamingScan
@@ -37,7 +37,7 @@ public static class StreamingScan
         RecurseSubdirectories = false, IgnoreInaccessible = true, AttributesToSkip = 0, ReturnSpecialDirectories = false,
     };
 
-    /// <summary>C: one FileSystemEnumerable pass; name first, stat-backed facets only for name matches.</summary>
+    /// <summary>Single-threaded scan: one FileSystemEnumerable pass; name first, stat-backed facets only for name matches.</summary>
     public static IEnumerable<string> Find(FindRequest r)
     {
         var name = CreateNameMatcher(r);
@@ -56,7 +56,7 @@ public static class StreamingScan
         return NameMatcher.Create(expr, method, ops, SearchTokenization.FileMask);
     }
 
-    /// <summary>D: directories processed by <paramref name="threads"/> workers; hits streamed through a channel.</summary>
+    /// <summary>Parallel scan: directories processed by <paramref name="threads"/> workers; hits streamed through a channel.</summary>
     public static async IAsyncEnumerable<string> FindParallel(FindRequest r, int threads)
     {
         var name = CreateNameMatcher(r);

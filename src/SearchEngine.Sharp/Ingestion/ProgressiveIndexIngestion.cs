@@ -9,7 +9,7 @@ namespace SearchEngine.Ingestion;
 /// <remarks>
 /// <para><b>Concurrency contract</b></para>
 /// <list type="bullet">
-///   <item>Only one <see cref="IngestAsync"/> call may run per instance at a time.</item>
+///   <item>Only one <c>IngestAsync</c> call may run per instance at a time.</item>
 ///   <item>The scanner feeds a bounded channel; when the channel is full the scanner awaits
 ///         (backpressure) until the publisher drains entries.</item>
 ///   <item>Concurrent <see cref="ISearchEngine"/> queries against the same
@@ -19,7 +19,7 @@ namespace SearchEngine.Ingestion;
 /// </list>
 /// <para><b>Cancellation contract</b></para>
 /// <list type="bullet">
-///   <item>When <paramref name="cancellationToken"/> is signaled, the scan stops accepting new
+///   <item>When the <c>cancellationToken</c> passed to <c>IngestAsync</c> is signaled, the scan stops accepting new
 ///         entries.</item>
 ///   <item>When <see cref="IngestPublishOptions.FlushOnCancellation"/> is <see langword="true"/>
 ///         (default), every accepted entry that is not yet published, including entries still queued in
@@ -256,7 +256,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
                 // While entries are buffered under a timer-driven policy, never wait for the scanner
                 // alone: a timer that wakes before its publish is due (Task.Delay truncates to whole
-                // milliseconds) is re-armed for the remaining time by the next pass of this loop.
+                // milliseconds) is re-armed for the remaining time by the next iteration of this loop.
                 if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) is { } wait)
                 {
                     using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

@@ -28,9 +28,9 @@ def med(rs, f):
 def vname(r):
     v = r['variant']
     lib = r['label'].split(':')[1] if ':' in (r.get('label') or '') else ''
-    if v in ('B', 'E') and r.get('policy') and r['policy'] != 'adaptive':
+    if v in ('commander-policy', 'commander-single-pass') and r.get('policy') and r['policy'] != 'adaptive':
         v += '-' + r['policy']
-    elif v == 'B':
+    elif v == 'commander-policy':
         v += '-adaptive-' + str(r.get('batch'))
     return (lib + ' ' + v).strip()
 

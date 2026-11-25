@@ -109,16 +109,16 @@ static class FindRun
 
         switch (variant)
         {
-            case "A":
-            case "B":
-            case "E":
-                cp = new CommanderPattern(variant == "A" ? null : opts, instrument, fseScan: variant == "E");
+            case "commander":
+            case "commander-policy":
+            case "commander-single-pass":
+                cp = new CommanderPattern(variant == "commander" ? null : opts, instrument, fseScan: variant == "commander-single-pass");
                 await foreach (var (path, _) in cp.FindAsync(req)) OnHit(path);
                 break;
-            case "C":
+            case "scan":
                 foreach (var path in StreamingScan.Find(req)) OnHit(path);
                 break;
-            case "D":
+            case "scan-parallel":
                 await foreach (var path in StreamingScan.FindParallel(req, a.Int("threads", Math.Min(8, Environment.ProcessorCount))))
                     OnHit(path);
                 break;
@@ -141,8 +141,8 @@ static class FindRun
             ["mode"] = "find",
             ["label"] = a.Opt("label"),
             ["variant"] = variant,
-            ["policy"] = variant is "B" or "E" ? a.Opt("policy") ?? "adaptive" : null,
-            ["batch"] = variant is "B" or "E" ? opts.FixedBatchSize : null,
+            ["policy"] = variant is "commander-policy" or "commander-single-pass" ? a.Opt("policy") ?? "adaptive" : null,
+            ["batch"] = variant is "commander-policy" or "commander-single-pass" ? opts.FixedBatchSize : null,
             ["query"] = req.NamePattern,
             ["regex"] = req.UseRegex,
             ["hits"] = hits,

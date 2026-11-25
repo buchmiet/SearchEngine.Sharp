@@ -1,15 +1,14 @@
 # Query semantics reference
 
-Precise behavior of tokenization, term matching, boolean expressions, glob patterns, and
-facet filters. The test suite (`tests/SearchEngine.Sharp.Tests`) encodes these rules;
-where this document and the tests disagree, the tests win.
+How text is tokenized and how a query is parsed and matched: terms, boolean operators, glob
+patterns, regular expressions, Unicode options, facet filters and result order.
 
 ## Pipeline overview
 
-**Indexing:** `SearchText` → split on the snapshot's **index-side** separators → lowercase
+Indexing: `SearchText` → split on the snapshot's index-side separators → lowercase
 → unique tokens per document → inverted index (token → posting list of documents).
 
-**Querying:** expression → split on the snapshot's **query-side** separators → each term
+Querying: expression → split on the snapshot's query-side separators → each term
 resolves to a document set → sets combined with boolean algebra → optional facet filter
 intersected → results materialized in the requested sort order.
 
@@ -24,7 +23,7 @@ read it from `snapshot.Tokenization`.
 
 | Preset | Index separators | Query separators | Use case |
 |---|---|---|---|
-| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except **no TAB** | token-level search (pre-0.5.3 behavior) |
+| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except TAB | token-level search |
 | `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | whitespace only: space, CR, LF | classic file-manager masks on whole names |
 | `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
 
@@ -38,14 +37,14 @@ var custom = SearchTokenization.Create(indexSeparators: "-", querySeparators: " 
 
 With `SearchTokenization.FileMask`:
 
-- A bare term such as `system` matches the **whole file name** (case-insensitive exact
+- A bare term such as `system` matches the whole file name (case-insensitive exact
   token equality), not a substring inside a longer token. `my-system-backup.zip` does
-  **not** match `system`.
-- `*.pdf`, `system*`, and `*system*` are anchored globs on the whole name; `.` is **not**
+  not match `system`.
+- `*.pdf`, `system*`, and `*system*` are anchored globs on the whole name; `.` is not
   a separator, so `*.pdf` means "name ends with `.pdf`".
 - `WordMatchMethod.Within` still matches substrings of the whole name (e.g. `port`
   matches `report-final.pdf`).
-- Boolean operators (`AND` / `OR` / `NOT`) still work; only **space** splits query terms
+- Boolean operators (`AND` / `OR` / `NOT`) still work; only space splits query terms
   (implicit AND between adjacent terms still applies).
 
 Worked examples, given an index of names `report-final.pdf`, `System`,
@@ -62,13 +61,13 @@ Worked examples, given an index of names `report-final.pdf`, `System`,
 | `* AND NOT *.zip` | all except `my-system-backup.zip` | `*` = all, minus suffix glob |
 | `port` (`Within`) | `report-final.pdf` | substring of the whole name |
 
-FileMask behavioral notes (by design — not bugs):
+Limits of FileMask:
 
-1. **Parentheses are not query separators** in FileMask, so parenthesis grouping is
+1. Parentheses are not query separators in FileMask, so parenthesis grouping is
    unavailable. Unbalanced-paren degradation in the evaluator does not apply because `(`
-   and `)` are ordinary name characters, not separators — a literal `(` or `)` in a name
-   **can** be matched (`report(1).pdf` matches the mask `report(1).pdf`).
-2. A **space in a file name** cannot be typed literally in a mask expression — use `?`
+   and `)` are ordinary name characters, not separators. A literal `(` or `)` in a name
+   can be matched (`report(1).pdf` matches the mask `report(1).pdf`).
+2. A space in a file name cannot be typed literally in a mask expression. Use `?`
    or `*` wildcards instead.
 3. `*.*` means "name contains a dot", not "match everything". Applications wanting DOS
    `*.*` behavior should rewrite `*.*` → `*` in the UI layer.
@@ -76,7 +75,7 @@ FileMask behavioral notes (by design — not bugs):
    searched by its bare name (the term parses as an operator). Query it with operators
    disabled, or with a wildcard that keeps the term out of operator form (`and*` also
    matches longer names, so prefer disabling operators). This collision exists in every
-   preset; it is simply more visible when whole names are single terms.
+   preset; it is more visible when whole names are single terms.
 
 Switching presets requires a full `RebuildFrom` from the application's file table; the
 preset is fixed per snapshot.
@@ -96,7 +95,7 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
 | `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
-| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose` |
+| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
 | `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`) |
 
 Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
@@ -120,8 +119,8 @@ Separator characters (`SearchTokenization.Default.IndexSeparators`):
 space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 ```
 
-Every maximal run of non-separator characters is one token. All other characters —
-including `_ ' " * ? & @ % + = !` — are token characters.
+Every maximal run of non-separator characters is one token. All other characters,
+including `_ ' " * ? & @ % + = !`, are token characters.
 
 - Tokens are lowercased (`char.ToLowerInvariant`; ASCII fast path).
 - Duplicate tokens within one document are indexed once.
@@ -130,7 +129,7 @@ including `_ ' " * ? & @ % + = !` — are token characters.
 
 `NameTokenizer.TokenizeName` is an optional pre-processing helper with a stricter rule:
 it keeps only letter/digit runs (so `_` also splits) and joins the result with `-`.
-If you pre-process indexed text with it, do **not** run query strings through it — it
+If you pre-process indexed text with it, do not run query strings through it, because it
 strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidance.
 
 ## Query parsing (Default preset)
@@ -146,7 +145,7 @@ space . , ; : / \ CR LF | - # [ ] { } ( ) ~ £ $ €
 Rules:
 
 1. The expression splits into terms on separators. Terms are lowercased.
-2. **Adjacent terms are combined with an implicit AND**, regardless of
+2. Adjacent terms are combined with an implicit AND, regardless of
    `enableOperators`: `report pdf` means `report AND pdf`.
 3. With `enableOperators: true`:
    - The words `and`, `or`, `not` (ASCII case-insensitive) are operators, not search terms.
@@ -167,7 +166,7 @@ Rules:
      `a AND NOT AND b` all mean `a AND b`.
    - An empty group `()` is dropped.
 6. An expression that is empty, whitespace, or reduces to nothing after correction
-   returns no results — unless a non-empty facet filter is supplied
+   returns no results unless a non-empty facet filter is supplied
    (see [filter-only queries](#filter-only-queries)).
 
 ## Term matching
@@ -186,23 +185,23 @@ expression a plain term uses the requested method while a wildcard term uses glo
 
 ## Regular expressions (`WordMatchMethod.Regex`)
 
-The **entire** `expression` is one .NET regular expression. The boolean tokenizer is
-**not** used — separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
+The entire `expression` is one .NET regular expression. The boolean tokenizer is
+not used: separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
 regex syntax, not query operators. `enableOperators` is ignored.
 
 Matching scans every unique indexed token (same loop as glob), using
 `RegexOptions.IgnoreCase | CultureInvariant` with standard unanchored
-`Regex.IsMatch` (the user pattern is compiled as-is — no implicit `^...$` wrapper).
+`Regex.IsMatch` (the user pattern is compiled as-is, with no implicit `^...$` wrapper).
 `NonBacktracking` is preferred; when the .NET regex engine throws
 `NotSupportedException` (lookarounds, backreferences), the library falls back to the
 default backtracking engine with the same options and 1 s match timeout. Invalid
 patterns and patterns that exceed the match timeout (catastrophic backtracking on
 the fallback path) yield an empty result set (no exception).
 
-**Token-level semantics (Default preset):** patterns run against normalized lowercase
+Token-level semantics (Default preset): patterns run against normalized lowercase
 tokens, not the original `SearchText`. A pattern that spans index separators (e.g.
 `report.*\.pdf`) cannot match because no single token contains both `report` and
-`pdf`. Use **`SearchTokenization.FileMask`** when the indexed token is the full file
+`pdf`. Use `SearchTokenization.FileMask` when the indexed token is the full file
 name, or combine regex hits with boolean/glob terms on Default.
 
 Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`):
@@ -215,7 +214,7 @@ Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`
 | `pdf` | `pdf` | docs with token `pdf` |
 | `final\|pdf` | `final`, `pdf` | union of posting lists |
 
-On **FileMask** index, token `report-final.pdf` can match `report-final\.pdf`,
+On a FileMask index, token `report-final.pdf` can match `report-final\.pdf`,
 `\.pdf$`, or unanchored `report` (matches `my-report.pdf` too). Use `^...$` for
 full-name equality.
 
@@ -224,9 +223,9 @@ full-name equality.
 A term containing `*` or `?` is matched as a glob against whole indexed tokens
 (anchored at both ends):
 
-- `*` — zero or more characters; consecutive `*` collapse into one
-- `?` — exactly one character
-- any other character — literal (after lowercasing)
+- `*`: zero or more characters; consecutive `*` collapse into one
+- `?`: exactly one character
+- any other character: literal (after lowercasing)
 
 Examples against an index containing tokens `report`, `reporting`, `log`:
 
@@ -247,19 +246,18 @@ Limits and edge cases:
   wildcards. Indexed tokens *can* contain them (they are not index separators) but are
   then only reachable through wildcard patterns or `Within` substrings.
 - A pattern containing separators splits into terms first: `ga-1*` becomes
-  `ga AND 1*`, and `*.txt` becomes `* AND txt` — that is, "has token `txt`", not
+  `ga AND 1*`, and `*.txt` becomes `* AND txt`, which means "has token `txt`", not
   "name ends with `.txt`". For anchored extension filtering use a facet
   (see the [file search guide](file-search-guide.md#file-extensions)).
-- Cost: one scan over *unique tokens* (not documents) with an early exit on token
-  length; posting lists of all matching tokens are unioned. Measurements:
-  [glob-and-facets-report.md](glob-and-facets-report.md).
+- A glob term scans every unique token of the index (not every document) and unions
+  the posting lists of the tokens that match. Costs: [performance.md](performance.md#per-query).
 
 ## Facet filters
 
 A document may carry named numeric values (facets), supplied as the optional third
 parameter of `IndexedEntry` and stored in the snapshot as columns parallel to the
 index. A `FacetFilter` restricts results to documents whose facet values satisfy
-**all** of its predicates. The filter applies after the text expression is fully
+all of its predicates. The filter applies after the text expression is fully
 evaluated, including `NOT`.
 
 ```csharp
@@ -296,7 +294,9 @@ Predicates:
 - A document without a value for a facet has `0` in that column. A range that
   includes `0`, or a mask with `mustHave: 0`, therefore matches such documents.
   If that is not intended, attach the facet to every document.
-- A filter naming a facet that no indexed document carries throws `ArgumentException`.
+- A filter naming a facet that no indexed document carries throws `ArgumentException`
+  when it is evaluated. Facet names are not checked when the index is empty or when the
+  text expression matches nothing; such a query returns an empty list.
 - `FacetFilter.None` (or a `Combine` of nothing) imposes no constraints.
 
 Recommended encodings:
@@ -314,19 +314,29 @@ An empty or whitespace expression combined with a non-empty filter matches all
 documents that pass the filter. An empty expression with no filter (or an empty one)
 returns nothing.
 
-### Performance note
-
-Filter evaluation is a single pass over all documents followed by one bitset
-intersection. The `Find` / `CountMatches` overloads that take a filter always run the
-full evaluation pipeline — when you have no facet constraints, call the overloads
-*without* the filter parameter to keep the exact single-term fast path.
+The cost of filters depends on how many documents the text expression matches; see
+[performance.md](performance.md#per-query).
 
 ## Result ordering
 
 | `SearchSortMode` | Order |
 |---|---|
 | `SnapshotOrder` | Document order within the current snapshot |
-| `NaturalSortAscending` | Natural sort of `SortText`: digit runs compare numerically (`file2` < `file10`), text case-insensitively; the permutation is computed once per snapshot and cached |
+| `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
+
+The natural order compares `SortText` part by part:
+
+- `SortText` splits into parts at `-`, space, `_` and `/`; inside a part, every run of
+  letters and every run of digits is a part of its own, and any other character is a
+  one-character text part. `IMG_0012.jpg` has the parts `img`, `0012`, `.`, `jpg`.
+- A number sorts before text at the same position. Numbers compare by value up to 12
+  digits; longer digit runs are not padded and compare as text.
+- Text compares case-insensitively (invariant lowercase, then ordinal).
+- When all parts of the shorter text equal the start of the longer one, the shorter
+  text comes first.
+
+`SortText` is never changed by the Unicode options. [performance.md](performance.md#work-deferred-to-the-first-query)
+describes what a natural sort costs.
 
 ## Worked examples
 

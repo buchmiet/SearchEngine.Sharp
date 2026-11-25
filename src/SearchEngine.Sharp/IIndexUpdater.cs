@@ -1,8 +1,9 @@
 namespace SearchEngine;
 
 /// <summary>
-/// Manages index content through full rebuilds and incremental updates.
-/// All operations are serialized and publish a new snapshot on completion.
+/// Manages index content. Every mutation (replacing all entries, or adding, updating or removing some) rebuilds
+/// the whole snapshot from the current entries and publishes it.
+/// All operations are serialized.
 /// </summary>
 public interface IIndexUpdater
 {

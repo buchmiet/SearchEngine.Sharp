@@ -1,67 +1,55 @@
-# Library benchmark harness (0.5.6)
+# Library comparison
 
-Compares **search libraries** on a shared in-memory file-name corpus (`FileSearchDataFactory` @ 100k, seed 2026).
+Runs the same file-name workloads in SearchEngine.Sharp and in three other in-memory search libraries, on one
+shared corpus of 100,000 file names (`corpus/file-search-100k-seed2026.json`). It compares libraries, not
+languages.
 
-This harness is **not** a cross-language runtime shootout. Hand-rolled reference algorithms in other languages were removed — they do not represent real libraries and are misleading.
-
-## Measured libraries
-
-| Library | Version | Adapter path | Notes |
-|---------|---------|--------------|-------|
-| **SearchEngine.Sharp** | `sharp-0.5.0-initial` @ `1bd312c`, `sharp-0.5.5`, `sharp-current` | `csharp/` | Historical via git worktree (x64) |
-| **Tantivy** | 0.22 | `tantivy/` | In-memory index; Within via case-insensitive `RegexQuery` on raw field |
-| **MiniSearch** | 7.x | `minisearch/` | In-memory; Within via bigram tokenization + AND search + `includes()` verify |
-| **Bleve** | 2.4 | `bleve/` | In-memory (`NewMemOnly`); Within via regexp on keyword-analyzed `name` field |
-
-Each adapter maps the same workloads and reports verified `hit_count` (see `scripts/validate-hits.ps1`).
-
-### Query semantics (per workload)
-
-| Workload kind | Sharp | Tantivy | MiniSearch | Bleve |
-|---------------|-------|---------|------------|-------|
-| `within` | Bigram Within | `(?i).*query.*` regex on raw name | Bigram AND + substring verify | Regexp on keyword field |
-| `exact` | Exact token match | String equality scan | String equality scan | String equality scan |
-| `glob` | FileMask glob | Ported `GlobMatcher` | Ported `GlobMatcher` | Ported `GlobMatcher` |
-| `within_facet` | Within + size range | Regex hits + size filter | Search hits + size filter | Regexp hits + size filter |
-| `natural` sort | `NaturalSortKeyBuilder` | Ported key builder | Ported key builder | Ported key builder |
-
-Cold workloads (`*_cold`, `zero_hits_natural_cold`) rebuild the index each iteration. External libraries pay full index-build cost on cold paths; Sharp's selectivity pipeline avoids that floor.
+| Library | Version | Adapter | How `Within` is answered |
+|---|---|---|---|
+| SearchEngine.Sharp | this repository (`sharp-current`), or an older tag | `csharp/` | `WordMatchMethod.Within` |
+| Tantivy | 0.22 | `tantivy/` | case-insensitive `RegexQuery` on the raw name |
+| MiniSearch | 7.x | `minisearch/` | bigram tokens, AND search, then a substring check |
+| Bleve | 2.4 | `bleve/` | regexp on a keyword-analyzed name field |
 
 ## Workloads
 
-See [`workloads.json`](workloads.json). Methodology: 3 warmup + 10 measured iterations; median ns.
+[`workloads.json`](workloads.json) defines them: 3 warm-up and 10 measured iterations, median in nanoseconds.
 
-Expected hit counts (all libraries must match `sharp-current`):
+| Kind | SearchEngine.Sharp | Other libraries |
+|---|---|---|
+| `within` | `Within` | as in the table above |
+| `exact` | exact token | string equality scan |
+| `glob` | `FileMask` glob | a port of the library's glob matcher |
+| `within_facet` | `Within` with a size range | the library's hits, then a size filter |
+| natural sort | `NaturalSortKeyBuilder` | a port of the key builder |
+
+Workloads ending in `_cold` rebuild the index in every iteration, so they include the build cost of each library.
+
+Every adapter reports its hit count, and `scripts/validate-hits.ps1` checks them against these values:
 
 | Workload | Hits |
-|----------|-----:|
-| `within_snapshot` | 10000 |
+|---|---:|
+| `within_snapshot` | 10,000 |
 | `within_facet_snapshot` | 4 |
 | `within_facet_natural_cold` | 4 |
 | `zero_hits_natural_cold` | 0 |
 | `exact_first` | 7 |
-| `glob_pdf` | 6667 |
+| `glob_pdf` | 6,667 |
 
-## Run
+## Running
+
+Prerequisites: the .NET 11 SDK, Rust (cargo), Node.js, and Go 1.22 or later for Bleve (skipped when `go` is
+missing).
 
 ```powershell
 cd benchmarks/SearchEngine.CompetitorBenchmarks
 ./scripts/run-all.ps1
 ```
 
-Historical Sharp (requires git worktree):
-
-```powershell
-./scripts/run-sharp-historical.ps1
-```
-
-Remote (macOS / homelab):
-
 ```bash
-./scripts/run-all.sh
-# SE_BENCH_OUTPUT=~/se-comp-bench/.../results/<host> ./scripts/run-all.sh
+./scripts/run-all.sh                      # results go to results/<host>; set SE_BENCH_OUTPUT to change it
+SKIP_HISTORICAL=1 ./scripts/run-all.sh    # only the current SearchEngine.Sharp
 ```
 
-Bleve requires Go 1.22+ (`go run .` in `bleve/`). macOS SSH host has no Go — run Bleve on homelab or x64 with Go installed.
-
-Evidence CSV: `audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/competitor-benchmarks/`.
+`run-sharp-historical.ps1` and `run-sharp-historical.sh` check out older releases into git worktrees under `.worktrees/`
+and run the same workloads against them.

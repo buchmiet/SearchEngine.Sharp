@@ -2,7 +2,7 @@
 
 End-to-end recipe for a file-manager style "find file" feature: name patterns (globs and
 boolean operators), size / date / attribute criteria, and live results while a directory
-scan is still running. Content search is out of scope — the index holds names and numeric
+scan is still running. Content search is out of scope: the index holds names and numeric
 metadata only.
 
 Semantics referenced here are specified in [query-semantics.md](query-semantics.md).
@@ -24,15 +24,15 @@ safe to run concurrently; queries always see a complete, immutable snapshot.
 
 ## Search modes
 
-A **search mode** is the triple:
+A search mode is the triple:
 
-1. **`SearchTokenization` preset** — how names split into index/query tokens
-2. **`WordMatchMethod`** — `Exact` (whole token) or `Within` (substring inside token/name)
-3. **`enableOperators`** — boolean `AND` / `OR` / `NOT`
+1. `SearchTokenization` preset: how names split into index/query tokens
+2. `WordMatchMethod`: `Exact` (whole token) or `Within` (substring inside token/name)
+3. `enableOperators`: boolean `AND` / `OR` / `NOT`
 
 Configure the preset on `IndexUpdater` at construction; every rebuild publishes a snapshot
-carrying the same preset. Switching modes (e.g. token search ↔ classic file mask) requires
-one `RebuildFrom` from your file table — you cannot mix presets in one snapshot.
+carrying the same preset. Switching between modes (e.g. token search and classic file mask)
+requires one `RebuildFrom` from your file table. You cannot mix presets in one snapshot.
 
 ```csharp
 // Classic file mask — whole-name semantics; *.pdf is end-anchored
@@ -49,7 +49,7 @@ Typical mask UI: `WordMatchMethod.Exact`, `enableOperators: true` for `*.pdf OR 
 style input; `Within` for incremental substring search on the whole name.
 
 To switch presets at runtime, create a new `IndexUpdater` with the other preset over the
-same provider and call `RebuildFrom` — the published snapshot replaces the old one
+same provider and call `RebuildFrom`. The published snapshot replaces the old one
 atomically. Do not keep two updaters with different presets active against one provider;
 whichever rebuilds last wins. For both modes side by side, register two independent
 provider/updater/engine sets (keyed DI: `AddKeyedSearchEngine("mask",
@@ -63,7 +63,7 @@ SearchTokenization.FileMask)`).
 | File name | `IndexedEntry.SearchText` | feed the raw name; it is tokenized on `.` `-` space etc. |
 | Display name | `IndexedEntry.SortText` | drives `SearchSortMode.NaturalSortAscending` |
 | Size | facet `size` | bytes; `0` for directories |
-| Modified time | facet `modified` | `LastWriteTimeUtc.Ticks` — keep all timestamps UTC |
+| Modified time | facet `modified` | `LastWriteTimeUtc.Ticks` (keep all timestamps UTC) |
 | Attributes | facet `attrs` | `(long)FileAttributes` bitmask |
 | Extension (optional) | facet `ext` | caller-assigned integer id; see [File extensions](#file-extensions) |
 
@@ -74,13 +74,13 @@ satisfies any range that includes `0`.
 
 Decide this first; it matters more than any tuning below.
 
-| Situation | Use | Why (measured, x64 laptop CPU, one core, warm cache) |
-|-----------|-----|-------------------------------------------------------|
-| **One-shot search** of a tree ("find files named `*.pdf` under this folder"), index thrown away afterwards | **Plain scan + `NameMatcher`** | Every name has to be read from disk once anyway; matching it while it is read is cheaper than indexing it. 100k files: **0.13 s, ~2 MB allocated**, first hit after ~11 ms, vs **~2.0 s, ~370 MB** for scan + progressive index + requery. 1M files: **1.3 s** vs **20 s** (0.6.0) / **114–127 s** (0.5.6). |
-| **Persistent index** queried many times over the same tree (type-as-you-go filter, "search this drive" kept in memory) | `IndexUpdater` + `SearchEngineSharp` | A query over 1M names takes 0.1–15 ms (`package.json`: ~0.15 ms, `*.pdf`: ~8 ms) instead of a 1.3 s rescan. Building it from disk costs about as much as 5–9 rescans, so it pays off after ~5–9 queries **if the tree does not change in between**. |
-| Persistent index with frequent file changes | Index only if changes are rare or batched | Every `AddEntry` / `RemoveEntry` / `RefreshEntry` rebuilds the whole index: ~0.2 s at 100k, ~1.7–2.7 s at 1M names. With one change per query the index loses to rescanning. Batch changes with `AddOrUpdateEntries` / `RemoveEntries`. |
+| Situation | Use | Why |
+|-----------|-----|-----|
+| One-shot search of a tree ("find files named `*.pdf` under this folder"), result thrown away afterwards | Plain scan with `NameMatcher` | Every name has to be read from disk once anyway, and matching it while it is read costs less than indexing it. At 1 million files the scan takes about 1 s and a few tens of MB; scanning into an index takes over 10 s and close to 2 GB of allocations. |
+| An index kept and queried many times over the same tree (filter as you type, a drive kept in memory) | `IndexUpdater` and `SearchEngineSharp` | A query over 1 million names takes 0.1 to 17 ms instead of a rescan. Building the index costs about 5 to 9 rescans, so it pays off after that many queries on a tree that does not change in between. |
+| A kept index over files that change often | An index only if the changes are rare or batched | Every `AddEntry`, `RemoveEntry` or `RefreshEntry` rebuilds the whole index (about 2 s at 1 million names). With one change per query, rescanning wins. Batch changes with `AddOrUpdateEntries` and `RemoveEntries`. |
 
-Numbers: profiling report of November 2026 (`benchmarks/SearchEngine.Sharp.Profiling`, synthetic trees of 10k/100k/1M files).
+The measurements behind these numbers: [Index or plain scan](performance.md#index-or-plain-scan).
 
 ## Plain scan (one-shot search)
 
@@ -120,8 +120,8 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
 
 - One enumeration pass: the directory listing already says whether an entry is a directory; size, time and
   attributes are read from the same entry (one `lstat` on Unix, none on Windows) and only for names that match.
-  Do **not** call `Directory.Exists(path)` and `new FileInfo(path)` per entry — that is two extra system calls per
-  file (100k files: 540k system calls instead of 53k) and `Directory.Exists` is true for a symlink to a directory.
+  Do not call `Directory.Exists(path)` and `new FileInfo(path)` per entry: that is two extra system calls per
+  file (100k files: 540k system calls instead of 53k), and `Directory.Exists` is true for a symlink to a directory.
 - Recursive enumeration in .NET follows directory symlinks unless `ShouldRecursePredicate` says otherwise; on a
   stock Ubuntu `/usr` that never ends, on Homebrew it returns every file several times.
 - A file that disappears during the scan does not throw from `FileSystemEntry` (measured: on Linux it reports size 0
@@ -134,7 +134,7 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
 
 ## Scanning into a persistent index
 
-Do not call `AddEntry` per file — each call rebuilds the whole index and total work grows
+Do not call `AddEntry` per file: each call rebuilds the whole index and total work grows
 O(N²). Stream the scan through `ProgressiveIndexIngestion`. The scanner owns the id → path table and hands
 each path to the consumer through a thread-safe map; do not share a plain `List<string>` between the scanner
 (which runs on the ingestion's producer task) and the code that reads results:
@@ -196,16 +196,13 @@ IngestionResult result = await ingestion.IngestAsync(
     cancellationToken: ct);
 ```
 
-Defaults (`IngestPublishPolicy.Adaptive`, `GrowthAwareBatchCap = true`) give roughly **8 index publishes per
-100k files** on a fast scan and about 13–16 for 1M files. While one rebuild (`R`) takes less than
-`MaxStaleness / (1 + AdaptiveMultiplier)` (333 ms with the defaults) the publish containing an entry starts within
-`MaxStaleness` (1 s) of the scanner handing it over; for larger indexes a staleness publish waits
-`AdaptiveMultiplier` × the last rebuild after that rebuild finished (since 0.6.0), so the worst case is
-`max(MaxStaleness, (1 + AdaptiveMultiplier) × R)` (`StrictMaxStaleness = true` restores the old, quadratic
-behaviour and the plain `MaxStaleness` bound). Tunables: [ingestion-policy-report.md](ingestion-policy-report.md).
+The default options publish about 7 times for 100,000 files on a fast scan and 14 times for 1 million. An entry
+becomes searchable within `MaxStaleness` (1 s) until one rebuild takes longer than about a third of that; for
+larger indexes the delay grows with the rebuild time. The options and the exact bound:
+[Tuning progressive ingestion](performance.md#tuning-progressive-ingestion).
 
 Starting a new search scope: `updater.Clear()`, a new `paths` map, start a new
-ingest. Ids must be unique within one scope — reusing an id replaces the entry.
+ingest. Ids must be unique within one scope, and reusing an id replaces the entry.
 
 ## Live requery loop
 
@@ -220,10 +217,8 @@ void Requery()
 }
 ```
 
-Two things to know:
-
 - `onPublished` and the `Published` event run on the ingestion's publisher task, not on
-  your UI thread — marshal before touching UI state.
+  your UI thread. Marshal before touching UI state.
 - `CountMatches` with the same arguments gives the total for a status bar without
   materializing the id list.
 
@@ -261,9 +256,7 @@ static List<int> Search(ISearchEngine engine, SearchCriteria c)
 {
     FacetFilter filter = BuildFilter(c);
 
-    // Single-term exact queries with a filter use a posting-span fast path when the name
-    // expression is one operand (even with enableOperators:true). Multi-term boolean
-    // expressions still run the full evaluator + facet post-processing.
+    // Without facet criteria call the overload without a filter (see performance.md).
     return filter.IsEmpty
         ? engine.Find(c.NameQuery, WordMatchMethod.Within,
             enableOperators: true, SearchSortMode.NaturalSortAscending)
@@ -294,13 +287,13 @@ Notes on the choices:
 
 ### File extensions
 
-**Default preset:** `*.txt` in a query splits on the `.` separator into `* AND txt`,
-which means "name contains the token `txt`" — usually good enough, but `notes.txt.bak`
+Default preset: `*.txt` in a query splits on the `.` separator into `* AND txt`,
+which means "name contains the token `txt`". This is usually good enough, but `notes.txt.bak`
 also matches. For anchored extension filtering, encode the extension as an integer-id facet
-(see below) or switch to **FileMask** mode.
+(see below) or switch to FileMask mode.
 
-**FileMask preset:** `*.pdf` is a single glob term anchored on the whole file name —
-end-anchored extension filtering works without an `ext` facet. Example:
+FileMask preset: `*.pdf` is a single glob term anchored on the whole file name.
+End-anchored extension filtering works without an `ext` facet. Example:
 
 ```csharp
 var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
@@ -308,7 +301,7 @@ updater.RebuildFrom(fileTable);
 var pdfs = engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true);
 ```
 
-**Default preset — ext facet workaround** (only when staying on token semantics):
+Default preset, ext facet workaround (only when staying on token semantics):
 
 ```csharp
 // During the scan (ids start at 1 so 0 keeps meaning "none"):
@@ -327,38 +320,29 @@ var onlyPdf = FacetFilter.Range("ext", pdf, pdf);
 Intercept `*.ext`-shaped input in the UI layer and translate it to this filter instead
 of passing it through as a text expression.
 
-## Performance expectations
+## Performance
 
-Measured numbers: [glob-and-facets-report.md](glob-and-facets-report.md). Orientation
-points from that report (synthetic data, single thread):
+Name queries other than regexes take less than 2 ms at 100,000 names and less than 20 ms at 1 million
+([Query latency](performance.md#query-latency)). Two costs show up in a live result list:
 
-- Text-only queries at 100k documents: thousands to hundreds of thousands of queries/s
-  depending on match method.
-- With a facet filter at 250k documents the slowest mode (filter-only, all documents
-  considered) still completes in ~2.5 ms — comfortably per-keystroke territory.
-- **Exact + single-term facet** queries use a posting-span fast path (facet predicates
-  checked only for matching ordinals). **Filter-only** and general boolean + facet
-  queries still scan all documents for facet predicates.
-- Glob matching scans unique tokens; Within uses the bigram index then substring verification.
-
-Query evaluation itself is cheap at 100k scale, but **`NaturalSortAscending` on a new snapshot** builds and caches a full permutation on first use. Measured x64/file corpus @ 100k ([`pass2-x64-win/`](../../audits/2026-08-15-searchengine-sharp-dotnet-performance/artifacts/pass2-x64-win/README.md)): **~23 ms** cold, **~77 μs** warm on the same snapshot; progressive growth-aware ingestion (~7 publishes) totals **~48 ms** cold NaturalSort requery vs **~135 μs** with SnapshotOrder.
-
-Requerying on every ingestion publish therefore adds modest query cost but can add **tens of milliseconds per publish** when the UI sorts results naturally — acceptable for many UIs, but not negligible.
+- Every publish creates a new snapshot. The first `Within` query on it builds the bigram index, and a natural sort
+  of a result that holds more than 80% of the names builds the sort permutation
+  ([Work deferred to the first query](performance.md#work-deferred-to-the-first-query)).
+- `NaturalSortAscending` sorts the hits on every query: about 4 ms for 10,000 hits and 65 ms for 100,000 hits.
+  For large result lists, show them in snapshot order first or page them.
 
 ## Pitfalls checklist
 
 - Missing facet values read as `0`; attach every facet to every document.
 - Facet names are case-sensitive; pick one spelling (`size`, not `Size`) and stick to it.
-- Filtering on a facet name that no document carries throws `ArgumentException` — build
+- Filtering on a facet name that no document carries throws `ArgumentException`. Build
   filters only from facets your scanner writes.
 - Don't pass an empty filter to the filter overloads; call the filter-less overload when
   no facet criteria apply.
-- Single-term **Exact** queries (including with `enableOperators:true` when the expression
-  is one word) keep posting fast paths; **Within** + **NaturalSort** still materialize via bitset.
 - Keep all timestamp facets in UTC; mixing kinds shifts range boundaries.
-- `*.txt` has token semantics under **Default**, not end-anchored semantics — use
-  **FileMask** or an `ext` facet; see [File extensions](#file-extensions).
+- `*.txt` has token semantics under Default, not end-anchored semantics. Use
+  FileMask or an `ext` facet; see [File extensions](#file-extensions).
 - A literal `*` or `?` cannot be searched for; on the query side they are always
   wildcards.
-- Do not pre-process query strings with `NameTokenizer.TokenizeName` — it strips
+- Do not pre-process query strings with `NameTokenizer.TokenizeName`: it strips
   `*` and `?`. Feed raw file names to the index and raw user input to `Find`.

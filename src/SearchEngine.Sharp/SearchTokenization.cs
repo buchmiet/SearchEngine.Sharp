@@ -10,15 +10,17 @@ public sealed class SearchTokenization
 {
     private const string DefaultIndexSeparators = " .,;:/\\\r\n\t|-#[]{}()~£$€";
     private const string DefaultQuerySeparators = "| -./\n\r\\,#[]{}()~:;$£€";
-    private const string FileMaskQuerySeparators = " \r\n"; // explicit CR/LF, not Environment.NewLine — query semantics must be identical on every OS
+    private const string FileMaskQuerySeparators = " \r\n"; // explicit CR/LF, not Environment.NewLine: query semantics must be identical on every OS
 
     /// <summary>
-    /// Current default preset: token-level semantics (same as pre-0.5.3 behavior).
+    /// Default preset: token-level search. Indexed text splits on whitespace and on the separator characters
+    /// listed in <see cref="IndexSeparators"/> (<c>. , ; : / \ | - # [ ] { } ( ) ~ £ $ €</c>); query terms split on
+    /// the characters listed in <see cref="QuerySeparators"/>.
     /// </summary>
     public static SearchTokenization Default { get; } = new(DefaultIndexSeparators, DefaultQuerySeparators);
 
     /// <summary>
-    /// Classic file-mask preset: whole <see cref="IndexedEntry.SearchText"/> is one index token;
+    /// File-mask preset: the whole <see cref="IndexedEntry.SearchText"/> is one index token;
     /// query terms split on whitespace only.
     /// </summary>
     public static SearchTokenization FileMask { get; } = new(string.Empty, FileMaskQuerySeparators);
@@ -69,7 +71,7 @@ public sealed class SearchTokenization
 
     internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
 
-    // One query term, after operators were recognized on the query as typed. Regex patterns are never folded.
+    // One query term, after operators have been recognized on the query as typed. Regex patterns are never folded.
     internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
         => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
             ? term
