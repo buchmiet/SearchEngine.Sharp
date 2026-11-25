@@ -324,16 +324,41 @@ The cost of filters depends on how many documents the text expression matches; s
 | `SnapshotOrder` | Document order within the current snapshot |
 | `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
 
-The natural order compares `SortText` part by part:
+The natural order compares `SortText` part by part, the way file managers order names:
 
-- `SortText` splits into parts at `-`, space, `_` and `/`; inside a part, every run of
-  letters and every run of digits is a part of its own, and any other character is a
+- `-`, space, `_` and `/` separate parts and are otherwise ignored. Every run of letters
+  and every run of digits is a part of its own, and any other character is a
   one-character text part. `IMG_0012.jpg` has the parts `img`, `0012`, `.`, `jpg`.
-- A number sorts before text at the same position. Numbers compare by value up to 12
-  digits; longer digit runs are not padded and compare as text.
-- Text compares case-insensitively (invariant lowercase, then ordinal).
-- When all parts of the shorter text equal the start of the longer one, the shorter
-  text comes first.
+- The first parts are compared first; the next pair decides only when they are equal.
+- A number part comes before a text part.
+- Two numbers compare by value, at any length (no limit at 19 or 20 digits). Leading
+  zeros do not count, so `007` equals `7`. Digits of other scripts count with their
+  value: `٣` (Arabic-Indic three) equals `3`.
+- Two text parts compare one UTF-16 code unit at a time after `char.ToLowerInvariant`.
+  Case does not matter, and the culture of the machine plays no part: `é` comes after
+  `z`. When one text part is the start of the other, the shorter one comes first: `a`
+  before `ab`, so `a 2` sorts before `ab`.
+- When every part of one text equals the matching part of the other and one text has
+  more parts, the one with fewer parts comes first: `a` before `a 2`.
+- Texts that differ only in case, in leading zeros or in which separator they use are
+  equal: `File2` and `file2`, `007` and `7`, `a_b` and `a b`.
+
+Examples, in ascending order:
+
+| Before | After | Rule |
+|---|---|---|
+| `file2` | `file10` | numbers by value |
+| `a 2` | `ab` | `a` is the start of `ab` |
+| `a2` | `ab` | number before text |
+| `x1` | `xa` | number before text |
+| `a b` | `ab` | `a` is the start of `ab` |
+| `a` | `a 2` | fewer parts |
+| `img_0012.jpg` | `img_12a.jpg` | `0012` equals `12`; then `.` before `a` |
+| `a999999999999` | `a1000000000000` | numbers by value at any length |
+| `z` | `é` | code units, not the alphabet of a culture |
+
+`NaturalSortKeyBuilder.Build` returns the key that holds this order: comparing two keys
+with `string.CompareOrdinal` gives the order of their texts.
 
 `SortText` is never changed by the Unicode options. [performance.md](performance.md#work-deferred-to-the-first-query)
 describes what a natural sort costs.

@@ -2,7 +2,7 @@ namespace SearchEngine.Sorting;
 
 /// <summary>
 /// Builds the key that <see cref="SearchSortMode.NaturalSortAscending"/> compares ordinally, so that
-/// <c>file2</c> sorts before <c>file10</c>.
+/// <c>file2</c> sorts before <c>file10</c> and <c>a 2</c> before <c>ab</c>.
 /// </summary>
 /// <remarks>
 /// <para>The text is split into parts:</para>
@@ -12,100 +12,120 @@ namespace SearchEngine.Sorting;
 /// <see cref="char.IsDigit(char)"/>) is a part of its own.</item>
 /// <item>Any other character (punctuation, symbols) is a one-character text part.</item>
 /// </list>
-/// <para>The key joins the parts with <c>|</c>. A number part is written as <c>0:</c> followed by the digits
-/// zero-padded to 12; a text part as <c>1:</c> followed by its invariant lowercase. So a number sorts before text at
-/// the same position, numbers of up to 12 digits compare by value, text compares case-insensitively, and a text
-/// whose parts all equal the start of a longer one sorts first. A digit run longer than 12 digits is kept in full and
-/// is not ordered by value against numbers of a different length. Numbers that differ only in leading zeros get the
-/// same key.</para>
+/// <para>Two keys compare like their texts compared part by part, from the first part:</para>
+/// <list type="bullet">
+/// <item>A number part comes before a text part.</item>
+/// <item>Two number parts compare by value, whatever their length; leading zeros do not count, so <c>007</c> and
+/// <c>7</c> are equal. A digit of another script counts with its value (<c>٣</c> is 3).</item>
+/// <item>Two text parts compare character by character after <see cref="char.ToLowerInvariant(char)"/>, by UTF-16
+/// code unit, so the comparison ignores case and does not depend on the culture. A part that is the start of
+/// the other comes first: <c>a</c> before <c>ab</c>, so <c>a 2</c> sorts before <c>ab</c>.</item>
+/// <item>When all parts of one text equal the first parts of the other, the text with fewer parts comes first.</item>
+/// </list>
+/// <para>Texts that differ only in case, in leading zeros or in which separator they use get the same key.</para>
 /// </remarks>
 public static class NaturalSortKeyBuilder
 {
-    private const int NumericPadding = 12;
-    // Worst-case per input char: single unknown char → "1:x|" = 4 chars.
-    // Digit runs are bounded by NumericPadding + 3 ("0:" prefix + padding + "|").
-    // Use a conservative multiplier to cover all cases.
-    private const int MaxCharsPerInputChar = NumericPadding + 3; // 15
+    // Key layout, compared with string.CompareOrdinal:
+    //   number part: NumberTag, the count of significant digits, the digits '0'..'9' without leading zeros
+    //   text part:   TextTag, the lowercase characters, PartEnd
+    // NumberTag < TextTag puts numbers before text. PartEnd is below every character, so a text part that is the
+    // start of another ends first and sorts first. Equal counts compare the digits, so numbers compare by value.
+    // A count of 0xFFFF digits or more is written as LongCount followed by the count in two code units.
+    private const char PartEnd = '\0';
+    private const char NumberTag = '\u0001';
+    private const char TextTag = '\u0002';
+    private const char LongCount = (char)0xFFFF;
+
+    // A key has at most three code units per input character: a one-digit number or a one-character text part.
+    private const int MaxKeyCharsPerInputChar = 3;
+    private const int MaxStackKeyLength = 1024;
 
     /// <summary>
     /// Builds the natural sort key of <paramref name="sortText"/>.
     /// </summary>
     /// <param name="sortText">The text to build the key for, usually <see cref="IndexedEntry.SortText"/>.</param>
-    /// <returns>The key, or an empty string for a <see langword="null"/> or empty text.</returns>
-    /// <remarks>For texts of up to 64 characters the only allocation is the returned string. The method is
+    /// <returns>The key, or an empty string for a <see langword="null"/> or empty text. The key is meant only for
+    /// ordinal comparison with other keys; it is not readable text.</returns>
+    /// <remarks>For texts of up to 341 characters the only allocation is the returned string. The method is
     /// thread-safe.</remarks>
     public static string Build(string sortText)
     {
         if (string.IsNullOrEmpty(sortText))
             return string.Empty;
 
-        int maxLen = sortText.Length * MaxCharsPerInputChar;
-        // stackalloc for typical names (≤64 chars → buffer ≤960 chars)
-        Span<char> buffer = maxLen <= 960
-            ? stackalloc char[maxLen]
-            : new char[maxLen];
+        int maxLength = checked(sortText.Length * MaxKeyCharsPerInputChar);
+        Span<char> buffer = maxLength <= MaxStackKeyLength
+            ? stackalloc char[maxLength]
+            : new char[maxLength];
 
-        var span = sortText.AsSpan();
+        ReadOnlySpan<char> text = sortText;
         int pos = 0;
-        bool first = true;
-
         int i = 0;
-        while (i < span.Length)
+        while (i < text.Length)
         {
-            char c = span[i];
-
-            // Skip separators
+            char c = text[i];
             if (IsSeparator(c))
             {
                 i++;
-                continue;
             }
-
-            if (!first)
-                buffer[pos++] = '|';
-            first = false;
-
-            if (char.IsDigit(c))
+            else if (char.IsDigit(c))
             {
-                // Consume digit run
                 int start = i;
-                while (i < span.Length && char.IsDigit(span[i]))
+                while (i < text.Length && char.IsDigit(text[i]))
                     i++;
 
-                // Numeric token: prefix '0:', zero-padded
-                buffer[pos++] = '0';
-                buffer[pos++] = ':';
-                int digitCount = i - start;
-                for (int p = digitCount; p < NumericPadding; p++)
-                    buffer[pos++] = '0';
-                span.Slice(start, digitCount).CopyTo(buffer[pos..]);
-                pos += digitCount;
-            }
-            else if (char.IsLetter(c))
-            {
-                // Consume letter run
-                int start = i;
-                while (i < span.Length && char.IsLetter(span[i]))
-                    i++;
-
-                // Text token: prefix '1:', lowercased
-                buffer[pos++] = '1';
-                buffer[pos++] = ':';
-                for (int k = start; k < i; k++)
-                    buffer[pos++] = char.ToLowerInvariant(span[k]);
+                pos = AppendNumber(text[start..i], buffer, pos);
             }
             else
             {
-                // Unknown character - treat as text token
-                buffer[pos++] = '1';
-                buffer[pos++] = ':';
-                buffer[pos++] = char.ToLowerInvariant(c);
-                i++;
+                buffer[pos++] = TextTag;
+                if (char.IsLetter(c))
+                {
+                    while (i < text.Length && char.IsLetter(text[i]))
+                        buffer[pos++] = char.ToLowerInvariant(text[i++]);
+                }
+                else
+                {
+                    buffer[pos++] = char.ToLowerInvariant(c);
+                    i++;
+                }
+
+                buffer[pos++] = PartEnd;
             }
         }
 
         return new string(buffer[..pos]);
     }
+
+    private static int AppendNumber(ReadOnlySpan<char> digits, Span<char> buffer, int pos)
+    {
+        int first = 0;
+        while (first < digits.Length && DigitValue(digits[first]) == 0)
+            first++;
+
+        int count = digits.Length - first;
+        buffer[pos++] = NumberTag;
+        if (count < LongCount)
+        {
+            buffer[pos++] = (char)count;
+        }
+        else
+        {
+            buffer[pos++] = LongCount;
+            buffer[pos++] = (char)(count >> 16);
+            buffer[pos++] = (char)count;
+        }
+
+        for (int d = first; d < digits.Length; d++)
+            buffer[pos++] = (char)('0' + DigitValue(digits[d]));
+
+        return pos;
+    }
+
+    // char.IsDigit is true for decimal digits of every script; their numeric value is 0 to 9.
+    private static int DigitValue(char c)
+        => char.IsAsciiDigit(c) ? c - '0' : (int)char.GetNumericValue(c);
 
     private static bool IsSeparator(char c)
         => c is '-' or ' ' or '_' or '/';
