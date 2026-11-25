@@ -18,6 +18,7 @@
     <RepositoryUrl>https://github.com/buchmiet/SearchEngine.Sharp</RepositoryUrl>
     <PackageProjectUrl>https://github.com/buchmiet/SearchEngine.Sharp</PackageProjectUrl>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

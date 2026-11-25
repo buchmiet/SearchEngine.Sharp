@@ -5,30 +5,56 @@ using System.Runtime.InteropServices;
 namespace SearchEngine.Tokenizer;
 
 /// <summary>
-/// Splits text into words at separator characters and lowercases them (invariant culture) the way the index does.
-/// The overloads without a separator set use the index separators of <see cref="SearchTokenization.Default"/>.
+/// Splits text into tokens at separator characters and lowercases them (invariant culture, character by
+/// character) the way the index builder does.
 /// </summary>
+/// <remarks>
+/// The overloads without a separator set use the index separators of <see cref="SearchTokenization.Default"/>; for
+/// another preset pass <c>SearchValues.Create(tokenization.IndexSeparators)</c>. The Unicode options of a preset are
+/// not applied here. All members are thread-safe.
+/// </remarks>
 public static class TextNormalizer
 {
-    /// <summary>Callback for <c>ForEachUniqueWord</c>, invoked once for each distinct lowercase word.</summary>
+    /// <summary>Receives one distinct lowercase token from <c>ForEachUniqueWord</c>.</summary>
+    /// <typeparam name="TState">The type of the caller's state.</typeparam>
+    /// <param name="state">The state passed to <c>ForEachUniqueWord</c>, by reference.</param>
+    /// <param name="word">The lowercase token.</param>
     public delegate void UniqueWordAction<TState>(ref TState state, string word);
 
     private static readonly SearchValues<char> DefaultSeparatorValues = SearchSeparators.IndexText;
     private static readonly char[] AsciiLowercaseMap = BuildAsciiLowercaseMap();
     private const int MaxStackWordLength = 256;
 
+    /// <summary>Returns whether <paramref name="ch"/> is an index separator of
+    /// <see cref="SearchTokenization.Default"/>.</summary>
+    /// <param name="ch">The character to test.</param>
+    /// <returns><see langword="true"/> when <paramref name="ch"/> splits tokens.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSeparator(char ch) => IsSeparator(ch, DefaultSeparatorValues);
 
+    /// <summary>Returns whether <paramref name="ch"/> is one of <paramref name="separators"/>.</summary>
+    /// <param name="ch">The character to test.</param>
+    /// <param name="separators">The separator set.</param>
+    /// <returns><see langword="true"/> when <paramref name="ch"/> splits tokens.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSeparator(char ch, SearchValues<char> separators) => separators.Contains(ch);
 
+    /// <summary>
+    /// Returns the distinct lowercase tokens of <paramref name="text"/>, split at the index separators of
+    /// <see cref="SearchTokenization.Default"/>, longest first.
+    /// </summary>
+    /// <param name="text">The text to split. <see langword="null"/> or empty gives an empty list.</param>
+    /// <returns>A new list of tokens.</returns>
     public static List<string> GetWordsFromString(string text)
         => GetWordsFromString(text, DefaultSeparatorValues);
 
     /// <summary>
-    /// Returns the distinct lowercase words of <paramref name="text"/>, longest first.
+    /// Returns the distinct lowercase tokens of <paramref name="text"/>, split at <paramref name="separators"/>,
+    /// longest first.
     /// </summary>
+    /// <param name="text">The text to split. <see langword="null"/> or empty gives an empty list.</param>
+    /// <param name="separators">The characters that split tokens.</param>
+    /// <returns>A new list of tokens.</returns>
     public static List<string> GetWordsFromString(string text, SearchValues<char> separators)
     {
         var words = new List<string>();
@@ -40,6 +66,17 @@ public static class TextNormalizer
         return words;
     }
 
+    /// <summary>
+    /// Calls <paramref name="action"/> once for each distinct lowercase token of <paramref name="text"/>, split at
+    /// the index separators of <see cref="SearchTokenization.Default"/>, in order of first occurrence.
+    /// </summary>
+    /// <typeparam name="TState">The type of <paramref name="state"/>.</typeparam>
+    /// <param name="text">The text to split. <see langword="null"/> or empty calls nothing.</param>
+    /// <param name="uniqueWords">A set that compares ordinally. It is cleared first and holds the tokens
+    /// afterwards.</param>
+    /// <param name="state">State passed to every call of <paramref name="action"/>, by reference.</param>
+    /// <param name="action">The callback.</param>
+    /// <exception cref="ArgumentException"><paramref name="uniqueWords"/> does not compare ordinally.</exception>
     public static void ForEachUniqueWord<TState>(
         string text,
         HashSet<string> uniqueWords,
@@ -48,10 +85,19 @@ public static class TextNormalizer
         => ForEachUniqueWord(text, uniqueWords, DefaultSeparatorValues, ref state, action);
 
     /// <summary>
-    /// Calls <paramref name="action"/> once for each distinct lowercase word of <paramref name="text"/>, in order of
-    /// first occurrence. <paramref name="uniqueWords"/> is cleared first and holds the words afterwards.
+    /// Calls <paramref name="action"/> once for each distinct lowercase token of <paramref name="text"/>, split at
+    /// <paramref name="separators"/>, in order of first occurrence.
     /// </summary>
+    /// <typeparam name="TState">The type of <paramref name="state"/>.</typeparam>
+    /// <param name="text">The text to split. <see langword="null"/> or empty calls nothing.</param>
+    /// <param name="uniqueWords">A set that compares ordinally (<see cref="StringComparer.Ordinal"/> or the default
+    /// comparer). It is cleared first and holds the tokens afterwards.</param>
+    /// <param name="separators">The characters that split tokens.</param>
+    /// <param name="state">State passed to every call of <paramref name="action"/>, by reference.</param>
+    /// <param name="action">The callback.</param>
     /// <exception cref="ArgumentException"><paramref name="uniqueWords"/> does not compare ordinally.</exception>
+    /// <remarks>A token that is already lowercase and makes up the whole text is passed as <paramref name="text"/>
+    /// itself; every other new token allocates one string.</remarks>
     public static void ForEachUniqueWord<TState>(
         string text,
         HashSet<string> uniqueWords,
@@ -135,6 +181,10 @@ public static class TextNormalizer
         action(ref state, word);
     }
 
+    /// <summary>Returns a lowercase copy of <paramref name="source"/>, converted character by character with
+    /// <see cref="ToLowerInvariantFast"/>.</summary>
+    /// <param name="source">The characters to copy.</param>
+    /// <returns>A new string of the same length.</returns>
     public static string CreateNormalizedWord(ReadOnlySpan<char> source)
     {
         return string.Create(source.Length, source, static (destination, state) =>
@@ -158,6 +208,10 @@ public static class TextNormalizer
         return true;
     }
 
+    /// <summary>Returns the same result as <see cref="char.ToLowerInvariant(char)"/>, using a table for
+    /// ASCII.</summary>
+    /// <param name="ch">The character to convert.</param>
+    /// <returns>The lowercase character.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static char ToLowerInvariantFast(char ch)
     {

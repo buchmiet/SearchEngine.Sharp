@@ -3,27 +3,21 @@ using SearchEngine.Snapshots;
 namespace SearchEngine;
 
 /// <summary>
-/// Thread-safe provider for the current index snapshot.
-/// Uses atomic reference swap for lock-free reads.
+/// Holds the current snapshot of one index. Reading <see cref="Current"/> takes no lock and is safe from any
+/// number of threads.
 /// </summary>
 /// <remarks>
-/// The read/write protocol is:
-///   Write (IndexUpdater): Interlocked.Exchange atomically replaces _current with the
-///     new snapshot. Any reader that starts after this point sees the new snapshot.
-///   Read (SearchEngineSharp): Volatile.Read ensures the reference is not cached in a CPU
-///     register, so each call sees the latest value written by any thread.
-///
-/// Safety relies on the content of an IndexSnapshot never changing after construction (its
-/// lazily built derived structures are thread-safe, see IndexSnapshot). A reader that obtained a
-/// reference before a write keeps using the old snapshot for the duration of
-/// that query. There is no data race because the old snapshot is never mutated.
+/// Snapshots are published by the <see cref="IndexUpdater"/> created with this provider and by the registration
+/// methods of <see cref="DependencyInjection.ServiceCollectionExtensions"/> that take initial content. A publish
+/// replaces the reference atomically. A query that read <see cref="Current"/> before a publish keeps using that
+/// snapshot to the end; the snapshot never changes, so the query sees a consistent index.
 /// </remarks>
 public sealed class IndexSnapshotProvider : IIndexSnapshotProvider
 {
     private IndexSnapshot _current = IndexSnapshot.Empty;
 
     /// <summary>
-    /// Gets the current snapshot. Lock-free volatile read.
+    /// Gets the most recently published snapshot, or <see cref="IndexSnapshot.Empty"/> before the first publish.
     /// </summary>
     public IndexSnapshot Current => Volatile.Read(ref _current);
 
