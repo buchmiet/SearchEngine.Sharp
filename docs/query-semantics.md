@@ -95,7 +95,7 @@ applied to indexed `SearchText` and to queries; ASCII text is never touched):
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
 | `CaseFold` | `ß`/`ẞ`→`ss`, `ς`→`σ`, `İ`→`i`, `ſ`→`s`, `µ`→`μ`, Greek symbol variants, ligatures U+FB00–FB06. Not applied to regex patterns |
-| `RemoveDiacritics` | drops combining marks after decomposition (`é`→`e`), plus `ł ø đ ħ ı` → `l o d h i`; implies `Compose` |
+| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose` |
 | `GraphemeBoundaries` | `Within` matches must start and end on extended grapheme cluster boundaries (UAX #29) |
 
 Regex patterns are composed (and stripped of diacritics with `RemoveDiacritics`) but not case-folded,

@@ -30,9 +30,12 @@ public enum UnicodeMatching
     CaseFold = 2,
 
     /// <summary>
-    /// Accent folding: canonical decomposition, removal of non-spacing marks, then composition
-    /// (<c>é</c>→<c>e</c>, <c>ą</c>→<c>a</c>, <c>ü</c>→<c>u</c>), plus <c>ł</c>→<c>l</c>, <c>ø</c>→<c>o</c>,
-    /// <c>đ</c>→<c>d</c>, <c>ħ</c>→<c>h</c>, <c>ı</c>→<c>i</c>, which have no decomposition. Implies <see cref="Compose"/>.
+    /// Accent folding: canonical decomposition, removal of the accents of Latin, Greek and Cyrillic letters (the
+    /// non-spacing marks of the Combining Diacritical Marks blocks U+0300–U+036F, U+1AB0–U+1AFF, U+1DC0–U+1DFF and
+    /// U+FE20–U+FE2F), then composition (<c>é</c>→<c>e</c>, <c>ą</c>→<c>a</c>, <c>ü</c>→<c>u</c>, <c>ά</c>→<c>α</c>,
+    /// <c>й</c>→<c>и</c>), plus <c>ł</c>→<c>l</c>, <c>ø</c>→<c>o</c>, <c>đ</c>→<c>d</c>, <c>ħ</c>→<c>h</c>,
+    /// <c>ı</c>→<c>i</c>, which have no decomposition. Marks of other scripts are part of the letter and stay
+    /// (Japanese dakuten: <c>バ</c> ≠ <c>ハ</c>; Thai tone marks; Indic vowel signs). Implies <see cref="Compose"/>.
     /// </summary>
     RemoveDiacritics = 4,
 
@@ -127,7 +130,7 @@ internal static class TextFolder
         var sb = new StringBuilder(decomposed.Length);
         foreach (char ch in decomposed)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
+            if (IsAccent(ch))
                 continue;
 
             sb.Append(ch switch
@@ -139,6 +142,16 @@ internal static class TextFolder
 
         return sb.ToString().Normalize(NormalizationForm.FormC);
     }
+
+    // Accents are the non-spacing marks of the Combining Diacritical Marks blocks, the marks that Latin, Greek and
+    // Cyrillic letters decompose into: U+0300–U+036F, U+1AB0–U+1AFF (Extended), U+1DC0–U+1DFF (Supplement) and the
+    // half marks U+FE20–U+FE2F. Marks of other scripts belong to the letter and change the word (the Japanese
+    // dakuten U+3099 turns ハス into バス, Thai tone marks, Indic vowel signs, Hebrew points), and U+20D0–U+20FF are
+    // marks for symbols (including the keycap U+20E3), so all of those stay. Every accent is in the BMP: testing
+    // UTF-16 code units is exact, and a surrogate never matches.
+    private static bool IsAccent(char ch)
+        => ch is (>= '\u0300' and <= '\u036F') or (>= '\u1AB0' and <= '\u1AFF') or (>= '\u1DC0' and <= '\u1DFF') or (>= '\uFE20' and <= '\uFE2F')
+            && CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark;
 
     private static string ApplyCaseFoldSpecials(string text)
     {

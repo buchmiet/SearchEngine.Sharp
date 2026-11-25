@@ -117,6 +117,46 @@ public class UnicodeMatchingTests
         Assert.Equal([1], engine.Find(query.ToUpperInvariant(), WordMatchMethod.Within));
     }
 
+    [NormalizationTheory]
+    [InlineData("Vi\u1EC7t Nam", "viet")]
+    [InlineData("\u0395\u03BB\u03BB\u03AC\u03B4\u03B1", "\u03B5\u03BB\u03BB\u03B1\u03B4\u03B1")]
+    [InlineData("\u0419\u043E\u0434", "\u0438\u043E\u0434")]
+    [InlineData("\u1F84\u03C1\u03B1", "\u03B1\u03C1\u03B1")]
+    public void RemoveDiacritics_StripsLatinGreekAndCyrillicAccents(string name, string query)
+    {
+        var engine = Index(SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics), name);
+
+        Assert.Equal([1], engine.Find(query, WordMatchMethod.Exact));
+    }
+
+    // Dakuten, Thai tone marks and Indic vowel signs are part of the letter, not accents: stripping them merged
+    // different words (バス bus, パス pass, ハス lotus).
+    [NormalizationTheory]
+    [InlineData("\u30D0\u30B9.txt", "\u30CF\u3099\u30B9.txt", "\u30CF\u30B9.txt")]
+    [InlineData("\u30D1\u30B9.txt", "\u30CF\u309A\u30B9.txt", "\u30CF\u30B9.txt")]
+    [InlineData("\u304C\u3063\u3053\u3046", "\u304B\u3099\u3063\u3053\u3046", "\u304B\u3063\u3053\u3046")]
+    [InlineData("\u0E02\u0E48\u0E32\u0E27", "\u0E02\u0E48\u0E32\u0E27", "\u0E02\u0E32\u0E27")]
+    [InlineData("\u0915\u0941\u0932", "\u0915\u0941\u0932", "\u0915\u0932")]
+    public void RemoveDiacritics_KeepsMarksOfOtherScripts(string marked, string markedDecomposed, string bare)
+    {
+        var engine = Index(SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics), marked, bare);
+
+        Assert.Equal([1], engine.Find(marked, WordMatchMethod.Exact));
+        Assert.Equal([1], engine.Find(markedDecomposed + "*", WordMatchMethod.Exact));
+        Assert.Equal([2], engine.Find(bare, WordMatchMethod.Exact));
+    }
+
+    [NormalizationFact]
+    public void RemoveDiacritics_StripsOnlyNonSpacingMarksOfTheCombiningDiacriticalMarkBlocks()
+    {
+        // U+0301 (Combining Diacritical Marks), U+1AB0 (Extended), U+1DC4 (Supplement) and U+FE20 (Half Marks) go;
+        // U+1ABE is an enclosing mark, U+20D7 and the keycap U+20E3 are marks for symbols, U+05B8 is a Hebrew point
+        // and the supplementary U+1D167 a musical mark: they stay.
+        Assert.Equal(
+            "abcd\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67",
+            TextFolder.Fold("a\u0301b\u1AB0c\u1DC4d\uFE20\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67", UnicodeMatching.RemoveDiacritics, isRegex: false));
+    }
+
     [Fact]
     public void GraphemeBoundaries_WithinDoesNotMatchInsideAGraphemeCluster()
     {
