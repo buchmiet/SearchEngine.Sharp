@@ -14,9 +14,7 @@ static class Scale
         int n = a.Int("n", 100_000);
         bool facets = a.Has("facets");
         var preset = a.Opt("preset") == "Default" ? SearchTokenization.Default : SearchTokenization.FileMask;
-#if UNICODEOPT
         if (a.Int("unicode", 0) is var u and not 0) preset = preset.WithUnicodeMatching((UnicodeMatching)u);
-#endif
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         long heap0 = GC.GetTotalMemory(true);
         var entries = Bench.Entries(n, a.Int("seed", 2026), facets);

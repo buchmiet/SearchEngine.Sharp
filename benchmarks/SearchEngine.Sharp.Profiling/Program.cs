@@ -40,7 +40,9 @@ switch (mode)
         Concurrency.Run(a);
         break;
     default:
-        Console.WriteLine("modes: gen-tree | find | decompose | querypaths | scale | persistent | unicode | concurrency");
+        Console.WriteLine("modes: gen-tree | find | decompose | querypaths | scale | persistent | unicode | study | concurrency");
+        Console.WriteLine("unicode --dir DIR creates DIR/" + UnicodeProbe.ProbeDirectoryName + ", refuses to run if it exists and is not empty, and deletes it afterwards.");
+        Console.WriteLine("See benchmarks/SearchEngine.Sharp.Profiling/README.md for the options of every mode.");
         break;
 }
 
@@ -59,9 +61,13 @@ static class Proc
     [DllImport("libc", SetLastError = true)]
     static extern int getrusage(int who, long[] usage);
 
-    /// <summary>Peak resident set size of this process in bytes (getrusage ru_maxrss).</summary>
+    /// <summary>Peak resident set size of this process in bytes (getrusage ru_maxrss; peak working set on Windows).</summary>
     public static long PeakRss()
     {
+        // getrusage exists on Linux and macOS only; Windows reports the peak working set directly.
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+            return Process.GetCurrentProcess().PeakWorkingSet64;
+
         var buf = new long[18];
         if (getrusage(0, buf) != 0) return -1;
         long v = buf[4];

@@ -251,11 +251,7 @@ public sealed class CommanderPattern(IngestPublishOptions? options, bool instrum
         {
             cancellationToken.ThrowIfCancellationRequested();
             string name = f.Path[f.NameStart..];
-#if NEWFACETS
             var facets = FacetValues.Create([new("size", f.Size), new("modified", f.Modified), new("attrs", f.Attrs)]);
-#else
-            var facets = FacetValues.FromDictionary(new Dictionary<string, long> { ["size"] = f.Size, ["modified"] = f.Modified, ["attrs"] = f.Attrs });
-#endif
             var id = paths.Count;
             paths.Add(f.Path);
             yield return new KeyValuePair<int, IndexedEntry>(id, new IndexedEntry(name, name, facets));
