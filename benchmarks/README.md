@@ -68,7 +68,7 @@ strategy runs at every density, also where the pipeline would not choose it.
 | Benchmark | Answers |
 |---|---|
 | `FacetSelectivityBenchmark` | Up to which density is filtering only the text hits (`FacetFilterEvaluator.ApplyOnHitsInPlace`) faster than testing every document and intersecting (`ApplyFullScan`)? At 100,000 and 1,000,000 documents. This is `FacetOnHitsMaxFraction`. |
-| `NaturalSortSelectivityBenchmark` | Up to which density is sorting only the hits (`ResultMaterializer.MaterializeNaturalSortKOnly`) faster than walking a sort permutation that is already built (`MaterializeNaturalSortFullPermutation`)? |
+| `NaturalSortSelectivityBenchmark` | Up to which density is sorting only the hits (`ResultMaterializer.MaterializeNaturalSortKOnly`) faster than walking a sort permutation that is already built (`MaterializeNaturalSortFullPermutation`)? Also runs at 0.2% and 0.5%. This is `NaturalSortBuiltPermutationSortKMaxFraction`. |
 | `NaturalSortColdSelectivityBenchmark` | The same on a new snapshot, where the full permutation strategy first builds the permutation. With the warm case, this is `NaturalSortSortKMaxFraction`. |
 | `SelectivityPipelineBenchmark` | What does `Find` with the facet filter cost end to end, with the strategies the engine picks: a `Within` query in snapshot order, and an `Exact` query with natural sort? |
 | `SelectivityPipelineColdBenchmark` | The natural sort query of `SelectivityPipelineBenchmark` as the first query on a new snapshot. |

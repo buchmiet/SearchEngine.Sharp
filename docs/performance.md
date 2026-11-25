@@ -140,12 +140,13 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
 - A regex runs `Regex.IsMatch` on every token of the vocabulary.
 - A facet filter checks only the hits when they are at most half of the documents, otherwise it scans the facet
   columns. A filter-only query always scans the columns.
-- `NaturalSortAscending` with one hit costs nothing extra. Up to 80% of the documents it builds the sort keys of
-  the hits and sorts them on every query (65 ms for 105,000 hits at 10^6). Above 80% it walks the cached
-  permutation.
+- `NaturalSortAscending` with one hit costs nothing extra. While the snapshot has no permutation yet, a result of
+  up to 80% of the documents builds the sort keys of its hits and sorts them (65 ms for 105,000 hits at 10^6), and
+  a larger result builds the permutation and walks it. Once the permutation exists, every result of more than 0.5%
+  of the documents walks it, and only smaller results sort their hits.
 
-When you re-run a query after every publish and sort it naturally, each run pays the sort of its hits, and a
-dense result also pays the permutation build once per publish.
+When you re-run a query after every publish and sort it naturally, each run pays the sort of its hits until
+some query builds the permutation, and a dense result pays that build once per publish.
 
 ## Index or plain scan
 
