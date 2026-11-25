@@ -322,25 +322,6 @@ internal static class TextFolder
         return sb?.ToString() ?? text;
     }
 
-    /// <summary>True when <paramref name="position"/> is an extended grapheme cluster boundary of <paramref name="word"/> (UAX #29).</summary>
-    internal static bool IsGraphemeBoundary(ReadOnlySpan<char> word, int position)
-    {
-        if (position == 0 || position >= word.Length)
-            return true;
-
-        // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
-        char before = word[position - 1];
-        char after = word[position];
-        if (char.IsAscii(before) && char.IsAscii(after))
-            return before != '\r' || after != '\n';
-
-        int boundary = 0;
-        while (boundary < position)
-            boundary += StringInfo.GetNextTextElementLength(word[boundary..]);
-
-        return boundary == position;
-    }
-
     /// <summary>
     /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
     /// extended grapheme cluster boundaries, or -1: the substring match of <see cref="UnicodeMatching.GraphemeBoundaries"/>
@@ -349,12 +330,91 @@ internal static class TextFolder
     internal static int IndexOfOnGraphemeBoundaries(ReadOnlySpan<char> word, ReadOnlySpan<char> value)
     {
         int index = word.IndexOf(value);
-        while (index >= 0 && !(IsGraphemeBoundary(word, index) && IsGraphemeBoundary(word, index + value.Length)))
-        {
-            int next = word[(index + 1)..].IndexOf(value);
-            index = next < 0 ? -1 : index + 1 + next;
-        }
+        if (index < 0)
+            return -1;
 
-        return index;
+        var boundaries = new GraphemeBoundaryMap(word, word.Length < GraphemeBoundaryMap.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        try
+        {
+            while (index >= 0 && !(boundaries.IsBoundary(index) && boundaries.IsBoundary(index + value.Length)))
+            {
+                int next = word[(index + 1)..].IndexOf(value);
+                index = next < 0 ? -1 : index + 1 + next;
+            }
+
+            return index;
+        }
+        finally
+        {
+            boundaries.Dispose();
+        }
+    }
+}
+
+/// <summary>
+/// The extended grapheme cluster boundaries (UAX #29) of one word. The first test that cannot be answered from the two
+/// characters around the position finds all boundaries in one forward walk; every later test reads that table, so
+/// testing many positions costs one walk instead of one walk per test.
+/// </summary>
+/// <remarks>Not copied once used (the table and its state live in the instance), and not declared in a
+/// <see langword="using"/> statement, whose variable is read-only: call <see cref="Dispose"/> in a
+/// <see langword="finally"/> block.</remarks>
+internal ref struct GraphemeBoundaryMap
+{
+    /// <summary>Words shorter than this get their table on the stack from the caller; longer ones rent it.</summary>
+    internal const int MaxStackLength = 256;
+
+    private readonly ReadOnlySpan<char> _word;
+    private Span<bool> _isBoundary;
+    private bool[]? _rented;
+    private bool _built;
+
+    /// <param name="word">The word.</param>
+    /// <param name="buffer">Room for <c>word.Length + 1</c> flags, or empty to rent it from the shared pool when
+    /// needed.</param>
+    internal GraphemeBoundaryMap(ReadOnlySpan<char> word, Span<bool> buffer)
+    {
+        _word = word;
+        _isBoundary = buffer;
+    }
+
+    /// <summary>True when <paramref name="position"/> (0 to the word's length) is a cluster boundary.</summary>
+    internal bool IsBoundary(int position)
+    {
+        if (position <= 0 || position >= _word.Length)
+            return true;
+
+        // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
+        char before = _word[position - 1];
+        char after = _word[position];
+        if (char.IsAscii(before) && char.IsAscii(after))
+            return before != '\r' || after != '\n';
+
+        if (!_built)
+            Build();
+
+        return _isBoundary[position];
+    }
+
+    private void Build()
+    {
+        if (_isBoundary.Length < _word.Length + 1)
+            _isBoundary = _rented = ArrayPool<bool>.Shared.Rent(_word.Length + 1);
+
+        _isBoundary[.._word.Length].Clear();
+        for (int boundary = 0; boundary < _word.Length; boundary += StringInfo.GetNextTextElementLength(_word[boundary..]))
+            _isBoundary[boundary] = true;
+
+        _isBoundary[_word.Length] = true;
+        _built = true;
+    }
+
+    /// <summary>Returns a rented table to the pool.</summary>
+    public void Dispose()
+    {
+        if (_rented is not null)
+            ArrayPool<bool>.Shared.Return(_rented);
+
+        _rented = null;
     }
 }

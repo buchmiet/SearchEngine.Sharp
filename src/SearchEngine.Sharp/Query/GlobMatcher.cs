@@ -20,6 +20,25 @@ internal static class GlobMatcher
     /// </summary>
     internal static bool IsWholeWordMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, bool graphemeBoundaries = false)
     {
+        if (!graphemeBoundaries)
+        {
+            var none = default(GraphemeBoundaryMap);
+            return Match(pattern, word, graphemeBoundaries: false, ref none);
+        }
+
+        var boundaries = new GraphemeBoundaryMap(word, word.Length < GraphemeBoundaryMap.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        try
+        {
+            return Match(pattern, word, graphemeBoundaries: true, ref boundaries);
+        }
+        finally
+        {
+            boundaries.Dispose();
+        }
+    }
+
+    private static bool Match(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, bool graphemeBoundaries, ref GraphemeBoundaryMap boundaries)
+    {
         int patternIndex = 0;
         int wordIndex = 0;
         int starPatternIndex = -1;
@@ -28,7 +47,7 @@ internal static class GlobMatcher
         while (wordIndex < word.Length)
         {
             if (patternIndex < pattern.Length
-                && (!graphemeBoundaries || MayCrossAt(pattern, patternIndex, word, wordIndex)))
+                && (!graphemeBoundaries || MayCrossAt(pattern, patternIndex, wordIndex, ref boundaries)))
             {
                 char patternChar = pattern[patternIndex];
                 if (patternChar == '*')
@@ -71,10 +90,10 @@ internal static class GlobMatcher
     // The pattern moves from a literal to a wildcard (or back) at patternIndex: word must have a grapheme cluster
     // boundary there. Leftmost placement of each literal run stays correct, because the check depends only on where
     // that run is placed.
-    private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, ReadOnlySpan<char> word, int wordIndex)
+    private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, int wordIndex, ref GraphemeBoundaryMap boundaries)
         => patternIndex == 0
             || IsWildcard(pattern[patternIndex]) == IsWildcard(pattern[patternIndex - 1])
-            || TextFolder.IsGraphemeBoundary(word, wordIndex);
+            || boundaries.IsBoundary(wordIndex);
 
     private static bool IsWildcard(char ch) => ch is '*' or '?';
 
@@ -154,15 +173,29 @@ internal static class GlobMatcher
         {
             // First-character check before the vectorized compare: most words differ there.
             Kind.Prefix => word.Length >= _headLength && word[0] == _pattern[_headStart] && word.StartsWith(Head)
-                && IsBoundary(word, _headLength),
-            Kind.Suffix => word.EndsWith(Tail) && IsBoundary(word, word.Length - _tailLength),
+                && AreBoundaries(word, _headLength, _headLength),
+            Kind.Suffix => word.EndsWith(Tail) && AreBoundaries(word, word.Length - _tailLength, word.Length - _tailLength),
             Kind.Contains => QueryMatcher.ContainsWithin(word, Head, _graphemeBoundaries),
             Kind.PrefixSuffix => word.Length >= _headLength + _tailLength && word.StartsWith(Head) && word.EndsWith(Tail)
-                && IsBoundary(word, _headLength) && IsBoundary(word, word.Length - _tailLength),
+                && AreBoundaries(word, _headLength, word.Length - _tailLength),
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
-        private bool IsBoundary(ReadOnlySpan<char> word, int position)
-            => !_graphemeBoundaries || TextFolder.IsGraphemeBoundary(word, position);
+        // Both positions are cluster boundaries of word, or the boundaries are not checked.
+        private bool AreBoundaries(ReadOnlySpan<char> word, int first, int second)
+        {
+            if (!_graphemeBoundaries)
+                return true;
+
+            var boundaries = new GraphemeBoundaryMap(word, default);
+            try
+            {
+                return boundaries.IsBoundary(first) && boundaries.IsBoundary(second);
+            }
+            finally
+            {
+                boundaries.Dispose();
+            }
+        }
     }
 }
