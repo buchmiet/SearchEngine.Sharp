@@ -36,24 +36,43 @@ Other options: `--warmup N` (default 3), `--iterations N` (default 10), `--seed 
 
 ```bash
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter '*ExactFacet*'
+dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --filter '*Selectivity*'
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.MicroBenchmarks -- --list flat
 ```
 
 A BenchmarkDotNet suite that runs in process, with the memory diagnoser. The arguments are BenchmarkDotNet's
-(`--filter`, `--list`, `--warmupCount`, `--iterationCount` and so on; do not pass `--job`, it replaces the
-in-process toolchain this suite needs). Results go to `benchmarks/SearchEngine.Sharp.MicroBenchmarks/BenchmarkDotNet.Artifacts`
-as Markdown, CSV and HTML. `--fingerprint [DIR]` writes a JSON description of the machine and runtime instead of
-running benchmarks.
+(`--filter`, `--list`, `--warmupCount`, `--iterationCount` and so on). Results go to
+`benchmarks/SearchEngine.Sharp.MicroBenchmarks/BenchmarkDotNet.Artifacts` as Markdown, CSV and HTML.
+`--fingerprint [DIR]` writes a JSON description of the machine and runtime instead of running benchmarks.
 
-| Benchmark | Measures |
+| Benchmark | Answers |
 |---|---|
-| `ExactFacetBenchmark` | an exact term with and without a facet filter |
-| `OperatorsOnBenchmark` | a single term with `enableOperators` on and off |
-| `FileSearchBenchmark` | typical file-search queries on a realistic file-name corpus |
-| `FileMaskGlobBenchmark` | `*.pdf` on whole names compared with the token preset |
-| `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark` | natural sort on a new snapshot and after each publish of a progressive scan |
-| `NaturalSortSelectivityBenchmark` | natural sort by sorting only the hits compared with walking the permutation of all documents, over result sizes (the basis of `SelectivityThresholds.NaturalSortSortKMaxFraction`) |
-| `FacetSelectivityBenchmark` | a facet filter on the text hits only compared with a scan of all documents, over result sizes (the basis of `SelectivityThresholds.FacetOnHitsMaxFraction`) |
-| `SelectivityPipelineBenchmark` | a query with no hits, and a `Within` query with a facet filter, with natural sort and in snapshot order |
-| `BitSetMaterializationBenchmark` | turning a result set into a list of ids, over result sizes |
-| `SnapshotBuildAllocationBenchmark` | time and allocations of a snapshot build |
+| `ExactFacetBenchmark` | What does a facet filter add to an exact term? |
+| `OperatorsOnBenchmark` | What does `enableOperators` cost on a single term? |
+| `FileSearchBenchmark` | How fast are typical file-search queries on a realistic file-name corpus? |
+| `FileMaskGlobBenchmark` | How does `*.pdf` on whole names compare with the token preset? |
+| `NaturalSortBenchmark`, `ProgressiveNaturalSortBenchmark` | What does natural sort cost on a new snapshot, and after each publish of a progressive scan? |
+| `FastBitSetBenchmark` | How fast are AND, OR, AND NOT, the population count and the set-bit enumeration of a result set, from 1,000 to 1,000,000 bits? |
+| `BitSetMaterializationBenchmark` | What does turning a result set into a list of ids in snapshot order cost, by number of hits? |
+| `SnapshotBuildAllocationBenchmark` | How long does a snapshot build take and how much does it allocate? |
+
+### Selectivity benchmarks
+
+The query pipeline picks a facet strategy and a natural sort strategy from the share of documents the query matches,
+using the fractions in `src/SearchEngine.Sharp/Query/SelectivityThresholds.cs`. These benchmarks check those
+fractions. All of them run at the hit densities 0.1%, 1%, 10%, 25%, 50%, 65%, 80%, 90% and 100% of a 100,000-name
+corpus (`SelectivityCorpus`: the `FileSearchDataFactory` names, one search word per density, a facet filter that
+keeps half of the documents). The strategy benchmarks call the internal strategy methods directly, so each
+strategy runs at every density, also where the pipeline would not choose it.
+
+| Benchmark | Answers |
+|---|---|
+| `FacetSelectivityBenchmark` | Up to which density is filtering only the text hits (`FacetFilterEvaluator.ApplyOnHitsInPlace`) faster than testing every document and intersecting (`ApplyFullScan`)? At 100,000 and 1,000,000 documents. This is `FacetOnHitsMaxFraction`. |
+| `NaturalSortSelectivityBenchmark` | Up to which density is sorting only the hits (`ResultMaterializer.MaterializeNaturalSortKOnly`) faster than walking a sort permutation that is already built (`MaterializeNaturalSortFullPermutation`)? |
+| `NaturalSortColdSelectivityBenchmark` | The same on a new snapshot, where the full permutation strategy first builds the permutation. With the warm case, this is `NaturalSortSortKMaxFraction`. |
+| `SelectivityPipelineBenchmark` | What does `Find` with the facet filter cost end to end, with the strategies the engine picks: a `Within` query in snapshot order, and an `Exact` query with natural sort? |
+| `SelectivityPipelineColdBenchmark` | The natural sort query of `SelectivityPipelineBenchmark` as the first query on a new snapshot. |
+
+The cold benchmarks build a new snapshot before each call and run one call per iteration, so they take longer
+than the others. To read a crossover, compare the two strategy rows at each density: the threshold belongs between
+the last density where the hits-only strategy is faster and the first where it is slower.

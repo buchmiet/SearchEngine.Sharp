@@ -1,90 +1,49 @@
 using BenchmarkDotNet.Attributes;
-using SearchEngine;
 using SearchEngine.Filters;
-using SearchEngine.Sharp.Benchmarks;
 
 namespace SearchEngine.Sharp.MicroBenchmarks;
 
 /// <summary>
-/// Measured hit counts for the within+facet scenario (file corpus @ 100k, seed 2026).
-/// Populated once in <see cref="SelectivityPipelineBenchmark.GlobalSetup"/>.
+/// End-to-end <see cref="SearchEngineSharp.Find(string, WordMatchMethod, bool, SearchSortMode, FacetFilter?)"/> with
+/// the facet filter of <see cref="SelectivityCorpus"/>, by density of the text hits, on a snapshot whose sort
+/// permutation is already built. The engine picks the facet and sort strategies itself.
 /// </summary>
-internal static class SelectivityPipelineCounts
-{
-    internal const string WithinQuery = "report";
-    internal static int TextHitCount { get; set; }
-    internal static int PostFacetHitCount { get; set; }
-}
-
+/// <remarks>
+/// The Within query reaches the facet strategies through the bitset pipeline; an Exact query in snapshot order takes
+/// a path without them. The Exact query with natural sort goes through both choices: facet strategy on the text hits,
+/// sort strategy on the hits left after the filter (about half).
+/// </remarks>
 [MemoryDiagnoser]
-[WarmupCount(1)]
-[IterationCount(5)]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class SelectivityPipelineBenchmark
 {
-    private Dictionary<int, IndexedEntry> _entries = null!;
-    private SearchEngineSharp _coldEngine = null!;
+    private SearchEngineSharp _engine = null!;
     private FacetFilter _filter = null!;
-    private string _zeroHitQuery = null!;
-    private string _withinQuery = null!;
+    private string _word = null!;
+
+    public static IEnumerable<double> Densities => SelectivityCorpus.Densities;
+
+    [ParamsSource(nameof(Densities))]
+    public double Density { get; set; }
 
     [GlobalSetup]
     public void Setup()
     {
-        const int documentCount = 100_000;
-        var data = FileSearchDataFactory.Create(documentCount, seed: 2026);
-        _entries = FileSearchDataFactory.ToIndexedEntries(data.Documents);
-        _filter = FacetFilter.Range("size", 1_024, 1_048_576);
-        _zeroHitQuery = "zzzznotfound999";
-        _withinQuery = data.InfixQueries[0];
-
-        var measureProvider = new IndexSnapshotProvider();
-        new IndexUpdater(measureProvider).RebuildFrom(_entries);
-        var measureEngine = new SearchEngineSharp(measureProvider);
-        SelectivityPipelineCounts.TextHitCount = measureEngine.CountMatches(
-            _withinQuery, WordMatchMethod.Within, enableOperators: true);
-        SelectivityPipelineCounts.PostFacetHitCount = measureEngine.CountMatches(
-            _withinQuery, WordMatchMethod.Within, enableOperators: true, _filter);
-
-        Console.WriteLine(
-            $"SelectivityPipelineCounts: query='{_withinQuery}' textHits={SelectivityPipelineCounts.TextHitCount} postFacet={SelectivityPipelineCounts.PostFacetHitCount}");
-
-        RebuildColdEngine();
-    }
-
-    [IterationSetup]
-    public void IterationSetup()
-        => RebuildColdEngine();
-
-    [Benchmark(Baseline = true, Description = "0 text hits + NaturalSort cold")]
-    public int ZeroHits_NaturalSort()
-        => _coldEngine.Find(
-            _zeroHitQuery,
-            WordMatchMethod.Within,
-            enableOperators: true,
-            SearchSortMode.NaturalSortAscending).Count;
-
-    [Benchmark(Description = "Within+Facet+NaturalSort cold (see SelectivityPipelineCounts)")]
-    public int WithinFacet_NaturalSort()
-        => _coldEngine.Find(
-            _withinQuery,
-            WordMatchMethod.Within,
-            enableOperators: true,
-            SearchSortMode.NaturalSortAscending,
-            _filter).Count;
-
-    [Benchmark(Description = "Within+Facet SnapshotOrder (see SelectivityPipelineCounts)")]
-    public int WithinFacet_SnapshotOrder()
-        => _coldEngine.Find(
-            _withinQuery,
-            WordMatchMethod.Within,
-            enableOperators: true,
-            SearchSortMode.SnapshotOrder,
-            _filter).Count;
-
-    private void RebuildColdEngine()
-    {
+        var corpus = SelectivityCorpus.Create(100_000);
         var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(_entries);
-        _coldEngine = new SearchEngineSharp(provider);
+        new IndexUpdater(provider).RebuildFrom(corpus.Entries);
+        _ = provider.Current.GetSortedPermutation();
+        _engine = new SearchEngineSharp(provider);
+        _filter = corpus.Filter;
+        _word = SelectivityCorpus.WordFor(Density);
     }
+
+    [Benchmark(Description = "Within + filter, snapshot order")]
+    public int WithinFilterSnapshotOrder()
+        => _engine.Find(_word, WordMatchMethod.Within, enableOperators: false, SearchSortMode.SnapshotOrder, _filter).Count;
+
+    [Benchmark(Description = "Exact + filter, natural sort (permutation built)")]
+    public int ExactFilterNaturalSort()
+        => _engine.Find(_word, WordMatchMethod.Exact, enableOperators: false, SearchSortMode.NaturalSortAscending, _filter).Count;
 }
