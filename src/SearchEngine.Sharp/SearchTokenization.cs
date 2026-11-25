@@ -69,8 +69,11 @@ public sealed class SearchTokenization
 
     internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
 
-    internal string FoldQuery(string expression, WordMatchMethod method)
-        => method == WordMatchMethod.Regex ? expression : TextFolder.Fold(expression, UnicodeMatching);
+    // One query term, after operators were recognized on the query as typed. Regex patterns are never folded.
+    internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
+        => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
+            ? term
+            : TextFolder.Fold(term.ToString(), UnicodeMatching);
 
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 

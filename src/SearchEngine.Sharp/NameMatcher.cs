@@ -41,7 +41,6 @@ public sealed class NameMatcher
     {
         ArgumentNullException.ThrowIfNull(expression);
         tokenization ??= SearchTokenization.Default;
-        expression = tokenization.FoldQuery(expression, method);
         if (string.IsNullOrWhiteSpace(expression))
             return new NameMatcher(tokenization, method, null, null);
 
@@ -51,7 +50,7 @@ public sealed class NameMatcher
             return new NameMatcher(tokenization, method, null, regex);
         }
 
-        var postfix = QueryExpressionEvaluator.ToPostfix(expression, enableOperators, tokenization.QuerySeparatorValues);
+        var postfix = QueryExpressionEvaluator.ToPostfix(expression, enableOperators, tokenization);
         return new NameMatcher(tokenization, method, postfix?.ToArray(), null);
     }
 

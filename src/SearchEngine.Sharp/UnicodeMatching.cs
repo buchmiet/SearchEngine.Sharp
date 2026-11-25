@@ -5,7 +5,7 @@ using System.Text;
 namespace SearchEngine;
 
 /// <summary>
-/// Optional Unicode-aware matching. The folding options are applied to indexed text and to queries;
+/// Optional Unicode-aware matching. The folding options are applied to indexed text and to query terms;
 /// pure ASCII text is never changed, so the cost is paid only for names that contain non-ASCII characters.
 /// A <see cref="WordMatchMethod.Regex"/> pattern is not folded (that would change its character classes): it runs
 /// as written against the folded text. Set through <see cref="SearchTokenization.WithUnicodeMatching"/>.
@@ -57,10 +57,11 @@ internal static class TextFolder
     // NFC wherever normalization works.
     internal static bool IsNormalizationAvailable { get; } = !"e\u0301".IsNormalized(NormalizationForm.FormC);
 
+    internal const UnicodeMatching FoldingOptions = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
+
     internal static string Fold(string text, UnicodeMatching normalization)
     {
-        const UnicodeMatching folding = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
-        if ((normalization & folding) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
+        if ((normalization & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
             return text;
 
         bool removeDiacritics = (normalization & UnicodeMatching.RemoveDiacritics) != 0;

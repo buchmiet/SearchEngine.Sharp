@@ -220,11 +220,11 @@ public class UnicodeMatchingTests
         string[] names = ["e.txt", "Re\u0301sume\u0301.pdf", "Stra\u00DFe.pdf"];
         var engine = Index(tokenization, names);
 
-        AssertRegex(engine, tokenization, names, "^[xe\u0301]" + @"\.txt$", [1]);
-        AssertRegex(engine, tokenization, names, "^r\u00E9sum\u00E9", [2]);
-        AssertRegex(engine, tokenization, names, "^re\u0301sume\u0301", []);
-        AssertRegex(engine, tokenization, names, @"^strasse\.pdf$", [3]);
-        AssertRegex(engine, tokenization, names, "^stra\u00DFe" + @"\.pdf$", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[xe\u0301]" + @"\.txt$", [1]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^r\u00E9sum\u00E9", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^re\u0301sume\u0301", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, @"^strasse\.pdf$", [3]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra\u00DFe" + @"\.pdf$", []);
     }
 
     [NormalizationFact]
@@ -234,15 +234,56 @@ public class UnicodeMatchingTests
         string[] names = ["report.pdf", "\u00E9cole.txt", "\u00C5l.txt", "bar"];
         var engine = Index(tokenization, names);
 
-        AssertRegex(engine, tokenization, names, "^[b-\u00E5]", [1, 2, 4]);
-        AssertRegex(engine, tokenization, names, "^[\u00E0-\u00FF]", []);
-        AssertRegex(engine, tokenization, names, "^ecole", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[b-\u00E5]", [1, 2, 4]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[\u00E0-\u00FF]", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^ecole", [2]);
     }
 
-    private static void AssertRegex(SearchEngineSharp engine, SearchTokenization tokenization, string[] names, string pattern, int[] expected)
+    // Operators are recognized in the query as typed; a word that only folds to and/or/not (nöt, ånd, őr, ør) is
+    // a term.
+    [NormalizationFact]
+    public void RemoveDiacritics_WordsThatFoldToOperatorsStayTerms()
     {
-        Assert.Equal(expected, engine.Find(pattern, WordMatchMethod.Regex));
-        var matcher = NameMatcher.Create(pattern, WordMatchMethod.Regex, tokenization: tokenization);
+        var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics);
+        string[] names = ["n\u00F6t", "\u00E5nd", "\u0151r", "other", "recept", "n\u00F6t recept"];
+        var engine = Index(tokenization, names);
+
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "n\u00F6t", [1, 6], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "\u00E5nd", [2], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "\u0151r", [3], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Within, "\u00F8r", [3], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "other \u00E5nd", [], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "n\u00F6t recept", [6], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "n\u00F6t OR \u00E5nd", [1, 2, 6], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "recept NOT n\u00F6t", [5], enableOperators: true);
+    }
+
+    // Terms are folded one by one, so a term that folds to a query separator (U+037E GREEK QUESTION MARK is
+    // canonically ';') splits into terms the same way the folded index text splits into tokens.
+    [NormalizationFact]
+    public void Compose_TermThatFoldsToASeparatorSplitsLikeTheIndexText()
+    {
+        var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.Compose);
+        string[] names = ["alpha\u037Ebeta", "alpha gamma"];
+        var engine = Index(tokenization, names);
+
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "alpha\u037Ebeta", [1]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "alpha\u037Ebeta", [1], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Within, "pha\u037Ebe", [1]);
+    }
+
+    private static void AssertFinds(
+        SearchEngineSharp engine,
+        SearchTokenization tokenization,
+        string[] names,
+        WordMatchMethod method,
+        string query,
+        int[] expected,
+        bool enableOperators = false)
+    {
+        Assert.Equal(expected, engine.Find(query, method, enableOperators));
+        Assert.Equal(expected.Length, engine.CountMatches(query, method, enableOperators));
+        var matcher = NameMatcher.Create(query, method, enableOperators, tokenization);
         Assert.Equal(expected, Enumerable.Range(1, names.Length).Where(id => matcher.IsMatch(names[id - 1])));
     }
 }

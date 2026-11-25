@@ -89,7 +89,8 @@ query and vice versa; `ß` ≠ `ss`, final `ς` ≠ `σ`, and `İ` stays `İ`; `
 cluster (`cafe` inside a decomposed `café`, one emoji inside a ZWJ family sequence).
 
 `SearchTokenization.WithUnicodeMatching(UnicodeMatching)` opts in per preset (stored in each snapshot,
-applied to indexed `SearchText` and to queries; ASCII text is never touched):
+applied to indexed `SearchText` and to each query term; ASCII text is never touched). Operators are recognized
+in the query as typed, before folding, so under `RemoveDiacritics` the words `nöt`, `ånd` and `ør` stay terms:
 
 | Flag | Effect |
 |------|--------|
