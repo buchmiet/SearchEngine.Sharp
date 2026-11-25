@@ -36,7 +36,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   also waits `AdaptiveMultiplier` × the last rebuild duration (13–16 rebuilds, ~20 s). Unchanged while rebuilds
   are faster than `MaxStaleness / AdaptiveMultiplier`.
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
-  with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
+  with `NOT AND` or `NOT OR`, and returned nothing for misplaced operators elsewhere (`a NOT AND b`, `(AND a)`,
+  `(a OR) b`, `a () b`). Malformed operator sequences are now corrected by the documented rules at the start and
+  end of the expression and of every parenthesised group.
 
 ### Changed
 
@@ -59,7 +61,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 
 ### Tests
 
-- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); leading `NOT AND`/`NOT OR`; lazy bigram index vs brute
+- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); malformed
+  operator sequences at the start, middle and end of expressions and groups (52 cases); lazy bigram index vs brute
   force with concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
   columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
   `NameMatcher` vs index (20 queries × 4 presets).

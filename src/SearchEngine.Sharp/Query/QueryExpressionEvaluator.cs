@@ -69,10 +69,6 @@ internal static class QueryExpressionEvaluator
 
         word = null;
         var tokens = Tokenize(expression, enableOperators: true, separators);
-        if (tokens.Count == 0)
-            return false;
-
-        CorrectTokens(tokens);
         if (tokens.Count != 1 || tokens[0].Operation != WordOperations.None)
             return false;
 
@@ -92,13 +88,10 @@ internal static class QueryExpressionEvaluator
         if (tokens.Count == 0)
             return null;
 
-        CorrectTokens(tokens);
-        if (tokens.Count == 0)
-            return null;
-
         return EvaluateTokens(tokens, method, qc, snapshot);
     }
 
+    // Splits the expression into a well-formed infix token list (see Append); empty when nothing is left.
     private static List<QueryToken> Tokenize(
         ReadOnlySpan<char> expression,
         bool enableOperators,
@@ -124,12 +117,13 @@ internal static class QueryExpressionEvaluator
 
             if (enableOperators && allowParentheses && ch is '(' or ')')
             {
-                tokens.Add(QueryToken.CreateOperation(
+                Append(tokens, QueryToken.CreateOperation(
                     ch == '(' ? WordOperations.OpenParenthesis : WordOperations.CloseParenthesis));
             }
         }
 
         EmitWord(expression, wordStart, expression.Length, enableOperators, tokens);
+        DropTrailingOperators(tokens);
         return tokens;
     }
 
@@ -146,88 +140,69 @@ internal static class QueryExpressionEvaluator
         var wordSpan = expression[wordStart..wordEnd];
         if (enableOperators && TryGetOperator(wordSpan, out var operation))
         {
-            tokens.Add(QueryToken.CreateOperation(operation));
+            Append(tokens, QueryToken.CreateOperation(operation));
             return;
         }
 
-        tokens.Add(QueryToken.CreateWord(TextNormalizer.CreateNormalizedWord(wordSpan)));
+        Append(tokens, QueryToken.CreateWord(TextNormalizer.CreateNormalizedWord(wordSpan)));
     }
 
-    // Sanitises a raw token list so that EvaluateTokens receives a well-formed expression:
-    //  1. Strip leading OR/AND (an expression cannot start with a binary operator).
-    //  2. Strip trailing operators (an expression cannot end with an operator).
-    //  3. Collapse consecutive binary operators (e.g. "AND AND" → "AND") via
-    //     CorrectOperationSequence.
-    //  4. Insert implicit AND between adjacent words / close-open parentheses
-    //     (e.g. "cat dog" → "cat AND dog") via InsertDefaultAnd.
-    private static void CorrectTokens(List<QueryToken> tokens)
+    // Appends one token so that the list stays a well-formed infix expression (malformed input is corrected, not
+    // rejected; docs/query-semantics.md, query parsing rule 5). The start of the expression and of every group
+    // behave alike:
+    //   - a term, "(" or NOT right after a term or ")" gets an implicit AND in front ("cat dog" = "cat AND dog");
+    //   - a binary operator at the start is dropped;
+    //   - NOT NOT counts as one NOT; a binary operator followed by NOT is kept (NOT binds to what follows);
+    //   - any other pair of adjacent operators collapses to AND, which is then checked against the token before it
+    //     ("a AND NOT AND b" = "a AND b", "(NOT AND a)" = "(a)");
+    //   - ")" drops the operators in front of it, and an empty group is dropped.
+    // Trailing operators at the end of the expression are dropped by DropTrailingOperators once all tokens are in.
+    private static void Append(List<QueryToken> tokens, QueryToken token)
     {
-        if (tokens.Count == 0)
-            return;
+        var last = tokens.Count > 0 ? tokens[^1].Operation : WordOperations.OpenParenthesis;
+        bool afterOperand = last is WordOperations.None or WordOperations.CloseParenthesis;
 
-        while (tokens.Count > 0 && tokens[0].Operation is WordOperations.Or or WordOperations.And)
-            tokens.RemoveAt(0);
+        switch (token.Operation)
+        {
+            case WordOperations.None:
+            case WordOperations.OpenParenthesis:
+            case WordOperations.Not:
+                if (afterOperand)
+                    tokens.Add(QueryToken.CreateOperation(WordOperations.And));
+                else if (token.Operation == WordOperations.Not && last == WordOperations.Not)
+                    return;
 
-        while (tokens.Count > 0 && tokens[^1].Operation is not WordOperations.None and not WordOperations.CloseParenthesis)
+                tokens.Add(token);
+                return;
+
+            case WordOperations.And:
+            case WordOperations.Or:
+                if (afterOperand)
+                {
+                    tokens.Add(token);
+                }
+                else if (last != WordOperations.OpenParenthesis)
+                {
+                    tokens.RemoveAt(tokens.Count - 1);
+                    Append(tokens, QueryToken.CreateOperation(WordOperations.And));
+                }
+
+                return;
+
+            case WordOperations.CloseParenthesis:
+                DropTrailingOperators(tokens);
+                if (tokens[^1].Operation == WordOperations.OpenParenthesis)
+                    tokens.RemoveAt(tokens.Count - 1);
+                else
+                    tokens.Add(token);
+                return;
+        }
+    }
+
+    private static void DropTrailingOperators(List<QueryToken> tokens)
+    {
+        while (tokens.Count > 0 && tokens[^1].Operation is WordOperations.And or WordOperations.Or or WordOperations.Not)
             tokens.RemoveAt(tokens.Count - 1);
-
-        for (int i = 0; i < tokens.Count - 1; i++)
-        {
-            CorrectOperationSequence(tokens, ref i);
-            if (i < 0)
-            {
-                // A leading "NOT AND" / "NOT OR" collapsed into a leading binary operator:
-                // strip it like any other leading binary operator (rule 1).
-                while (tokens.Count > 0 && tokens[0].Operation is WordOperations.Or or WordOperations.And)
-                    tokens.RemoveAt(0);
-                continue;
-            }
-
-            InsertDefaultAnd(tokens, i);
-        }
-    }
-
-    // Collapses two adjacent operators into a single well-defined one.
-    // Rules (only binary–binary adjacency is handled; word and parenthesis tokens are skipped):
-    //   binary + NOT   → keep as-is (NOT binds to the following word)
-    //   NOT    + NOT   → remove the second (double negation is a no-op at parse time)
-    //   anything else  → replace both with AND and back up the index
-    private static void CorrectOperationSequence(List<QueryToken> tokens, ref int i)
-    {
-        if (tokens[i].Operation is WordOperations.None or WordOperations.OpenParenthesis or WordOperations.CloseParenthesis
-            || tokens[i + 1].Operation is WordOperations.None or WordOperations.OpenParenthesis or WordOperations.CloseParenthesis)
-            return;
-
-        if (tokens[i].Operation != WordOperations.Not && tokens[i + 1].Operation == WordOperations.Not)
-            return;
-
-        if (tokens[i].Operation == WordOperations.Not && tokens[i + 1].Operation == WordOperations.Not)
-        {
-            tokens.RemoveAt(i + 1);
-            return;
-        }
-
-        tokens[i] = QueryToken.CreateOperation(WordOperations.And);
-        tokens.RemoveAt(i + 1);
-        i--;
-    }
-
-    // If the current token ends a value (word or ")") and the next token starts a
-    // new value (word, "(", or NOT), insert an implicit AND between them.
-    // This makes "cat dog" behave identically to "cat AND dog".
-    private static void InsertDefaultAnd(List<QueryToken> tokens, int i)
-    {
-        if (i >= tokens.Count - 1)
-            return;
-
-        var current = tokens[i].Operation;
-        var next = tokens[i + 1].Operation;
-
-        bool leftComplete = current is WordOperations.None or WordOperations.CloseParenthesis;
-        bool rightStarting = next is WordOperations.None or WordOperations.OpenParenthesis or WordOperations.Not;
-
-        if (leftComplete && rightStarting)
-            tokens.Insert(i + 1, QueryToken.CreateOperation(WordOperations.And));
     }
 
     // Evaluates the token list using the shunting-yard algorithm (Dijkstra, 1961).
@@ -241,10 +216,6 @@ internal static class QueryExpressionEvaluator
     internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchValues<char> separators)
     {
         var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
-        if (tokens.Count == 0)
-            return null;
-
-        CorrectTokens(tokens);
         if (tokens.Count == 0)
             return null;
 
