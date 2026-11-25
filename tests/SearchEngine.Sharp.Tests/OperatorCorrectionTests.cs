@@ -18,76 +18,76 @@ public class OperatorCorrectionTests
         [4] = "gamma",
     };
 
-    public static TheoryData<string, int[]> Cases() => new()
-    {
+    public static IEnumerable<Func<(string Expression, int[] Expected)>> Cases() =>
+    [
         // Pairs of operators between two terms.
-        { "alpha NOT AND beta", [1] },
-        { "alpha NOT OR beta", [1] },
-        { "alpha AND NOT AND beta", [1] },
-        { "alpha OR NOT OR beta", [1] },
-        { "alpha AND AND beta", [1] },
-        { "alpha OR OR beta", [1] },
-        { "alpha AND OR beta", [1] },
-        { "alpha OR AND beta", [1] },
-        { "beta OR NOT AND alpha", [1] },
-        { "alpha AND NOT beta", [2] },
-        { "alpha NOT beta", [2] },
-        { "alpha NOT NOT beta", [2] },
-        { "alpha OR NOT beta", [1, 2, 4] },
+        () => ("alpha NOT AND beta", [1]),
+        () => ("alpha NOT OR beta", [1]),
+        () => ("alpha AND NOT AND beta", [1]),
+        () => ("alpha OR NOT OR beta", [1]),
+        () => ("alpha AND AND beta", [1]),
+        () => ("alpha OR OR beta", [1]),
+        () => ("alpha AND OR beta", [1]),
+        () => ("alpha OR AND beta", [1]),
+        () => ("beta OR NOT AND alpha", [1]),
+        () => ("alpha AND NOT beta", [2]),
+        () => ("alpha NOT beta", [2]),
+        () => ("alpha NOT NOT beta", [2]),
+        () => ("alpha OR NOT beta", [1, 2, 4]),
 
         // Start and end of the expression.
-        { "AND alpha", [1, 2] },
-        { "OR alpha", [1, 2] },
-        { "NOT AND alpha", [1, 2] },
-        { "NOT OR alpha", [1, 2] },
-        { "AND NOT alpha", [3, 4] },
-        { "NOT NOT alpha", [3, 4] },
-        { "NOT NOT NOT alpha", [3, 4] },
-        { "alpha AND", [1, 2] },
-        { "alpha OR", [1, 2] },
-        { "alpha NOT", [1, 2] },
-        { "alpha AND NOT", [1, 2] },
-        { "alpha NOT AND", [1, 2] },
+        () => ("AND alpha", [1, 2]),
+        () => ("OR alpha", [1, 2]),
+        () => ("NOT AND alpha", [1, 2]),
+        () => ("NOT OR alpha", [1, 2]),
+        () => ("AND NOT alpha", [3, 4]),
+        () => ("NOT NOT alpha", [3, 4]),
+        () => ("NOT NOT NOT alpha", [3, 4]),
+        () => ("alpha AND", [1, 2]),
+        () => ("alpha OR", [1, 2]),
+        () => ("alpha NOT", [1, 2]),
+        () => ("alpha AND NOT", [1, 2]),
+        () => ("alpha NOT AND", [1, 2]),
 
         // Start and end of a group.
-        { "(AND alpha)", [1, 2] },
-        { "(OR alpha)", [1, 2] },
-        { "(NOT AND alpha)", [1, 2] },
-        { "(alpha AND)", [1, 2] },
-        { "(alpha NOT)", [1, 2] },
-        { "(alpha OR) beta", [1] },
-        { "gamma OR (AND alpha)", [1, 2, 4] },
-        { "gamma OR (alpha NOT AND beta)", [1, 4] },
-        { "((NOT AND alpha) OR (gamma AND))", [1, 2, 4] },
-        { "NOT (AND alpha OR beta)", [4] },
-        { "NOT (alpha OR beta)", [4] },
-        { "((alpha OR gamma)) beta", [1] },
-        { "(alpha OR gamma)(beta)", [1] },
+        () => ("(AND alpha)", [1, 2]),
+        () => ("(OR alpha)", [1, 2]),
+        () => ("(NOT AND alpha)", [1, 2]),
+        () => ("(alpha AND)", [1, 2]),
+        () => ("(alpha NOT)", [1, 2]),
+        () => ("(alpha OR) beta", [1]),
+        () => ("gamma OR (AND alpha)", [1, 2, 4]),
+        () => ("gamma OR (alpha NOT AND beta)", [1, 4]),
+        () => ("((NOT AND alpha) OR (gamma AND))", [1, 2, 4]),
+        () => ("NOT (AND alpha OR beta)", [4]),
+        () => ("NOT (alpha OR beta)", [4]),
+        () => ("((alpha OR gamma)) beta", [1]),
+        () => ("(alpha OR gamma)(beta)", [1]),
 
         // Empty groups.
-        { "alpha () beta", [1] },
-        { "() alpha", [1, 2] },
-        { "alpha ()", [1, 2] },
-        { "(()) alpha", [1, 2] },
-        { "alpha AND (OR) beta", [1] },
-        { "gamma OR (NOT)", [4] },
+        () => ("alpha () beta", [1]),
+        () => ("() alpha", [1, 2]),
+        () => ("alpha ()", [1, 2]),
+        () => ("(()) alpha", [1, 2]),
+        () => ("alpha AND (OR) beta", [1]),
+        () => ("gamma OR (NOT)", [4]),
 
         // Unbalanced parentheses are plain separators.
-        { "(alpha OR gamma", [1, 2, 4] },
-        { "alpha OR gamma)", [1, 2, 4] },
+        () => ("(alpha OR gamma", [1, 2, 4]),
+        () => ("alpha OR gamma)", [1, 2, 4]),
 
         // Nothing left after correction.
-        { "AND", [] },
-        { "NOT", [] },
-        { "AND OR NOT", [] },
-        { "()", [] },
-        { "(AND)", [] },
-        { "(NOT) OR", [] },
-    };
+        () => ("AND", []),
+        () => ("NOT", []),
+        () => ("AND OR NOT", []),
+        () => ("()", []),
+        () => ("(AND)", []),
+        () => ("(NOT) OR", []),
+    ];
 
-    [Theory]
-    [MemberData(nameof(Cases))]
-    public void MalformedOperatorSequence_IsCorrected(string expression, int[] expected)
+    [Test]
+    [MethodDataSource(nameof(Cases))]
+    public async Task MalformedOperatorSequence_IsCorrected(string expression, int[] expected)
     {
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(Documents);
@@ -95,8 +95,8 @@ public class OperatorCorrectionTests
 
         foreach (var method in new[] { WordMatchMethod.Exact, WordMatchMethod.Within })
         {
-            Assert.Equal(expected, engine.Find(expression, method, enableOperators: true).Order());
-            Assert.Equal(expected.Length, engine.CountMatches(expression, method, enableOperators: true));
+            await Assert.That(engine.Find(expression, method, enableOperators: true).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
+            await Assert.That(engine.CountMatches(expression, method, enableOperators: true)).IsEqualTo(expected.Length);
         }
     }
 }

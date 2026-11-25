@@ -6,19 +6,19 @@ namespace SearchEngine.Sharp.Tests;
 // entries by id, so the last value for an id wins.
 public class DuplicateIdTests
 {
-    [Fact]
-    public void Build_rejects_a_repeated_id_in_string_entries()
+    [Test]
+    public async Task Build_rejects_a_repeated_id_in_string_entries()
     {
         KeyValuePair<int, string>[] entries = [new(1, "alpha"), new(2, "beta"), new(1, "gamma")];
 
-        var exception = Assert.Throws<ArgumentException>(() => IndexSnapshotBuilder.Build(entries));
+        var exception = await Assert.That(() => IndexSnapshotBuilder.Build(entries)).ThrowsExactly<ArgumentException>();
 
-        Assert.Equal("entries", exception.ParamName);
-        Assert.Contains("1", exception.Message);
+        await Assert.That(exception!.ParamName).IsEqualTo("entries");
+        await Assert.That(exception.Message).Contains("1", StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Build_rejects_a_repeated_id_in_indexed_entries()
+    [Test]
+    public async Task Build_rejects_a_repeated_id_in_indexed_entries()
     {
         IEnumerable<KeyValuePair<int, IndexedEntry>> Entries()
         {
@@ -27,44 +27,40 @@ public class DuplicateIdTests
             yield return new(42, new IndexedEntry("gamma", "gamma"));
         }
 
-        var exception = Assert.Throws<ArgumentException>(
-            () => IndexSnapshotBuilder.Build(Entries(), SearchTokenization.FileMask, progress: null));
+        var exception = await Assert.That(
+            () => IndexSnapshotBuilder.Build(Entries(), SearchTokenization.FileMask, progress: null)).ThrowsExactly<ArgumentException>();
 
-        Assert.Equal("entries", exception.ParamName);
-        Assert.Contains("42", exception.Message);
+        await Assert.That(exception!.ParamName).IsEqualTo("entries");
+        await Assert.That(exception.Message).Contains("42", StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Build_accepts_dictionaries_and_distinct_ids()
+    [Test]
+    public async Task Build_accepts_dictionaries_and_distinct_ids()
     {
         var fromDictionary = IndexSnapshotBuilder.Build(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var fromSequence = IndexSnapshotBuilder.Build([new KeyValuePair<int, string>(3, "alpha"), new(4, "alpha")]);
 
-        Assert.Equal(2, fromDictionary.DocumentCount);
-        Assert.Equal(2, fromSequence.DocumentCount);
+        await Assert.That(fromDictionary.DocumentCount).IsEqualTo(2);
+        await Assert.That(fromSequence.DocumentCount).IsEqualTo(2);
     }
 
-    [Fact]
-    public void AddOrUpdateEntries_keeps_the_last_value_of_a_repeated_id()
+    [Test]
+    public async Task AddOrUpdateEntries_keeps_the_last_value_of_a_repeated_id()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.AddOrUpdateEntries([new KeyValuePair<int, string>(5, "first"), new(6, "other"), new(5, "second")]);
 
-        Assert.Equal(2, updater.EntryCount);
-        Assert.Equal(2, engine.DocumentCount);
-        Assert.Empty(engine.Find("first", WordMatchMethod.Exact));
-        Assert.Equal([5], engine.Find("second", WordMatchMethod.Exact));
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
+        await Assert.That(engine.DocumentCount).IsEqualTo(2);
+        await Assert.That(engine.Find("first", WordMatchMethod.Exact)).IsEmpty();
+        await Assert.That(engine.Find("second", WordMatchMethod.Exact)).IsEquivalentTo([5], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddOrUpdateEntries_with_indexed_entries_keeps_the_last_value_of_a_repeated_id()
+    [Test]
+    public async Task AddOrUpdateEntries_with_indexed_entries_keeps_the_last_value_of_a_repeated_id()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.AddOrUpdateEntries(
         [
@@ -72,12 +68,12 @@ public class DuplicateIdTests
             new(5, new IndexedEntry("second", "second")),
         ]);
 
-        Assert.Equal(1, engine.DocumentCount);
-        Assert.Equal([5], engine.Find("second", WordMatchMethod.Exact));
-        Assert.Empty(engine.Find("first", WordMatchMethod.Exact));
+        await Assert.That(engine.DocumentCount).IsEqualTo(1);
+        await Assert.That(engine.Find("second", WordMatchMethod.Exact)).IsEquivalentTo([5], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("first", WordMatchMethod.Exact)).IsEmpty();
     }
 
-    [Fact]
+    [Test]
     public async Task RebuildFromAsync_keeps_the_last_value_of_a_repeated_id()
     {
         static async IAsyncEnumerable<KeyValuePair<int, string>> Entries()
@@ -87,13 +83,11 @@ public class DuplicateIdTests
             yield return new(9, "second");
         }
 
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         await updater.RebuildFromAsync(Entries());
 
-        Assert.Equal(1, engine.DocumentCount);
-        Assert.Equal([9], engine.Find("second", WordMatchMethod.Exact));
+        await Assert.That(engine.DocumentCount).IsEqualTo(1);
+        await Assert.That(engine.Find("second", WordMatchMethod.Exact)).IsEquivalentTo([9], CollectionOrdering.Matching);
     }
 }

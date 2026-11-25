@@ -5,18 +5,20 @@ using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
 
+// Several tests here measure wall-clock time: gaps between publishes, cancellation after a fixed delay, and the
+// rebuild time of two batch policies compared with each other. They run one at a time and with no other test
+// beside them: TUnit runs every other test in parallel, and that load was enough to reverse the rebuild time
+// comparison of Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale.
+[NotInParallel]
 public class ProgressiveIndexIngestionTests
 {
     private static (SearchEngineSharp engine, IIndexUpdater updater, ProgressiveIndexIngestion ingestion) Create()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        var ingestion = new ProgressiveIndexIngestion(updater);
-        return (engine, updater, ingestion);
+        var (engine, updater, _) = TestIndex.Create();
+        return (engine, updater, new ProgressiveIndexIngestion(updater));
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_CompletesWithExactEntrySet()
     {
         var (engine, updater, ingestion) = Create();
@@ -31,22 +33,22 @@ public class ProgressiveIndexIngestionTests
                 MinInterval = TimeSpan.FromMilliseconds(50),
             });
 
-        Assert.True(result.CompletedSuccessfully);
-        Assert.False(result.WasCancelled);
-        Assert.Equal(count, result.EntriesAccepted);
-        Assert.Equal(count, result.EntriesPublished);
-        Assert.Equal(count, updater.EntryCount);
-        Assert.Equal(count, engine.DocumentCount);
+        await Assert.That(result.CompletedSuccessfully).IsTrue();
+        await Assert.That(result.WasCancelled).IsFalse();
+        await Assert.That(result.EntriesAccepted).IsEqualTo(count);
+        await Assert.That(result.EntriesPublished).IsEqualTo(count);
+        await Assert.That(updater.EntryCount).IsEqualTo(count);
+        await Assert.That(engine.DocumentCount).IsEqualTo(count);
 
         var expected = SyntheticPathFeed.CreateDictionary(count, seed: 11);
         foreach (var (id, text) in expected)
         {
-            Assert.True(updater.ContainsEntry(id));
+            await Assert.That(updater.ContainsEntry(id)).IsTrue();
             _ = text;
         }
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_PublishesProgressivelyDuringScan()
     {
         var (engine, _, ingestion) = Create();
@@ -68,13 +70,13 @@ public class ProgressiveIndexIngestionTests
                     sawPartialIndex = true;
             });
 
-        Assert.True(result.CompletedSuccessfully);
-        Assert.True(publishCounts.Count >= 3, $"Expected multiple publishes, got {publishCounts.Count}.");
-        Assert.True(sawPartialIndex, "Expected at least one publish before the full set was indexed.");
-        Assert.Equal(count, engine.DocumentCount);
+        await Assert.That(result.CompletedSuccessfully).IsTrue();
+        await Assert.That(publishCounts.Count).IsGreaterThanOrEqualTo(3).Because($"Expected multiple publishes, got {publishCounts.Count}.");
+        await Assert.That(sawPartialIndex).IsTrue().Because("Expected at least one publish before the full set was indexed.");
+        await Assert.That(engine.DocumentCount).IsEqualTo(count);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_CancellationFlushesBufferByDefault()
     {
         var (_, updater, ingestion) = Create();
@@ -96,13 +98,13 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestTask;
 
-        Assert.True(result.WasCancelled);
-        Assert.False(result.CompletedSuccessfully);
-        Assert.InRange(result.EntriesPublished, 1, result.EntriesAccepted);
-        Assert.Equal(result.EntriesPublished, updater.EntryCount);
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.CompletedSuccessfully).IsFalse();
+        await Assert.That(result.EntriesPublished).IsBetween(1, result.EntriesAccepted);
+        await Assert.That(updater.EntryCount).IsEqualTo(result.EntriesPublished);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_CancellationWithoutFlush_DiscardsBuffer()
     {
         var (_, updater, ingestion) = Create();
@@ -125,12 +127,12 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestTask;
 
-        Assert.True(result.WasCancelled);
-        Assert.Equal(0, result.EntriesPublished);
-        Assert.Equal(0, updater.EntryCount);
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesPublished).IsEqualTo(0);
+        await Assert.That(updater.EntryCount).IsEqualTo(0);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_ReadWhileWriteStress_NeverThrowsOrReturnsUnknownIds()
     {
         var (engine, _, ingestion) = Create();
@@ -183,12 +185,12 @@ public class ProgressiveIndexIngestionTests
         queryCts.Cancel();
         await Task.WhenAll(queryTasks);
 
-        Assert.True(ingestResult.CompletedSuccessfully);
-        Assert.Empty(exceptions);
-        Assert.Equal(count, engine.DocumentCount);
+        await Assert.That(ingestResult.CompletedSuccessfully).IsTrue();
+        await Assert.That(exceptions).IsEmpty();
+        await Assert.That(engine.DocumentCount).IsEqualTo(count);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_WithFacets_SupportsFilterQueriesDuringAndAfterScan()
     {
         var (engine, _, ingestion) = Create();
@@ -211,12 +213,12 @@ public class ProgressiveIndexIngestionTests
                     sawPartialHits = true;
             });
 
-        Assert.True(result.CompletedSuccessfully);
-        Assert.True(sawPartialHits, "Expected filter-only queries to return partial results during ingestion.");
-        Assert.Equal(count - 500, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count);
+        await Assert.That(result.CompletedSuccessfully).IsTrue();
+        await Assert.That(sawPartialHits).IsTrue().Because("Expected filter-only queries to return partial results during ingestion.");
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count).IsEqualTo(count - 500);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale()
     {
         var (_, _, ingestion) = Create();
@@ -247,16 +249,16 @@ public class ProgressiveIndexIngestionTests
                 MinTimerPublishBatch = int.MaxValue,
             });
 
-        Assert.True(growth.CompletedSuccessfully);
-        Assert.True(fixedBatch.CompletedSuccessfully);
-        Assert.True(growth.PublishCount < fixedBatch.PublishCount,
-            $"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
-        Assert.Equal(5, growth.PublishCount);      // 2k, 4k, 8k, 16k, final 20k
-        Assert.Equal(10, fixedBatch.PublishCount); // every 2k
-        Assert.True(growth.TotalRebuildDuration < fixedBatch.TotalRebuildDuration);
+        await Assert.That(growth.CompletedSuccessfully).IsTrue();
+        await Assert.That(fixedBatch.CompletedSuccessfully).IsTrue();
+        await Assert.That(growth.PublishCount).IsLessThan(fixedBatch.PublishCount)
+            .Because($"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
+        await Assert.That(growth.PublishCount).IsEqualTo(5);      // 2k, 4k, 8k, 16k, final 20k
+        await Assert.That(fixedBatch.PublishCount).IsEqualTo(10); // every 2k
+        await Assert.That(growth.TotalRebuildDuration).IsLessThan(fixedBatch.TotalRebuildDuration);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_TotalRebuildDuration_IsTheSumOfTheRebuildDurationsOfAllPublishes()
     {
         var (_, _, ingestion) = Create();
@@ -267,11 +269,11 @@ public class ProgressiveIndexIngestionTests
             new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 250 },
             onPublished: e => rebuildDurations.Enqueue(e.RebuildDuration));
 
-        Assert.Equal(4, rebuildDurations.Count);
-        Assert.Equal(TimeSpan.FromTicks(rebuildDurations.Sum(d => d.Ticks)), result.TotalRebuildDuration);
+        await Assert.That(rebuildDurations.Count).IsEqualTo(4);
+        await Assert.That(result.TotalRebuildDuration).IsEqualTo(TimeSpan.FromTicks(rebuildDurations.Sum(d => d.Ticks)));
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_RejectsConcurrentRuns()
     {
         var (_, _, ingestion) = Create();
@@ -279,8 +281,8 @@ public class ProgressiveIndexIngestionTests
 
         var first = ingestion.IngestAsync(WaitOnGateAsync(gate));
         await Task.Delay(50);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            ingestion.IngestAsync(SyntheticPathFeed.EnumerateAsync(10)));
+        await Assert.That(() =>
+            (Task)ingestion.IngestAsync(SyntheticPathFeed.EnumerateAsync(10))).ThrowsExactly<InvalidOperationException>();
 
         gate.Set();
         await first;
@@ -323,9 +325,9 @@ public class ProgressiveIndexIngestionTests
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task Adaptive_WhenRebuildExceedsMaxStaleness_BacksOffUnlessStrict(bool strict)
     {
         // Every rebuild takes 120 ms, longer than MaxStaleness (30 ms): each new batch is stale
@@ -357,19 +359,19 @@ public class ProgressiveIndexIngestionTests
             gaps.Add(System.Diagnostics.Stopwatch.GetElapsedTime(publishEnds[i - 1].End, nextStart));
         }
 
-        Assert.NotEmpty(gaps);
+        await Assert.That(gaps).IsNotEmpty();
         if (strict)
-            Assert.True(gaps.Min() < TimeSpan.FromMilliseconds(60), $"strict: smallest gap {gaps.Min().TotalMilliseconds} ms");
+            await Assert.That(gaps.Min()).IsLessThan(TimeSpan.FromMilliseconds(60)).Because($"strict: smallest gap {gaps.Min().TotalMilliseconds} ms");
         else
-            Assert.True(gaps.Min() >= TimeSpan.FromMilliseconds(200), $"backoff: smallest gap {gaps.Min().TotalMilliseconds} ms (expected >= 2 x 120 ms)");
+            await Assert.That(gaps.Min()).IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(200)).Because($"backoff: smallest gap {gaps.Min().TotalMilliseconds} ms (expected >= 2 x 120 ms)");
     }
 
     public enum PublishFault { Updater, OnPublishedCallback, PublishedEvent }
 
-    [Theory]
-    [InlineData(PublishFault.Updater)]
-    [InlineData(PublishFault.OnPublishedCallback)]
-    [InlineData(PublishFault.PublishedEvent)]
+    [Test]
+    [Arguments(PublishFault.Updater)]
+    [Arguments(PublishFault.OnPublishedCallback)]
+    [Arguments(PublishFault.PublishedEvent)]
     public async Task Ingest_PublisherFaultsWhileScannerIsBlockedOnFullChannel_FaultsWithOriginalException(PublishFault where)
     {
         // 30,000 entries, channel capacity 10,000: by the time the publisher fails on its first batch the
@@ -396,15 +398,15 @@ public class ProgressiveIndexIngestionTests
             new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = batch },
             onPublished: where == PublishFault.OnPublishedCallback ? _ => failOnceScannerIsBlocked() : null);
 
-        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => ingest.WaitAsync(TestTimeout));
+        var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<InvalidOperationException>();
 
-        Assert.Same(boom, thrown);
-        Assert.True(feed.Disposed, "The scanner's enumerator must be disposed.");
-        Assert.True(feed.Yielded < count, "The scanner must have been stopped, not drained.");
+        await Assert.That(thrown).IsSameReferenceAs(boom);
+        await Assert.That(feed.Disposed).IsTrue().Because("The scanner's enumerator must be disposed.");
+        await Assert.That(feed.Yielded).IsLessThan(count).Because("The scanner must have been stopped, not drained.");
 
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_ScannerFaultsWhilePublisherWaits_FlushesBufferThenFaultsWithScannerException()
     {
         var updater = new IndexUpdater(new IndexSnapshotProvider());
@@ -424,13 +426,13 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
 
-        var thrown = await Assert.ThrowsAsync<IOException>(() => ingest.WaitAsync(TestTimeout));
+        var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
-        Assert.Same(scanFault, thrown);
-        Assert.Equal(50, updater.EntryCount);
+        await Assert.That(thrown).IsSameReferenceAs(scanFault);
+        await Assert.That(updater.EntryCount).IsEqualTo(50);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_ScannerAndPublisherBothFault_ScannerExceptionSurfaces()
     {
         var scanFault = new IOException("scan failed");
@@ -451,12 +453,12 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
 
-        var thrown = await Assert.ThrowsAsync<IOException>(() => ingest.WaitAsync(TestTimeout));
+        var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
-        Assert.Same(scanFault, thrown);
+        await Assert.That(thrown).IsSameReferenceAs(scanFault);
     }
 
-    [Fact]
+    [Test]
     public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then
@@ -485,11 +487,11 @@ public class ProgressiveIndexIngestionTests
         releaseRebuild.Set();
         var result = await ingest.WaitAsync(TestTimeout);
 
-        Assert.True(result.WasCancelled);
-        Assert.Equal(60, result.EntriesAccepted);
-        Assert.Equal(60, result.EntriesPublished);
-        Assert.Equal(60, updater.EntryCount);
-        Assert.True(feed.Disposed);
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesAccepted).IsEqualTo(60);
+        await Assert.That(result.EntriesPublished).IsEqualTo(60);
+        await Assert.That(updater.EntryCount).IsEqualTo(60);
+        await Assert.That(feed.Disposed).IsTrue();
     }
 
     /// <summary>A scanner that yields <c>count</c> entries as fast as it is allowed to and records how far it got.</summary>
@@ -501,13 +503,15 @@ public class ProgressiveIndexIngestionTests
         public int Yielded => Volatile.Read(ref _yielded);
         public bool Disposed => Volatile.Read(ref _disposed) != 0;
 
+        // Runs on the publisher's thread inside a rebuild or a publish callback, so it fails synchronously.
         public void WaitUntilYielded(int target, TimeSpan timeout)
         {
             var spin = new SpinWait();
             var elapsed = global::System.Diagnostics.Stopwatch.StartNew();
             while (Yielded < target)
             {
-                Assert.True(elapsed.Elapsed < timeout, $"The scanner stalled at {Yielded} of {target} entries.");
+                if (elapsed.Elapsed >= timeout)
+                    Fail.Test($"The scanner stalled at {Yielded} of {target} entries.");
                 spin.SpinOnce(sleep1Threshold: -1);
             }
         }
@@ -535,7 +539,7 @@ public class ProgressiveIndexIngestionTests
 
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
-    [Fact]
+    [Test]
     public async Task Adaptive_TimerWakingEarly_RearmsInsteadOfWaitingForNextEntry()
     {
         // Task.Delay truncates to whole milliseconds, so a timer may fire just before the publish
@@ -573,14 +577,14 @@ public class ProgressiveIndexIngestionTests
         // 20 entries publish by batch size; the remaining 5 can only leave through the timer.
         await clock.FireTimersUntilAsync(() => publishes.Count >= 2, early: TimeSpan.FromMilliseconds(1), TestTimeout);
 
-        Assert.Equal([20, 5], publishes.ToArray());
+        await Assert.That(publishes.ToArray()).IsEquivalentTo([20, 5], CollectionOrdering.Matching);
         finishScan.SetResult();
-        Assert.True((await ingest.WaitAsync(TestTimeout)).CompletedSuccessfully);
+        await Assert.That((await ingest.WaitAsync(TestTimeout)).CompletedSuccessfully).IsTrue();
     }
 
-    [Theory]
-    [InlineData(false, 1200)] // gated: an entry buffered when a rebuild starts waits (1 + k) x rebuild
-    [InlineData(true, 1000)]  // strict: MaxStaleness
+    [Test]
+    [Arguments(false, 1200)] // gated: an entry buffered when a rebuild starts waits (1 + k) x rebuild
+    [Arguments(true, 1000)]  // strict: MaxStaleness
     public async Task Adaptive_StaleEntriesPublishWithoutFurtherScannerActivity(bool strict, int expectedStalenessMs)
     {
         // Rebuild 400 ms, k = 2, MaxStaleness 1 s. Five entries arrive while the first rebuild runs.
@@ -633,8 +637,8 @@ public class ProgressiveIndexIngestionTests
         finishScan.SetResult();
         var result = await ingest.WaitAsync(TestTimeout);
 
-        Assert.Equal([20, 5], publishes.ToArray());
-        Assert.Equal(TimeSpan.FromMilliseconds(expectedStalenessMs), result.MaxObservedStaleness);
+        await Assert.That(publishes.ToArray()).IsEquivalentTo([20, 5], CollectionOrdering.Matching);
+        await Assert.That(result.MaxObservedStaleness).IsEqualTo(TimeSpan.FromMilliseconds(expectedStalenessMs));
     }
 
     /// <summary>
@@ -671,7 +675,7 @@ public class ProgressiveIndexIngestionTests
             var elapsed = global::System.Diagnostics.Stopwatch.StartNew();
             while (!done())
             {
-                Assert.True(elapsed.Elapsed < timeout, "Timed out: no timer was armed and the expected publish never happened.");
+                await Assert.That(elapsed.Elapsed).IsLessThan(timeout).Because("Timed out: no timer was armed and the expected publish never happened.");
                 if (TryFireEarliest(early))
                     early = TimeSpan.Zero;
                 else

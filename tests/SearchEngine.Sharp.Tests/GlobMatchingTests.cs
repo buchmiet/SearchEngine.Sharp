@@ -4,17 +4,9 @@ namespace SearchEngine.Sharp.Tests;
 
 public class GlobMatchingTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     private static (SearchEngineSharp engine, IIndexUpdater updater) CreateFileIndex()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",
@@ -29,17 +21,17 @@ public class GlobMatchingTests
         return (engine, updater);
     }
 
-    [Fact]
-    public void StarAlone_MatchesAllDocuments()
+    [Test]
+    public async Task StarAlone_MatchesAllDocuments()
     {
         var (engine, _) = CreateFileIndex();
-        Assert.Equal(8, engine.Find("*", WordMatchMethod.Exact).Count);
+        await Assert.That(engine.Find("*", WordMatchMethod.Exact).Count).IsEqualTo(8);
     }
 
-    [Fact]
-    public void QuestionMarkAlone_MatchesSingleCharTokens()
+    [Test]
+    public async Task QuestionMarkAlone_MatchesSingleCharTokens()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "a b cd",
@@ -47,54 +39,58 @@ public class GlobMatchingTests
         });
 
         var results = engine.Find("?", WordMatchMethod.Exact);
-        Assert.Equal(2, results.Count);
+        await Assert.That(results.Count).IsEqualTo(2);
     }
 
-    [Fact]
-    public void PrefixGlob_MatchesLeadingPattern()
+    [Test]
+    public async Task PrefixGlob_MatchesLeadingPattern()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("report*", WordMatchMethod.Exact);
-        Assert.Equal(new[] { 1, 2, 7 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 7 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void SuffixGlob_MatchesTrailingPattern()
+    [Test]
+    public async Task SuffixGlob_MatchesTrailingPattern()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("*log", WordMatchMethod.Exact);
-        Assert.Equal(new[] { 4, 7 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 4, 7 }, CollectionOrdering.Matching);
+
+        // Every token "*log" matches above is exactly "log", which a prefix test matches too: "report" ends with
+        // "port" without starting with it.
+        await Assert.That(engine.Find("*port", WordMatchMethod.Exact).OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 7 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void InfixGlob_MatchesMiddlePattern()
+    [Test]
+    public async Task InfixGlob_MatchesMiddlePattern()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("*report*", WordMatchMethod.Exact);
-        Assert.Equal(new[] { 1, 2, 7 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 7 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void SingleCharWildcard_MatchesExactlyOneCharacter()
+    [Test]
+    public async Task SingleCharWildcard_MatchesExactlyOneCharacter()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("a?c", WordMatchMethod.Exact);
-        Assert.Equal(new[] { 5, 6 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 5, 6 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void CollapsedStars_MatchLikeSingleStar()
+    [Test]
+    public async Task CollapsedStars_MatchLikeSingleStar()
     {
         var (engine, _) = CreateFileIndex();
         var single = engine.Find("report*", WordMatchMethod.Exact).OrderBy(x => x);
         var collapsed = engine.Find("re**port*", WordMatchMethod.Exact).OrderBy(x => x);
-        Assert.Equal(single, collapsed);
+        await Assert.That(collapsed).IsEquivalentTo(single, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void ComplexPattern_QuestionStarQuestion()
+    [Test]
+    public async Task ComplexPattern_QuestionStarQuestion()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "axc",
@@ -103,73 +99,73 @@ public class GlobMatchingTests
         });
 
         var results = engine.Find("?*?", WordMatchMethod.Exact);
-        Assert.Equal(new[] { 1, 2, 3 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 3 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void PatternLongerThanLongestWord_ReturnsEmpty()
+    [Test]
+    public async Task PatternLongerThanLongestWord_ReturnsEmpty()
     {
         var (engine, _) = CreateFileIndex();
-        Assert.Empty(engine.Find("zzzzzzzzzzzzzzzzzzzz", WordMatchMethod.Exact));
+        await Assert.That(engine.Find("zzzzzzzzzzzzzzzzzzzz", WordMatchMethod.Exact)).IsEmpty();
     }
 
-    [Fact]
-    public void StarWrappedTerm_BehavesLikeWithinForSameLiteral()
+    [Test]
+    public async Task StarWrappedTerm_BehavesLikeWithinForSameLiteral()
     {
         var (engine, _) = CreateFileIndex();
         var within = engine.Find("abc", WordMatchMethod.Within).OrderBy(x => x);
         var glob = engine.Find("*abc*", WordMatchMethod.Exact).OrderBy(x => x);
-        Assert.Equal(within, glob);
+        await Assert.That(glob).IsEquivalentTo(within, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Glob_IsCaseInsensitive()
+    [Test]
+    public async Task Glob_IsCaseInsensitive()
     {
         var (engine, _) = CreateFileIndex();
         var lower = engine.Find("report*", WordMatchMethod.Exact).OrderBy(x => x);
         var upper = engine.Find("REPORT*", WordMatchMethod.Exact).OrderBy(x => x);
-        Assert.Equal(lower, upper);
+        await Assert.That(upper).IsEquivalentTo(lower, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Glob_WorksInsideBooleanExpression()
+    [Test]
+    public async Task Glob_WorksInsideBooleanExpression()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("report* AND NOT *tmp", WordMatchMethod.Exact, enableOperators: true);
-        Assert.Equal(new[] { 1, 2, 7 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 7 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Glob_WorksWithParenthesesAndImplicitAnd()
+    [Test]
+    public async Task Glob_WorksWithParenthesesAndImplicitAnd()
     {
         var (engine, _) = CreateFileIndex();
         var explicit_ = engine.Find("(report*) (log)", WordMatchMethod.Exact, enableOperators: true);
         var implicit_ = engine.Find("report* log", WordMatchMethod.Exact, enableOperators: true);
-        Assert.Equal(explicit_.OrderBy(x => x), implicit_.OrderBy(x => x));
-        Assert.Single(implicit_);
-        Assert.Equal(7, implicit_[0]);
+        await Assert.That(implicit_.OrderBy(x => x)).IsEquivalentTo(explicit_.OrderBy(x => x), CollectionOrdering.Matching);
+        await Assert.That(implicit_).HasSingleItem();
+        await Assert.That(implicit_[0]).IsEqualTo(7);
     }
 
-    [Fact]
-    public void SingleTokenFastPathRegression_FooStar_DoesNotUseExactPostingShortcut()
+    [Test]
+    public async Task SingleTokenFastPathRegression_FooStar_DoesNotUseExactPostingShortcut()
     {
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("foo*", WordMatchMethod.Exact, enableOperators: false);
-        Assert.Single(results);
-        Assert.Equal(8, results[0]);
+        await Assert.That(results).HasSingleItem();
+        await Assert.That(results[0]).IsEqualTo(8);
     }
 
-    [Fact]
-    public void Glob_RoutesRegardlessOfWordMatchMethod()
+    [Test]
+    public async Task Glob_RoutesRegardlessOfWordMatchMethod()
     {
         var (engine, _) = CreateFileIndex();
         var exact = engine.Find("report*", WordMatchMethod.Exact).OrderBy(x => x);
         var within = engine.Find("report*", WordMatchMethod.Within).OrderBy(x => x);
-        Assert.Equal(exact, within);
+        await Assert.That(within).IsEquivalentTo(exact, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void ShapeFastPaths_AgreeWithGeneralMatcher_OnRandomPatterns()
+    [Test]
+    public async Task ShapeFastPaths_AgreeWithGeneralMatcher_OnRandomPatterns()
     {
         var rng = new Random(123);
         const string patternAlphabet = "ab.**?";
@@ -182,7 +178,7 @@ public class GlobMatchingTests
             bool expected = SearchEngine.Query.GlobMatcher.IsWholeWordMatch(pattern, word);
             bool actual = new SearchEngine.Query.GlobMatcher.Shape(pattern).IsMatch(word);
 
-            Assert.True(expected == actual, $"pattern '{pattern}' word '{word}': expected {expected}");
+            await Assert.That(actual).IsEqualTo(expected).Because($"pattern '{pattern}' word '{word}': expected {expected}");
         }
     }
 }

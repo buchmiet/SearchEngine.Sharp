@@ -41,60 +41,60 @@ public class NaturalSortTieBreakTests
             .ToList();
     }
 
-    [Fact]
-    public void Hits_below_the_sort_threshold_break_ties_by_id()
+    [Test]
+    public async Task Hits_below_the_sort_threshold_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
-        Assert.Equal(Expected(snapshot, id => id % 2 == 0), results);
+        await Assert.That(results).IsEquivalentTo(Expected(snapshot, id => id % 2 == 0), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void All_documents_break_ties_by_id_through_the_cached_permutation()
+    [Test]
+    public async Task All_documents_break_ties_by_id_through_the_cached_permutation()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var first = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
         var second = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
-        Assert.Equal(Expected(snapshot, _ => true), first);
-        Assert.Equal(first, second);
-        Assert.Equal(1, snapshot.SortedPermutationBuildCount);
+        await Assert.That(first).IsEquivalentTo(Expected(snapshot, _ => true), CollectionOrdering.Matching);
+        await Assert.That(second).IsEquivalentTo(first, CollectionOrdering.Matching);
+        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
     }
 
-    [Fact]
-    public void Filter_only_queries_break_ties_by_id()
+    [Test]
+    public async Task Filter_only_queries_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending, FacetFilter.Range("n", 1, 50));
 
-        Assert.Equal(Expected(snapshot, id => id <= 50), results);
+        await Assert.That(results).IsEquivalentTo(Expected(snapshot, id => id <= 50), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Text_and_filter_queries_break_ties_by_id()
+    [Test]
+    public async Task Text_and_filter_queries_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("odd", WordMatchMethod.Within, false, SearchSortMode.NaturalSortAscending, FacetFilter.Range("n", 20, 170));
 
-        Assert.Equal(Expected(snapshot, id => id % 2 == 1 && id >= 20 && id <= 170), results);
+        await Assert.That(results).IsEquivalentTo(Expected(snapshot, id => id % 2 == 1 && id >= 20 && id <= 170), CollectionOrdering.Matching);
     }
 
-    [Theory]
-    [InlineData(2)]
-    [InlineData(17)]
-    [InlineData(100)]
-    [InlineData(160)]
-    [InlineData(199)]
-    public void Both_sort_strategies_give_the_same_order(int hitCount)
+    [Test]
+    [Arguments(2)]
+    [Arguments(17)]
+    [Arguments(100)]
+    [Arguments(160)]
+    [Arguments(199)]
+    public async Task Both_sort_strategies_give_the_same_order(int hitCount)
     {
         var snapshot = BuildSnapshot();
         var hits = new FastBitSet(snapshot.DocumentCount);
@@ -104,26 +104,21 @@ public class NaturalSortTieBreakTests
         var sortedHits = ResultMaterializer.MaterializeNaturalSortKOnly(snapshot, hits, hitCount, snapshot.RecordIds);
         var permutation = ResultMaterializer.MaterializeNaturalSortFullPermutation(snapshot, hits, hitCount, snapshot.RecordIds);
 
-        Assert.Equal(permutation, sortedHits);
+        await Assert.That(sortedHits).IsEquivalentTo(permutation, CollectionOrdering.Matching);
         var hitIds = new HashSet<int>(sortedHits);
-        Assert.Equal(Expected(snapshot, hitIds.Contains), sortedHits);
+        await Assert.That(sortedHits).IsEquivalentTo(Expected(snapshot, hitIds.Contains), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Repeated_queries_on_new_snapshots_return_the_same_order()
+    [Test]
+    public async Task Repeated_queries_on_new_snapshots_return_the_same_order()
     {
-        var expected = new SearchEngineSharp(new FixedProvider(BuildSnapshot()))
+        var expected = new SearchEngineSharp(new FixedSnapshotProvider(BuildSnapshot()))
             .Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
         for (int run = 0; run < 5; run++)
         {
-            var engine = new SearchEngineSharp(new FixedProvider(BuildSnapshot()));
-            Assert.Equal(expected, engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending));
+            var engine = new SearchEngineSharp(new FixedSnapshotProvider(BuildSnapshot()));
+            await Assert.That(engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending)).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
-    }
-
-    private sealed class FixedProvider(IndexSnapshot snapshot) : IIndexSnapshotProvider
-    {
-        public IndexSnapshot Current => snapshot;
     }
 }

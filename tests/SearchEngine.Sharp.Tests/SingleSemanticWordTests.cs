@@ -20,13 +20,13 @@ public class SingleSemanticWordTests
         return new SearchEngineSharp(provider);
     }
 
-    [Theory]
-    [InlineData("report", true)]
-    [InlineData("report final", false)]
-    [InlineData("report AND final", false)]
-    [InlineData("NOT report", false)]
-    [InlineData("(report)", false)]
-    public void TryGetSingleSemanticWord_ClassifiesOperands(string expression, bool expectedSingleWord)
+    [Test]
+    [Arguments("report", true)]
+    [Arguments("report final", false)]
+    [Arguments("report AND final", false)]
+    [Arguments("NOT report", false)]
+    [Arguments("(report)", false)]
+    public async Task TryGetSingleSemanticWord_ClassifiesOperands(string expression, bool expectedSingleWord)
     {
         bool actual = QueryExpressionEvaluator.TryGetSingleSemanticWord(
             expression.AsSpan(),
@@ -34,39 +34,37 @@ public class SingleSemanticWordTests
             SearchTokenization.Default,
             out _);
 
-        Assert.Equal(expectedSingleWord, actual);
+        await Assert.That(actual).IsEqualTo(expectedSingleWord);
     }
 
-    [Fact]
-    public void GlobMetacharacters_UseGlobMatcher_NotExactPostingFastPath()
+    [Test]
+    public async Task GlobMetacharacters_UseGlobMatcher_NotExactPostingFastPath()
     {
         var engine = CreateEngine();
 
-        Assert.True(QueryExpressionEvaluator.TryGetSingleSemanticWord(
+        await Assert.That(QueryExpressionEvaluator.TryGetSingleSemanticWord(
             "report*".AsSpan(),
             enableOperators: true,
             SearchTokenization.Default,
-            out _));
+            out _)).IsTrue();
 
-        Assert.Equal(new[] { 1, 2 }, engine.Find("report*", WordMatchMethod.Exact, true).OrderBy(x => x));
+        await Assert.That(engine.Find("report*", WordMatchMethod.Exact, true).OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void EnableOperatorsTrue_SingleTokenExactSameAsOff()
+    [Test]
+    public async Task EnableOperatorsTrue_SingleTokenExactSameAsOff()
     {
         var engine = CreateEngine();
 
-        Assert.Equal(
-            engine.Find("report", WordMatchMethod.Exact, enableOperators: false),
-            engine.Find("report", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(engine.Find("report", WordMatchMethod.Exact, enableOperators: true))
+            .IsEquivalentTo(engine.Find("report", WordMatchMethod.Exact, enableOperators: false), CollectionOrdering.Matching);
 
-        Assert.Equal(
-            engine.CountMatches("report", WordMatchMethod.Exact, enableOperators: false),
-            engine.CountMatches("report", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(engine.CountMatches("report", WordMatchMethod.Exact, enableOperators: true))
+            .IsEqualTo(engine.CountMatches("report", WordMatchMethod.Exact, enableOperators: false));
     }
 
-    [Fact]
-    public void EnableOperatorsTrue_SingleTokenExactFacetSameAsOff()
+    [Test]
+    public async Task EnableOperatorsTrue_SingleTokenExactFacetSameAsOff()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
@@ -81,19 +79,18 @@ public class SingleSemanticWordTests
         var off = engine.Find("report", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
         var on = engine.Find("report", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter);
 
-        Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
-        Assert.Equal(
-            engine.CountMatches("report", WordMatchMethod.Exact, false, filter),
-            engine.CountMatches("report", WordMatchMethod.Exact, true, filter));
+        await Assert.That(on.OrderBy(x => x)).IsEquivalentTo(off.OrderBy(x => x), CollectionOrdering.Matching);
+        await Assert.That(engine.CountMatches("report", WordMatchMethod.Exact, true, filter))
+            .IsEqualTo(engine.CountMatches("report", WordMatchMethod.Exact, false, filter));
     }
 
-    [Fact]
-    public void EnableOperatorsTrue_BooleanExpression_StillEvaluates()
+    [Test]
+    public async Task EnableOperatorsTrue_BooleanExpression_StillEvaluates()
     {
         var engine = CreateEngine();
 
-        Assert.Equal(new[] { 1, 2 }, engine.Find("report OR draft", WordMatchMethod.Exact, true).OrderBy(x => x));
-        Assert.Equal(new[] { 1 }, engine.Find("report AND NOT draft", WordMatchMethod.Exact, true));
+        await Assert.That(engine.Find("report OR draft", WordMatchMethod.Exact, true).OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
+        await Assert.That(engine.Find("report AND NOT draft", WordMatchMethod.Exact, true)).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
     }
 
     private static FacetValues? Facets(long size)

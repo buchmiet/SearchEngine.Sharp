@@ -6,54 +6,54 @@ namespace SearchEngine.Sharp.Tests;
 
 public class FacetValuesTests
 {
-    [Fact]
-    public void FromDictionary_ReturnsNullWhenEmpty()
+    [Test]
+    public async Task FromDictionary_ReturnsNullWhenEmpty()
     {
-        Assert.Null(FacetValues.FromDictionary(null));
-        Assert.Null(FacetValues.FromDictionary(new Dictionary<string, long>()));
+        await Assert.That(FacetValues.FromDictionary(null)).IsNull();
+        await Assert.That(FacetValues.FromDictionary(new Dictionary<string, long>())).IsNull();
     }
 
-    [Fact]
-    public void FromDictionary_RejectsNullName()
+    [Test]
+    public async Task FromDictionary_RejectsNullName()
     {
         var values = new PairList([new(null!, 1L), new("size", 2L)]);
 
-        Assert.Throws<ArgumentException>(() => FacetValues.FromDictionary(values));
+        await Assert.That(() => FacetValues.FromDictionary(values)).ThrowsExactly<ArgumentException>();
     }
 
-    [Fact]
-    public void FromDictionary_RejectsDuplicateNames()
+    [Test]
+    public async Task FromDictionary_RejectsDuplicateNames()
     {
         var values = new PairList([new("size", 1L), new("size", 2L)]);
 
-        Assert.Throws<ArgumentException>(() => FacetValues.FromDictionary(values));
+        await Assert.That(() => FacetValues.FromDictionary(values)).ThrowsExactly<ArgumentException>();
     }
 
-    [Fact]
-    public void FromDictionary_RejectsNamesThatOnlyAReferenceComparerKeepsApart()
+    [Test]
+    public async Task FromDictionary_RejectsNamesThatOnlyAReferenceComparerKeepsApart()
     {
         // Two distinct string instances with equal content are distinct keys for a reference comparer.
         var first = new string("size".AsSpan());
         var second = new string("size".AsSpan());
         var values = new Dictionary<string, long>(new ReferenceStringComparer()) { [first] = 1, [second] = 2 };
 
-        Assert.Throws<ArgumentException>(() => FacetValues.FromDictionary(values));
+        await Assert.That(() => FacetValues.FromDictionary(values)).ThrowsExactly<ArgumentException>();
     }
 
-    [Fact]
-    public void FromDictionary_KeepsEveryPair()
+    [Test]
+    public async Task FromDictionary_KeepsEveryPair()
     {
         var facets = FacetValues.FromDictionary(new Dictionary<string, long> { ["size"] = 7, ["modified"] = 9, ["attrs"] = 3 });
 
-        Assert.NotNull(facets);
+        await Assert.That(facets).IsNotNull();
         var seen = new Dictionary<string, long>();
-        for (int i = 0; i < facets.Count; i++)
+        for (int i = 0; i < facets!.Count; i++)
             seen[facets.NameAt(i)] = facets.ValueAt(i);
-        Assert.Equal(new Dictionary<string, long> { ["size"] = 7, ["modified"] = 9, ["attrs"] = 3 }, seen);
+        await Assert.That(seen).IsEquivalentTo(new Dictionary<string, long> { ["size"] = 7, ["modified"] = 9, ["attrs"] = 3 });
     }
 
-    [Fact]
-    public void FromDictionary_WithMoreEntriesThanOnePoolBucket_KeepsEveryPair()
+    [Test]
+    public async Task FromDictionary_WithMoreEntriesThanOnePoolBucket_KeepsEveryPair()
     {
         var source = new Dictionary<string, long>();
         for (int i = 0; i < 300; i++)
@@ -61,13 +61,13 @@ public class FacetValuesTests
 
         var facets = FacetValues.FromDictionary(source);
 
-        Assert.NotNull(facets);
-        Assert.Equal(300, facets.Count);
+        await Assert.That(facets).IsNotNull();
+        await Assert.That(facets!.Count).IsEqualTo(300);
         for (int i = 0; i < facets.Count; i++)
-            Assert.Equal(source[facets.NameAt(i)], facets.ValueAt(i));
+            await Assert.That(facets.ValueAt(i)).IsEqualTo(source[facets.NameAt(i)]);
     }
 
-    [Fact]
+    [Test]
     public async Task FromDictionary_IsSafeWhileTheSourceIsMutated()
     {
         var source = new ConcurrentDictionary<string, long>();
@@ -86,15 +86,27 @@ public class FacetValuesTests
             }
         });
 
+        // Counted here and asserted once after the mutator stops: an awaited assertion per name would slow the
+        // loop that races the mutator.
+        int nullBags = 0;
+        int duplicateNames = 0;
         try
         {
             for (int call = 0; call < 20_000; call++)
             {
                 var facets = FacetValues.FromDictionary(source);
-                Assert.NotNull(facets);
+                if (facets is null)
+                {
+                    nullBags++;
+                    continue;
+                }
+
                 var names = new HashSet<string>();
                 for (int i = 0; i < facets.Count; i++)
-                    Assert.True(names.Add(facets.NameAt(i) ?? throw new InvalidOperationException("null facet name")));
+                {
+                    if (!names.Add(facets.NameAt(i) ?? throw new InvalidOperationException("null facet name")))
+                        duplicateNames++;
+                }
             }
         }
         finally
@@ -102,6 +114,9 @@ public class FacetValuesTests
             await stop.CancelAsync();
             await mutator;
         }
+
+        await Assert.That(nullBags).IsEqualTo(0);
+        await Assert.That(duplicateNames).IsEqualTo(0);
     }
 
     private sealed class ReferenceStringComparer : IEqualityComparer<string>

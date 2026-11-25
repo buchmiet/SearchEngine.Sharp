@@ -5,8 +5,8 @@ namespace SearchEngine.Sharp.Tests;
 
 public class FastBitSetEnumerationTests
 {
-    [Fact]
-    public void CopySetBitOrdinals_ReturnsSparseHits()
+    [Test]
+    public async Task CopySetBitOrdinals_ReturnsSparseHits()
     {
         var bitSet = new FastBitSet(100);
         bitSet.Add(0);
@@ -15,8 +15,9 @@ public class FastBitSetEnumerationTests
 
         Span<int> buffer = stackalloc int[8];
         int count = bitSet.CopySetBitOrdinals(buffer);
+        int[] ordinals = buffer[..count].ToArray();
 
-        Assert.Equal(3, count);
-        Assert.Equal([0, 7, 64], buffer[..count].ToArray());
+        await Assert.That(count).IsEqualTo(3);
+        await Assert.That(ordinals).IsEquivalentTo([0, 7, 64], CollectionOrdering.Matching);
     }
 }

@@ -4,25 +4,28 @@ namespace SearchEngine.Sharp.Tests;
 
 public class SyntheticPathFeedTests
 {
-    [Fact]
-    public void EnumerateAsync_rejects_a_negative_count_at_the_call()
+    [Test]
+    public async Task EnumerateAsync_rejects_a_negative_count_at_the_call()
     {
         // Thrown by the call itself, before the stream is enumerated, like CreateDictionary.
-        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => SyntheticPathFeed.EnumerateAsync(-1));
-        Assert.Equal("count", exception.ParamName);
+        var exception = await Assert.That(() => SyntheticPathFeed.EnumerateAsync(-1)).ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert.That(exception!.ParamName).IsEqualTo("count");
     }
 
-    [Fact]
-    public void CreateDictionary_names_count_for_a_negative_count()
-        => Assert.Equal("count", Assert.Throws<ArgumentOutOfRangeException>(() => SyntheticPathFeed.CreateDictionary(-1)).ParamName);
+    [Test]
+    public async Task CreateDictionary_names_count_for_a_negative_count()
+    {
+        var exception = await Assert.That(() => SyntheticPathFeed.CreateDictionary(-1)).ThrowsExactly<ArgumentOutOfRangeException>();
+        await Assert.That(exception!.ParamName).IsEqualTo("count");
+    }
 
-    [Fact]
+    [Test]
     public async Task EnumerateAsync_with_zero_count_yields_nothing()
     {
         int yielded = 0;
         await foreach (var _ in SyntheticPathFeed.EnumerateAsync(0))
             yielded++;
 
-        Assert.Equal(0, yielded);
+        await Assert.That(yielded).IsEqualTo(0);
     }
 }

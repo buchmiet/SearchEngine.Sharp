@@ -4,8 +4,8 @@ namespace SearchEngine.Sharp.Tests;
 
 public class SelectivityPipelineTests
 {
-    [Fact]
-    public void Find_ZeroHits_NaturalSort_ReturnsEmptyWithoutBuildingPermutation()
+    [Test]
+    public async Task Find_ZeroHits_NaturalSort_ReturnsEmptyWithoutBuildingPermutation()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
@@ -22,11 +22,11 @@ public class SelectivityPipelineTests
             enableOperators: true,
             SearchSortMode.NaturalSortAscending);
 
-        Assert.Empty(results);
+        await Assert.That(results).IsEmpty();
     }
 
-    [Fact]
-    public void Find_WithinFacet_NaturalSort_ReturnsSortedSparseResults()
+    [Test]
+    public async Task Find_WithinFacet_NaturalSort_ReturnsSortedSparseResults()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
@@ -47,11 +47,11 @@ public class SelectivityPipelineTests
             SearchSortMode.NaturalSortAscending,
             filter);
 
-        Assert.Equal([20, 10], results);
+        await Assert.That(results).IsEquivalentTo([20, 10], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_SnapshotOrder_UsesSetBitEnumeration()
+    [Test]
+    public async Task Find_SnapshotOrder_UsesSetBitEnumeration()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
@@ -64,6 +64,6 @@ public class SelectivityPipelineTests
 
         var results = engine.Find("needle", WordMatchMethod.Within, enableOperators: true);
 
-        Assert.Equal([5], results);
+        await Assert.That(results).IsEquivalentTo([5], CollectionOrdering.Matching);
     }
 }

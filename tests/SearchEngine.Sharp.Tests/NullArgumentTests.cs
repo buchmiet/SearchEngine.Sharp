@@ -15,117 +15,121 @@ public class NullArgumentTests
 {
     private static readonly IndexSnapshotProvider Provider = new();
 
-    private static void AssertNull(string paramName, Action call)
-        => Assert.Equal(paramName, Assert.Throws<ArgumentNullException>(call).ParamName);
-
-    private static void AssertInvalidElement(string paramName, Action call)
+    // The helpers take an Action, so only a throw at the call counts: a returned task that faults later does not.
+    private static async Task AssertNull(string paramName, Action call)
     {
-        var exception = Assert.Throws<ArgumentException>(call);
-        Assert.IsNotType<ArgumentNullException>(exception);
-        Assert.Equal(paramName, exception.ParamName);
+        var exception = await Assert.That(call).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(exception!.ParamName).IsEqualTo(paramName);
+    }
+
+    private static async Task AssertInvalidElement(string paramName, Action call)
+    {
+        var exception = await Assert.That(call).ThrowsExactly<ArgumentException>();
+        await Assert.That(exception).IsNotTypeOf<ArgumentNullException>();
+        await Assert.That(exception!.ParamName).IsEqualTo(paramName);
     }
 
     // ── Queries ──
 
-    [Fact]
-    public void SearchEngineSharp_rejects_a_null_provider()
-        => AssertNull("snapshotProvider", () => new SearchEngineSharp(null!));
+    [Test]
+    public async Task SearchEngineSharp_rejects_a_null_provider()
+        => await AssertNull("snapshotProvider", () => new SearchEngineSharp(null!));
 
-    [Fact]
-    public void Find_and_CountMatches_reject_a_null_expression()
+    [Test]
+    public async Task Find_and_CountMatches_reject_a_null_expression()
     {
         var engine = new SearchEngineSharp(Provider);
 
-        AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact));
-        AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending));
-        AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("n", 0, 1)));
-        AssertNull("expression", () => engine.CountMatches(null!, WordMatchMethod.Within));
-        AssertNull("expression", () => engine.CountMatches(null!, WordMatchMethod.Within, false, FacetFilter.Range("n", 0, 1)));
+        await AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact));
+        await AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending));
+        await AssertNull("expression", () => engine.Find(null!, WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("n", 0, 1)));
+        await AssertNull("expression", () => engine.CountMatches(null!, WordMatchMethod.Within));
+        await AssertNull("expression", () => engine.CountMatches(null!, WordMatchMethod.Within, false, FacetFilter.Range("n", 0, 1)));
     }
 
-    [Fact]
-    public void NameMatcher_rejects_a_null_expression()
-        => AssertNull("expression", () => NameMatcher.Create(null!, WordMatchMethod.Exact));
+    [Test]
+    public async Task NameMatcher_rejects_a_null_expression()
+        => await AssertNull("expression", () => NameMatcher.Create(null!, WordMatchMethod.Exact));
 
     // ── Tokenization and entries ──
 
-    [Fact]
-    public void SearchTokenization_Create_rejects_null_separators()
+    [Test]
+    public async Task SearchTokenization_Create_rejects_null_separators()
     {
-        AssertNull("indexSeparators", () => SearchTokenization.Create(null!, " "));
-        AssertNull("querySeparators", () => SearchTokenization.Create(" ", null!));
+        await AssertNull("indexSeparators", () => SearchTokenization.Create(null!, " "));
+        await AssertNull("querySeparators", () => SearchTokenization.Create(" ", null!));
     }
 
-    [Fact]
-    public void IndexedEntry_rejects_null_texts()
+    [Test]
+    public async Task IndexedEntry_rejects_null_texts()
     {
         var entry = new IndexedEntry("search", "sort");
 
-        AssertNull("SearchText", () => _ = new IndexedEntry(null!, "sort"));
-        AssertNull("SortText", () => _ = new IndexedEntry("search", null!));
-        AssertNull("SearchText", () => _ = entry with { SearchText = null! });
-        AssertNull("SortText", () => _ = entry with { SortText = null! });
+        await AssertNull("SearchText", () => _ = new IndexedEntry(null!, "sort"));
+        await AssertNull("SortText", () => _ = new IndexedEntry("search", null!));
+        await AssertNull("SearchText", () => _ = entry with { SearchText = null! });
+        await AssertNull("SortText", () => _ = entry with { SortText = null! });
     }
 
     // ── Facets ──
 
-    [Fact]
-    public void FacetFilter_factories_reject_null_arguments()
+    [Test]
+    public async Task FacetFilter_factories_reject_null_arguments()
     {
-        AssertNull("facet", () => FacetFilter.Range(null!, 0, 1));
-        AssertNull("facet", () => FacetFilter.Mask(null!, 1));
-        AssertNull("filters", () => FacetFilter.Combine(null!));
-        AssertInvalidElement("filters", () => FacetFilter.Combine(FacetFilter.Range("n", 0, 1), null!));
+        await AssertNull("facet", () => FacetFilter.Range(null!, 0, 1));
+        await AssertNull("facet", () => FacetFilter.Mask(null!, 1));
+        await AssertNull("filters", () => FacetFilter.Combine(null!));
+        await AssertInvalidElement("filters", () => FacetFilter.Combine(FacetFilter.Range("n", 0, 1), null!));
     }
 
-    [Fact]
-    public void FacetValues_Create_rejects_a_null_name()
-        => AssertNull("facet", () => FacetValues.Create(null!, 1));
+    [Test]
+    public async Task FacetValues_Create_rejects_a_null_name()
+        => await AssertNull("facet", () => FacetValues.Create(null!, 1));
 
     // ── Updater ──
 
-    [Fact]
-    public void IndexUpdater_rejects_a_null_provider()
-        => AssertNull("provider", () => new IndexUpdater(null!));
+    [Test]
+    public async Task IndexUpdater_rejects_a_null_provider()
+        => await AssertNull("provider", () => new IndexUpdater(null!));
 
-    [Fact]
-    public void IndexUpdater_rejects_null_arguments()
+    [Test]
+    public async Task IndexUpdater_rejects_null_arguments()
     {
         var updater = new IndexUpdater(new IndexSnapshotProvider());
 
-        AssertNull("entries", () => updater.RebuildFrom((IDictionary<int, string>)null!));
-        AssertNull("entries", () => updater.RebuildFrom((IDictionary<int, IndexedEntry>)null!));
-        AssertNull("entries", () => updater.RebuildFromAsync((IAsyncEnumerable<KeyValuePair<int, string>>)null!));
-        AssertNull("entries", () => updater.RebuildFromAsync((IAsyncEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
-        AssertNull("text", () => updater.AddEntry(1, (string)null!));
-        AssertNull("entry", () => updater.AddEntry(1, (IndexedEntry)null!));
-        AssertNull("text", () => updater.RefreshEntry(1, (string)null!));
-        AssertNull("entry", () => updater.RefreshEntry(1, (IndexedEntry)null!));
-        AssertNull("entries", () => updater.AddOrUpdateEntries((IEnumerable<KeyValuePair<int, string>>)null!));
-        AssertNull("entries", () => updater.AddOrUpdateEntries((IEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
-        AssertNull("ids", () => updater.RemoveEntries(null!));
-        Assert.Equal(0, updater.EntryCount);
+        await AssertNull("entries", () => updater.RebuildFrom((IDictionary<int, string>)null!));
+        await AssertNull("entries", () => updater.RebuildFrom((IDictionary<int, IndexedEntry>)null!));
+        await AssertNull("entries", () => updater.RebuildFromAsync((IAsyncEnumerable<KeyValuePair<int, string>>)null!));
+        await AssertNull("entries", () => updater.RebuildFromAsync((IAsyncEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
+        await AssertNull("text", () => updater.AddEntry(1, (string)null!));
+        await AssertNull("entry", () => updater.AddEntry(1, (IndexedEntry)null!));
+        await AssertNull("text", () => updater.RefreshEntry(1, (string)null!));
+        await AssertNull("entry", () => updater.RefreshEntry(1, (IndexedEntry)null!));
+        await AssertNull("entries", () => updater.AddOrUpdateEntries((IEnumerable<KeyValuePair<int, string>>)null!));
+        await AssertNull("entries", () => updater.AddOrUpdateEntries((IEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
+        await AssertNull("ids", () => updater.RemoveEntries(null!));
+        await Assert.That(updater.EntryCount).IsEqualTo(0);
     }
 
-    [Fact]
-    public void IndexUpdater_rejects_null_entries_inside_its_input_and_keeps_the_index()
+    [Test]
+    public async Task IndexUpdater_rejects_null_entries_inside_its_input_and_keeps_the_index()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
         updater.AddEntry(1, "kept");
         var published = provider.Current;
 
-        AssertInvalidElement("entries", () => updater.RebuildFrom(new Dictionary<int, string> { [2] = null! }));
-        AssertInvalidElement("entries", () => updater.RebuildFrom(new Dictionary<int, IndexedEntry> { [2] = null! }));
-        AssertInvalidElement("entries", () => updater.AddOrUpdateEntries([new KeyValuePair<int, string>(3, "new"), new(4, null!)]));
-        AssertInvalidElement("entries", () => updater.AddOrUpdateEntries([new KeyValuePair<int, IndexedEntry>(3, null!)]));
+        await AssertInvalidElement("entries", () => updater.RebuildFrom(new Dictionary<int, string> { [2] = null! }));
+        await AssertInvalidElement("entries", () => updater.RebuildFrom(new Dictionary<int, IndexedEntry> { [2] = null! }));
+        await AssertInvalidElement("entries", () => updater.AddOrUpdateEntries([new KeyValuePair<int, string>(3, "new"), new(4, null!)]));
+        await AssertInvalidElement("entries", () => updater.AddOrUpdateEntries([new KeyValuePair<int, IndexedEntry>(3, null!)]));
 
-        Assert.Same(published, provider.Current);
-        Assert.Equal(1, updater.EntryCount);
-        Assert.False(updater.ContainsEntry(3));
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
+        await Assert.That(updater.EntryCount).IsEqualTo(1);
+        await Assert.That(updater.ContainsEntry(3)).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task RebuildFromAsync_faults_for_a_null_entry_in_the_stream()
     {
         static async IAsyncEnumerable<KeyValuePair<int, string>> Entries()
@@ -136,44 +140,44 @@ public class NullArgumentTests
 
         var updater = new IndexUpdater(new IndexSnapshotProvider());
 
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() => updater.RebuildFromAsync(Entries()));
+        var exception = await Assert.That(() => updater.RebuildFromAsync(Entries())).ThrowsExactly<ArgumentException>();
 
-        Assert.Equal("entries", exception.ParamName);
+        await Assert.That(exception!.ParamName).IsEqualTo("entries");
     }
 
     // ── Builder and sort key ──
 
-    [Fact]
-    public void IndexSnapshotBuilder_rejects_null_arguments()
+    [Test]
+    public async Task IndexSnapshotBuilder_rejects_null_arguments()
     {
         KeyValuePair<int, string>[] texts = [new(1, "a")];
         KeyValuePair<int, IndexedEntry>[] entries = [new(1, new IndexedEntry("a", "a"))];
 
-        AssertNull("entries", () => IndexSnapshotBuilder.Build((IEnumerable<KeyValuePair<int, string>>)null!));
-        AssertNull("entries", () => IndexSnapshotBuilder.Build((IEnumerable<KeyValuePair<int, IndexedEntry>>)null!, progress: null));
-        AssertNull("tokenization", () => IndexSnapshotBuilder.Build(texts, (SearchTokenization)null!));
-        AssertNull("tokenization", () => IndexSnapshotBuilder.Build(entries, null!, progress: null));
-        AssertInvalidElement("entries", () => IndexSnapshotBuilder.Build([new KeyValuePair<int, string>(1, null!)]));
-        AssertInvalidElement("entries", () => IndexSnapshotBuilder.Build([new KeyValuePair<int, IndexedEntry>(1, null!)]));
+        await AssertNull("entries", () => IndexSnapshotBuilder.Build((IEnumerable<KeyValuePair<int, string>>)null!));
+        await AssertNull("entries", () => IndexSnapshotBuilder.Build((IEnumerable<KeyValuePair<int, IndexedEntry>>)null!, progress: null));
+        await AssertNull("tokenization", () => IndexSnapshotBuilder.Build(texts, (SearchTokenization)null!));
+        await AssertNull("tokenization", () => IndexSnapshotBuilder.Build(entries, null!, progress: null));
+        await AssertInvalidElement("entries", () => IndexSnapshotBuilder.Build([new KeyValuePair<int, string>(1, null!)]));
+        await AssertInvalidElement("entries", () => IndexSnapshotBuilder.Build([new KeyValuePair<int, IndexedEntry>(1, null!)]));
     }
 
-    [Fact]
-    public void NaturalSortKeyBuilder_rejects_a_null_text()
-        => AssertNull("sortText", () => NaturalSortKeyBuilder.Build(null!));
+    [Test]
+    public async Task NaturalSortKeyBuilder_rejects_a_null_text()
+        => await AssertNull("sortText", () => NaturalSortKeyBuilder.Build(null!));
 
     // ── Ingestion ──
 
-    [Fact]
-    public void ProgressiveIndexIngestion_rejects_null_arguments_at_the_call()
+    [Test]
+    public async Task ProgressiveIndexIngestion_rejects_null_arguments_at_the_call()
     {
-        AssertNull("updater", () => _ = new ProgressiveIndexIngestion(null!));
+        await AssertNull("updater", () => _ = new ProgressiveIndexIngestion(null!));
 
         var ingestion = new ProgressiveIndexIngestion(new IndexUpdater(new IndexSnapshotProvider()));
-        AssertNull("entries", () => ingestion.IngestAsync((IAsyncEnumerable<KeyValuePair<int, string>>)null!));
-        AssertNull("entries", () => ingestion.IngestAsync((IAsyncEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
+        await AssertNull("entries", () => ingestion.IngestAsync((IAsyncEnumerable<KeyValuePair<int, string>>)null!));
+        await AssertNull("entries", () => ingestion.IngestAsync((IAsyncEnumerable<KeyValuePair<int, IndexedEntry>>)null!));
     }
 
-    [Fact]
+    [Test]
     public async Task IngestAsync_faults_for_a_null_entry_in_the_scan()
     {
         static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Entries()
@@ -184,72 +188,72 @@ public class NullArgumentTests
 
         var ingestion = new ProgressiveIndexIngestion(new IndexUpdater(new IndexSnapshotProvider()));
 
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() => ingestion.IngestAsync(Entries()));
+        var exception = await Assert.That(() => (Task)ingestion.IngestAsync(Entries())).ThrowsExactly<ArgumentException>();
 
-        Assert.Equal("entries", exception.ParamName);
+        await Assert.That(exception!.ParamName).IsEqualTo("entries");
     }
 
     // ── Tokenizer helpers ──
 
-    [Fact]
-    public void NameTokenizer_rejects_a_null_join_text()
-        => AssertNull("joinCharacter", () => NameTokenizer.TokenizeName("a b", null!));
+    [Test]
+    public async Task NameTokenizer_rejects_a_null_join_text()
+        => await AssertNull("joinCharacter", () => NameTokenizer.TokenizeName("a b", null!));
 
-    [Fact]
-    public void TextNormalizer_rejects_null_arguments()
+    [Test]
+    public async Task TextNormalizer_rejects_null_arguments()
     {
         var separators = SearchValues.Create(" ");
         var set = new HashSet<string>(StringComparer.Ordinal);
         int state = 0;
         TextNormalizer.UniqueWordAction<int> action = static (ref int count, string _) => count++;
 
-        AssertNull("separators", () => TextNormalizer.IsSeparator(' ', null!));
-        AssertNull("text", () => TextNormalizer.GetWordsFromString(null!));
-        AssertNull("text", () => TextNormalizer.GetWordsFromString(null!, separators));
-        AssertNull("separators", () => TextNormalizer.GetWordsFromString("a", null!));
-        AssertNull("text", () => TextNormalizer.ForEachUniqueWord(null!, set, ref state, action));
-        AssertNull("uniqueWords", () => TextNormalizer.ForEachUniqueWord("a", null!, ref state, action));
-        AssertNull("action", () => TextNormalizer.ForEachUniqueWord("a", set, ref state, null!));
-        AssertNull("separators", () => TextNormalizer.ForEachUniqueWord("a", set, null!, ref state, action));
+        await AssertNull("separators", () => TextNormalizer.IsSeparator(' ', null!));
+        await AssertNull("text", () => TextNormalizer.GetWordsFromString(null!));
+        await AssertNull("text", () => TextNormalizer.GetWordsFromString(null!, separators));
+        await AssertNull("separators", () => TextNormalizer.GetWordsFromString("a", null!));
+        await AssertNull("text", () => TextNormalizer.ForEachUniqueWord(null!, set, ref state, action));
+        await AssertNull("uniqueWords", () => TextNormalizer.ForEachUniqueWord("a", null!, ref state, action));
+        await AssertNull("action", () => TextNormalizer.ForEachUniqueWord("a", set, ref state, null!));
+        await AssertNull("separators", () => TextNormalizer.ForEachUniqueWord("a", set, null!, ref state, action));
     }
 
     // ── Dependency injection ──
 
-    [Fact]
-    public void Registration_methods_reject_null_arguments()
+    [Test]
+    public async Task Registration_methods_reject_null_arguments()
     {
         var services = new ServiceCollection();
         var entries = new Dictionary<int, string> { [1] = "a" };
         Func<IServiceProvider, IDictionary<int, string>> factory = _ => entries;
 
-        AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!));
-        AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngineTransient(null!));
-        AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!, entries));
-        AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!, factory));
-        AssertNull("services", () => ServiceCollectionExtensions.AddKeyedSearchEngine(null!, "k"));
-        AssertNull("services", () => ServiceCollectionExtensions.AddKeyedSearchEngine(null!, "k", entries));
-        AssertNull("tokenization", () => services.AddSearchEngine((SearchTokenization)null!));
-        AssertNull("tokenization", () => services.AddSearchEngineTransient(null!));
-        AssertNull("tokenization", () => services.AddSearchEngine(entries, null!));
-        AssertNull("tokenization", () => services.AddSearchEngine(factory, null!));
-        AssertNull("tokenization", () => services.AddKeyedSearchEngine("k", (SearchTokenization)null!));
-        AssertNull("tokenization", () => services.AddKeyedSearchEngine("k", entries, null!));
-        AssertNull("initialEntries", () => services.AddSearchEngine((IDictionary<int, string>)null!));
-        AssertNull("initialEntries", () => services.AddKeyedSearchEngine("k", (IDictionary<int, string>)null!));
-        AssertNull("entriesFactory", () => services.AddSearchEngine((Func<IServiceProvider, IDictionary<int, string>>)null!));
-        AssertNull("key", () => services.AddKeyedSearchEngine(null!));
-        AssertNull("key", () => services.AddKeyedSearchEngine(null!, entries));
-        AssertInvalidElement("initialEntries", () => services.AddSearchEngine(new Dictionary<int, string> { [1] = null! }));
-        Assert.Empty(services);
+        await AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!));
+        await AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngineTransient(null!));
+        await AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!, entries));
+        await AssertNull("services", () => ServiceCollectionExtensions.AddSearchEngine(null!, factory));
+        await AssertNull("services", () => ServiceCollectionExtensions.AddKeyedSearchEngine(null!, "k"));
+        await AssertNull("services", () => ServiceCollectionExtensions.AddKeyedSearchEngine(null!, "k", entries));
+        await AssertNull("tokenization", () => services.AddSearchEngine((SearchTokenization)null!));
+        await AssertNull("tokenization", () => services.AddSearchEngineTransient(null!));
+        await AssertNull("tokenization", () => services.AddSearchEngine(entries, null!));
+        await AssertNull("tokenization", () => services.AddSearchEngine(factory, null!));
+        await AssertNull("tokenization", () => services.AddKeyedSearchEngine("k", (SearchTokenization)null!));
+        await AssertNull("tokenization", () => services.AddKeyedSearchEngine("k", entries, null!));
+        await AssertNull("initialEntries", () => services.AddSearchEngine((IDictionary<int, string>)null!));
+        await AssertNull("initialEntries", () => services.AddKeyedSearchEngine("k", (IDictionary<int, string>)null!));
+        await AssertNull("entriesFactory", () => services.AddSearchEngine((Func<IServiceProvider, IDictionary<int, string>>)null!));
+        await AssertNull("key", () => services.AddKeyedSearchEngine(null!));
+        await AssertNull("key", () => services.AddKeyedSearchEngine(null!, entries));
+        await AssertInvalidElement("initialEntries", () => services.AddSearchEngine(new Dictionary<int, string> { [1] = null! }));
+        await Assert.That(services).IsEmpty();
     }
 
-    [Fact]
-    public void A_null_dictionary_from_the_entries_factory_fails_when_the_index_is_resolved()
+    [Test]
+    public async Task A_null_dictionary_from_the_entries_factory_fails_when_the_index_is_resolved()
     {
         var services = new ServiceCollection();
         services.AddSearchEngine(_ => null!);
         using var provider = services.BuildServiceProvider();
 
-        Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IIndexSnapshotProvider>());
+        await Assert.That(() => provider.GetRequiredService<IIndexSnapshotProvider>()).ThrowsExactly<InvalidOperationException>();
     }
 }

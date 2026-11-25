@@ -16,33 +16,33 @@ public class DependencyInjectionTests
 
     // Resolves the index the way an application does: the updater makes the first change and the
     // engine answers queries. The entries registered up front must still be found afterwards.
-    private static void AssertFirstUpdateKeepsInitialEntries(IServiceProvider provider, object? key = null)
+    private static async Task AssertFirstUpdateKeepsInitialEntries(IServiceProvider provider, object? key = null)
     {
         var updater = key is null ? provider.GetRequiredService<IIndexUpdater>() : provider.GetRequiredKeyedService<IIndexUpdater>(key);
         var engine = key is null ? provider.GetRequiredService<ISearchEngine>() : provider.GetRequiredKeyedService<ISearchEngine>(key);
 
-        Assert.Equal([1, 2], Ids(engine, "a"));
-        Assert.Equal(2, updater.EntryCount);
+        await Assert.That(Ids(engine, "a")).IsEquivalentTo([1, 2], CollectionOrdering.Matching);
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
 
         updater.AddEntry(3, "gamma-data.csv");
 
-        Assert.Equal(3, updater.EntryCount);
-        Assert.Equal([1, 2, 3], Ids(engine, "a"));
-        Assert.Equal([1], Ids(engine, "alpha"));
-        Assert.Equal([3], Ids(engine, "gamma"));
+        await Assert.That(updater.EntryCount).IsEqualTo(3);
+        await Assert.That(Ids(engine, "a")).IsEquivalentTo([1, 2, 3], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "gamma")).IsEquivalentTo([3], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithInitialEntries_UpdaterKeepsThem()
+    [Test]
+    public async Task AddSearchEngine_WithInitialEntries_UpdaterKeepsThem()
     {
         var services = new ServiceCollection().AddSearchEngine(InitialEntries());
         using var provider = services.BuildServiceProvider();
 
-        AssertFirstUpdateKeepsInitialEntries(provider);
+        await AssertFirstUpdateKeepsInitialEntries(provider);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithInitialEntriesAndTokenization_UpdaterKeepsThemAndTheTokenization()
+    [Test]
+    public async Task AddSearchEngine_WithInitialEntriesAndTokenization_UpdaterKeepsThemAndTheTokenization()
     {
         var services = new ServiceCollection().AddSearchEngine(InitialEntries(), SearchTokenization.FileMask);
         using var provider = services.BuildServiceProvider();
@@ -51,26 +51,26 @@ public class DependencyInjectionTests
         var updater = provider.GetRequiredService<IIndexUpdater>();
         var engine = provider.GetRequiredService<ISearchEngine>();
 
-        Assert.Equal(SearchTokenization.FileMask, snapshots.Current.Tokenization);
+        await Assert.That(snapshots.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
         updater.AddEntry(3, "gamma-data.csv");
 
-        Assert.Equal(SearchTokenization.FileMask, snapshots.Current.Tokenization);
-        Assert.Equal([1], engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true));
-        Assert.Equal([3], engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true));
-        Assert.Equal([2], engine.Find("*.txt", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(snapshots.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
+        await Assert.That(engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([3], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("*.txt", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([2], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithEntriesFactory_UpdaterKeepsTheEntries()
+    [Test]
+    public async Task AddSearchEngine_WithEntriesFactory_UpdaterKeepsTheEntries()
     {
         var services = new ServiceCollection().AddSearchEngine(_ => InitialEntries());
         using var provider = services.BuildServiceProvider();
 
-        AssertFirstUpdateKeepsInitialEntries(provider);
+        await AssertFirstUpdateKeepsInitialEntries(provider);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithEntriesFactoryAndTokenization_UpdaterKeepsTheEntriesAndTheTokenization()
+    [Test]
+    public async Task AddSearchEngine_WithEntriesFactoryAndTokenization_UpdaterKeepsTheEntriesAndTheTokenization()
     {
         var services = new ServiceCollection().AddSearchEngine(_ => InitialEntries(), SearchTokenization.FileMask);
         using var provider = services.BuildServiceProvider();
@@ -79,16 +79,16 @@ public class DependencyInjectionTests
         var updater = provider.GetRequiredService<IIndexUpdater>();
         var engine = provider.GetRequiredService<ISearchEngine>();
 
-        Assert.Equal(SearchTokenization.FileMask, snapshots.Current.Tokenization);
+        await Assert.That(snapshots.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
         updater.AddEntry(3, "gamma-data.csv");
 
-        Assert.Equal(SearchTokenization.FileMask, snapshots.Current.Tokenization);
-        Assert.Equal([1], engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true));
-        Assert.Equal([3], engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(snapshots.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
+        await Assert.That(engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([3], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithEntriesFactory_RunsOnceForTheIndexAndTheUpdater()
+    [Test]
+    public async Task AddSearchEngine_WithEntriesFactory_RunsOnceForTheIndexAndTheUpdater()
     {
         int calls = 0;
         var services = new ServiceCollection().AddSearchEngine(_ =>
@@ -98,15 +98,15 @@ public class DependencyInjectionTests
         });
         using var provider = services.BuildServiceProvider();
 
-        Assert.Equal(0, calls);
+        await Assert.That(calls).IsEqualTo(0);
         provider.GetRequiredService<IIndexUpdater>().AddEntry(3, "gamma-data.csv");
         _ = provider.GetRequiredService<IIndexSnapshotProvider>().Current;
 
-        Assert.Equal(1, calls);
+        await Assert.That(calls).IsEqualTo(1);
     }
 
-    [Fact]
-    public void AddSearchEngine_WithInitialEntries_IgnoresChangesToTheDictionaryAfterRegistration()
+    [Test]
+    public async Task AddSearchEngine_WithInitialEntries_IgnoresChangesToTheDictionaryAfterRegistration()
     {
         var entries = InitialEntries();
         var services = new ServiceCollection().AddSearchEngine(entries);
@@ -116,21 +116,21 @@ public class DependencyInjectionTests
         var engine = provider.GetRequiredService<ISearchEngine>();
         provider.GetRequiredService<IIndexUpdater>().AddEntry(3, "gamma-data.csv");
 
-        Assert.Equal([1, 2, 3], Ids(engine, "a"));
-        Assert.Empty(Ids(engine, "late"));
+        await Assert.That(Ids(engine, "a")).IsEquivalentTo([1, 2, 3], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "late")).IsEmpty();
     }
 
-    [Fact]
-    public void AddKeyedSearchEngine_WithInitialEntries_UpdaterKeepsThem()
+    [Test]
+    public async Task AddKeyedSearchEngine_WithInitialEntries_UpdaterKeepsThem()
     {
         var services = new ServiceCollection().AddKeyedSearchEngine("files", InitialEntries());
         using var provider = services.BuildServiceProvider();
 
-        AssertFirstUpdateKeepsInitialEntries(provider, "files");
+        await AssertFirstUpdateKeepsInitialEntries(provider, "files");
     }
 
-    [Fact]
-    public void AddKeyedSearchEngine_WithInitialEntriesAndTokenization_UpdaterKeepsThemAndTheTokenization()
+    [Test]
+    public async Task AddKeyedSearchEngine_WithInitialEntriesAndTokenization_UpdaterKeepsThemAndTheTokenization()
     {
         var services = new ServiceCollection().AddKeyedSearchEngine("files", InitialEntries(), SearchTokenization.FileMask);
         using var provider = services.BuildServiceProvider();
@@ -141,13 +141,13 @@ public class DependencyInjectionTests
 
         updater.AddEntry(3, "gamma-data.csv");
 
-        Assert.Equal(SearchTokenization.FileMask, snapshots.Current.Tokenization);
-        Assert.Equal([1], engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true));
-        Assert.Equal([3], engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(snapshots.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
+        await Assert.That(engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("*.csv", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([3], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddKeyedSearchEngine_WithSeveralKeys_KeepsEachIndexSeparateAfterUpdates()
+    [Test]
+    public async Task AddKeyedSearchEngine_WithSeveralKeys_KeepsEachIndexSeparateAfterUpdates()
     {
         var services = new ServiceCollection()
             .AddKeyedSearchEngine("one", new Dictionary<int, string> { [1] = "alpha one" })
@@ -158,16 +158,16 @@ public class DependencyInjectionTests
         provider.GetRequiredKeyedService<IIndexUpdater>("one").AddEntry(11, "alpha eleven");
         provider.GetRequiredKeyedService<IIndexUpdater>("two").AddEntry(22, "beta twenty-two");
 
-        Assert.Equal([1, 11], Ids(provider.GetRequiredKeyedService<ISearchEngine>("one"), "alpha"));
-        Assert.Empty(Ids(provider.GetRequiredKeyedService<ISearchEngine>("one"), "beta"));
-        Assert.Equal([2, 22], Ids(provider.GetRequiredKeyedService<ISearchEngine>("two"), "beta"));
-        Assert.Empty(Ids(provider.GetRequiredKeyedService<ISearchEngine>("two"), "alpha"));
-        Assert.Empty(Ids(provider.GetRequiredKeyedService<ISearchEngine>("empty"), "alpha"));
-        Assert.Equal(0, provider.GetRequiredKeyedService<IIndexUpdater>("empty").EntryCount);
+        await Assert.That(Ids(provider.GetRequiredKeyedService<ISearchEngine>("one"), "alpha")).IsEquivalentTo([1, 11], CollectionOrdering.Matching);
+        await Assert.That(Ids(provider.GetRequiredKeyedService<ISearchEngine>("one"), "beta")).IsEmpty();
+        await Assert.That(Ids(provider.GetRequiredKeyedService<ISearchEngine>("two"), "beta")).IsEquivalentTo([2, 22], CollectionOrdering.Matching);
+        await Assert.That(Ids(provider.GetRequiredKeyedService<ISearchEngine>("two"), "alpha")).IsEmpty();
+        await Assert.That(Ids(provider.GetRequiredKeyedService<ISearchEngine>("empty"), "alpha")).IsEmpty();
+        await Assert.That(provider.GetRequiredKeyedService<IIndexUpdater>("empty").EntryCount).IsEqualTo(0);
     }
 
-    [Fact]
-    public void TwoContainersBuiltFromOneRegistration_DoNotShareUpdaterEntries()
+    [Test]
+    public async Task TwoContainersBuiltFromOneRegistration_DoNotShareUpdaterEntries()
     {
         var services = new ServiceCollection().AddSearchEngine(InitialEntries());
         using var first = services.BuildServiceProvider();
@@ -176,7 +176,7 @@ public class DependencyInjectionTests
         first.GetRequiredService<IIndexUpdater>().AddEntry(3, "gamma-data.csv");
         second.GetRequiredService<IIndexUpdater>().AddEntry(4, "delta-log.txt");
 
-        Assert.Equal([1, 2, 3], Ids(first.GetRequiredService<ISearchEngine>(), "a"));
-        Assert.Equal([1, 2, 4], Ids(second.GetRequiredService<ISearchEngine>(), "a"));
+        await Assert.That(Ids(first.GetRequiredService<ISearchEngine>(), "a")).IsEquivalentTo([1, 2, 3], CollectionOrdering.Matching);
+        await Assert.That(Ids(second.GetRequiredService<ISearchEngine>(), "a")).IsEquivalentTo([1, 2, 4], CollectionOrdering.Matching);
     }
 }

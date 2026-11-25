@@ -6,12 +6,6 @@ namespace SearchEngine.Sharp.Tests;
 
 public class IndexUpdaterTests
 {
-    private static (SearchEngineSharp engine, IndexUpdater updater, IndexSnapshotProvider provider) Create(SearchTokenization? tokenization = null)
-    {
-        var provider = new IndexSnapshotProvider();
-        return (new SearchEngineSharp(provider), new IndexUpdater(provider, tokenization), provider);
-    }
-
     // FacetValues validates names on creation, so a bag with a null name can only be forced into
     // existence; it makes the snapshot build throw, like any other component that fails during Build.
     private static IndexedEntry Poisoned
@@ -34,118 +28,118 @@ public class IndexUpdaterTests
     private static int[] Ids(SearchEngineSharp engine, string query)
         => [.. engine.Find(query, WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder).Order()];
 
-    [Fact]
-    public void AddEntry_WhenBuildThrows_KeepsStoredEntriesAndPublishedSnapshot()
+    [Test]
+    public async Task AddEntry_WhenBuildThrows_KeepsStoredEntriesAndPublishedSnapshot()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
-        Assert.ThrowsAny<Exception>(() => updater.AddEntry(3, Poisoned));
+        await Assert.That(() => updater.AddEntry(3, Poisoned)).Throws<Exception>();
 
-        Assert.Equal(2, updater.EntryCount);
-        Assert.False(updater.ContainsEntry(3));
-        Assert.Same(published, provider.Current);
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
+        await Assert.That(updater.ContainsEntry(3)).IsFalse();
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
 
         updater.AddEntry(4, "gamma");
-        Assert.Equal(3, updater.EntryCount);
-        Assert.Equal([4], Ids(engine, "gamma"));
-        Assert.Equal([1], Ids(engine, "alpha"));
+        await Assert.That(updater.EntryCount).IsEqualTo(3);
+        await Assert.That(Ids(engine, "gamma")).IsEquivalentTo([4], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddEntry_WhenReplacingAndBuildThrows_RestoresThePreviousEntry()
+    [Test]
+    public async Task AddEntry_WhenReplacingAndBuildThrows_RestoresThePreviousEntry()
     {
-        var (engine, updater, _) = Create();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
 
-        Assert.ThrowsAny<Exception>(() => updater.AddEntry(1, Poisoned));
+        await Assert.That(() => updater.AddEntry(1, Poisoned)).Throws<Exception>();
 
-        Assert.Equal(2, updater.EntryCount);
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
         updater.AddEntry(3, "gamma");
-        Assert.Equal([1], Ids(engine, "alpha"));
-        Assert.Equal([3], Ids(engine, "gamma"));
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "gamma")).IsEquivalentTo([3], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddOrUpdateEntries_WhenBuildThrows_RollsBackTheWholeBatch()
+    [Test]
+    public async Task AddOrUpdateEntries_WhenBuildThrows_RollsBackTheWholeBatch()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
-        Assert.ThrowsAny<Exception>(() => updater.AddOrUpdateEntries(new Dictionary<int, IndexedEntry>
+        await Assert.That(() => updater.AddOrUpdateEntries(new Dictionary<int, IndexedEntry>
         {
             [2] = new("replaced", "replaced"),
             [3] = new("added", "added"),
             [4] = Poisoned,
-        }));
+        })).Throws<Exception>();
 
-        Assert.Equal(2, updater.EntryCount);
-        Assert.Same(published, provider.Current);
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
         updater.AddEntry(5, "gamma");
-        Assert.Equal([2], Ids(engine, "beta"));
-        Assert.Empty(Ids(engine, "replaced"));
-        Assert.Empty(Ids(engine, "added"));
+        await Assert.That(Ids(engine, "beta")).IsEquivalentTo([2], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "replaced")).IsEmpty();
+        await Assert.That(Ids(engine, "added")).IsEmpty();
     }
 
-    [Fact]
-    public void AddOrUpdateEntries_WhenTheSourceEnumerationThrows_RollsBackAppliedEntries()
+    [Test]
+    public async Task AddOrUpdateEntries_WhenTheSourceEnumerationThrows_RollsBackAppliedEntries()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
         var published = provider.Current;
 
-        Assert.Throws<InvalidOperationException>(() => updater.AddOrUpdateEntries(ThrowingAfterFirst()));
+        await Assert.That(() => updater.AddOrUpdateEntries(ThrowingAfterFirst())).ThrowsExactly<InvalidOperationException>();
 
-        Assert.Equal(1, updater.EntryCount);
-        Assert.False(updater.ContainsEntry(100));
-        Assert.Same(published, provider.Current);
+        await Assert.That(updater.EntryCount).IsEqualTo(1);
+        await Assert.That(updater.ContainsEntry(100)).IsFalse();
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
     }
 
-    [Fact]
-    public void RefreshEntry_WhenBuildThrows_RestoresThePreviousEntry()
+    [Test]
+    public async Task RefreshEntry_WhenBuildThrows_RestoresThePreviousEntry()
     {
-        var (engine, updater, _) = Create();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
 
-        Assert.ThrowsAny<Exception>(() => updater.RefreshEntry(1, Poisoned));
-        Assert.ThrowsAny<Exception>(() => updater.RefreshEntry(2, Poisoned));
+        await Assert.That(() => updater.RefreshEntry(1, Poisoned)).Throws<Exception>();
+        await Assert.That(() => updater.RefreshEntry(2, Poisoned)).Throws<Exception>();
 
-        Assert.Equal(1, updater.EntryCount);
-        Assert.False(updater.ContainsEntry(2));
-        Assert.Equal([1], Ids(engine, "alpha"));
+        await Assert.That(updater.EntryCount).IsEqualTo(1);
+        await Assert.That(updater.ContainsEntry(2)).IsFalse();
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void RebuildFrom_WhenBuildThrows_KeepsThePreviousEntries()
+    [Test]
+    public async Task RebuildFrom_WhenBuildThrows_KeepsThePreviousEntries()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
-        Assert.ThrowsAny<Exception>(() => updater.RebuildFrom(new Dictionary<int, IndexedEntry> { [9] = Poisoned }));
+        await Assert.That(() => updater.RebuildFrom(new Dictionary<int, IndexedEntry> { [9] = Poisoned })).Throws<Exception>();
 
-        Assert.Equal(2, updater.EntryCount);
-        Assert.True(updater.ContainsEntry(1));
-        Assert.Same(published, provider.Current);
+        await Assert.That(updater.EntryCount).IsEqualTo(2);
+        await Assert.That(updater.ContainsEntry(1)).IsTrue();
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
         updater.AddEntry(3, "gamma");
-        Assert.Equal([1], Ids(engine, "alpha"));
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
     }
 
-    [Fact]
+    [Test]
     public async Task RebuildFromAsync_WhenBuildThrows_KeepsThePreviousEntries()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
         var published = provider.Current;
 
-        await Assert.ThrowsAnyAsync<Exception>(() => updater.RebuildFromAsync(PoisonedStream()));
+        await Assert.That(() => updater.RebuildFromAsync(PoisonedStream())).Throws<Exception>();
 
-        Assert.True(updater.ContainsEntry(1));
-        Assert.False(updater.ContainsEntry(9));
-        Assert.Equal(1, updater.EntryCount);
-        Assert.Same(published, provider.Current);
+        await Assert.That(updater.ContainsEntry(1)).IsTrue();
+        await Assert.That(updater.ContainsEntry(9)).IsFalse();
+        await Assert.That(updater.EntryCount).IsEqualTo(1);
+        await Assert.That(provider.Current).IsSameReferenceAs(published);
 
         static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> PoisonedStream()
         {
@@ -161,22 +155,23 @@ public class IndexUpdaterTests
         _ => SearchTokenization.Create("_", " "),
     };
 
-    [Theory]
-    [InlineData("default")]
-    [InlineData("filemask")]
-    [InlineData("custom")]
-    public void Clear_KeepsTheConfigurationOfTheUpdater(string preset)
+    [Test]
+    [Arguments("default")]
+    [Arguments("filemask")]
+    [Arguments("custom")]
+    public Task Clear_KeepsTheConfigurationOfTheUpdater(string preset)
         => AssertClearKeepsTheConfiguration(PresetByName(preset));
 
     // Compose needs Unicode normalization, so this preset is skipped in globalization-invariant mode.
-    [NormalizationFact]
-    public void Clear_KeepsTheConfigurationOfTheUpdater_WithUnicodeMatching()
+    [Test]
+    [SkipUnlessNormalization]
+    public Task Clear_KeepsTheConfigurationOfTheUpdater_WithUnicodeMatching()
         => AssertClearKeepsTheConfiguration(
             SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold));
 
-    private static void AssertClearKeepsTheConfiguration(SearchTokenization tokenization)
+    private static async Task AssertClearKeepsTheConfiguration(SearchTokenization tokenization)
     {
-        var (engine, updater, provider) = Create(tokenization);
+        var (engine, updater, provider) = TestIndex.Create(tokenization);
         var entries = new Dictionary<int, string>
         {
             [1] = "Report_Final.PDF",
@@ -191,47 +186,50 @@ public class IndexUpdaterTests
 
         updater.Clear();
 
-        Assert.Equal(tokenization.IndexSeparators, provider.Current.Tokenization.IndexSeparators);
-        Assert.Equal(tokenization.QuerySeparators, provider.Current.Tokenization.QuerySeparators);
-        Assert.Equal(tokenization.UnicodeMatching, provider.Current.Tokenization.UnicodeMatching);
-        Assert.Equal(0, updater.EntryCount);
-        Assert.All(queries, q => Assert.Empty(Ids(engine, q)));
+        await Assert.That(provider.Current.Tokenization.IndexSeparators).IsEqualTo(tokenization.IndexSeparators);
+        await Assert.That(provider.Current.Tokenization.QuerySeparators).IsEqualTo(tokenization.QuerySeparators);
+        await Assert.That(provider.Current.Tokenization.UnicodeMatching).IsEqualTo(tokenization.UnicodeMatching);
+        await Assert.That(updater.EntryCount).IsEqualTo(0);
+        foreach (string q in queries)
+            await Assert.That(Ids(engine, q)).IsEmpty();
 
         updater.RebuildFrom(entries);
-        Assert.Equal(before, queries.Select(q => Ids(engine, q)).ToArray());
+        await Assert.That(queries.Select(q => Ids(engine, q)).ToArray()).IsEquivalentTo(before, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void RemovingTheLastEntry_KeepsTheConfigurationOfTheUpdater()
+    [Test]
+    public async Task RemovingTheLastEntry_KeepsTheConfigurationOfTheUpdater()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);
-        var (_, updater, provider) = Create(tokenization);
+        var (_, updater, provider) = TestIndex.Create(tokenization);
         updater.AddEntry(1, "only.txt");
 
         updater.RemoveEntry(1);
 
-        Assert.Equal(UnicodeMatching.CaseFold, provider.Current.Tokenization.UnicodeMatching);
-        Assert.Equal(tokenization.QuerySeparators, provider.Current.Tokenization.QuerySeparators);
+        await Assert.That(provider.Current.Tokenization.UnicodeMatching).IsEqualTo(UnicodeMatching.CaseFold);
+        await Assert.That(provider.Current.Tokenization.QuerySeparators).IsEqualTo(tokenization.QuerySeparators);
     }
 
-    [Fact]
-    public void Clear_WithTheDefaultPreset_PublishesTheSharedEmptySnapshot()
+    [Test]
+    public async Task Clear_WithTheDefaultPreset_PublishesTheSharedEmptySnapshot()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.AddEntry(1, "a");
 
         updater.Clear();
 
-        Assert.Same(SearchEngine.Snapshots.IndexSnapshot.Empty, provider.Current);
+        await Assert.That(provider.Current).IsSameReferenceAs(SearchEngine.Snapshots.IndexSnapshot.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task RebuildFromAsync_DoesNotResumeOnTheCallersSynchronizationContext()
     {
-        var (engine, updater, _) = Create();
+        var (engine, updater, _) = TestIndex.Create();
         var context = new CountingSynchronizationContext();
         Task rebuild;
 
+        // Restore what the test runner had installed, not null.
+        var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(context);
         try
         {
@@ -239,13 +237,13 @@ public class IndexUpdaterTests
         }
         finally
         {
-            SynchronizationContext.SetSynchronizationContext(null);
+            SynchronizationContext.SetSynchronizationContext(previous);
         }
 
         await rebuild;
 
-        Assert.Equal(0, context.PostCount);
-        Assert.Equal([1], Ids(engine, "alpha"));
+        await Assert.That(context.PostCount).IsEqualTo(0);
+        await Assert.That(Ids(engine, "alpha")).IsEquivalentTo([1], CollectionOrdering.Matching);
     }
 
     // Completes asynchronously without capturing a context of its own, so only the updater could post to one.

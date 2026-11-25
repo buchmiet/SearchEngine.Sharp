@@ -4,26 +4,26 @@ namespace SearchEngine.Sharp.Tests;
 
 public sealed class NameTokenizerTests
 {
-    [Fact]
-    public void TokenizeName_NormalizesCase()
+    [Test]
+    public async Task TokenizeName_NormalizesCase()
     {
         var result = NameTokenizer.TokenizeName("Alpha BETA");
 
-        Assert.Equal("alpha-beta", result);
+        await Assert.That(result).IsEqualTo("alpha-beta");
     }
 
-    [Fact]
-    public void TokenizeName_DeduplicatesTokens()
+    [Test]
+    public async Task TokenizeName_DeduplicatesTokens()
     {
         var result = NameTokenizer.TokenizeName("foo bar FOO");
 
-        Assert.Equal("foo-bar", result);
+        await Assert.That(result).IsEqualTo("foo-bar");
     }
 
-    [Fact]
-    public void TokenizeName_EmptyInput_ReturnsEmpty()
+    [Test]
+    public async Task TokenizeName_EmptyInput_ReturnsEmpty()
     {
-        Assert.Equal(string.Empty, NameTokenizer.TokenizeName(null));
-        Assert.Equal(string.Empty, NameTokenizer.TokenizeName("   "));
+        await Assert.That(NameTokenizer.TokenizeName(null)).IsEqualTo(string.Empty);
+        await Assert.That(NameTokenizer.TokenizeName("   ")).IsEqualTo(string.Empty);
     }
 }
