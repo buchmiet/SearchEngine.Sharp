@@ -100,6 +100,8 @@ public class NameMatcherTests
         "a", "^a$", "^$", "[invalid", "x", "b$", "^a.b$", "\u03C3", "e\u0301", @".pdf$",
     ];
 
+    // Compose and RemoveDiacritics need Unicode normalization; in globalization-invariant mode the parity check runs
+    // without them.
     private static readonly SearchTokenization[] ParityTokenizations =
     [
         SearchTokenization.Default,
@@ -107,9 +109,14 @@ public class NameMatcherTests
         SearchTokenization.Create("X", " "),
         SearchTokenization.Create("x", " "),
         SearchTokenization.Create("-", " ()"),
-        SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
-        SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics | UnicodeMatching.GraphemeBoundaries),
         SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold),
+        .. TextFolder.IsNormalizationAvailable
+            ? (SearchTokenization[])
+            [
+                SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
+                SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics | UnicodeMatching.GraphemeBoundaries),
+            ]
+            : [],
     ];
 
     [Fact]
