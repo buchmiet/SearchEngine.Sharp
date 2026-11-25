@@ -64,9 +64,7 @@ public sealed class IndexSnapshot
         wordEnds: [],
         wordLengths: [],
         postingCounts: [],
-        bigramWordIndices: [],
         sortTexts: [],
-        sortedPermutation: [],
         facetColumns: [],
         tokenization: tokenization,
         documentCount: 0,
@@ -147,9 +145,7 @@ public sealed class IndexSnapshot
         int[] wordEnds,
         int[] wordLengths,
         int[] postingCounts,
-        Dictionary<int, int[]>? bigramWordIndices,
         string[] sortTexts,
-        int[]? sortedPermutation,
         Dictionary<string, long[]> facetColumns,
         SearchTokenization tokenization,
         int documentCount,
@@ -163,9 +159,7 @@ public sealed class IndexSnapshot
         WordEnds = wordEnds;
         WordLengths = wordLengths;
         PostingCounts = postingCounts;
-        _bigramWordIndices = bigramWordIndices;
         _sortTexts = sortTexts;
-        _sortedPermutation = sortedPermutation;
         FacetColumns = facetColumns;
         Tokenization = tokenization;
         DocumentCount = documentCount;
