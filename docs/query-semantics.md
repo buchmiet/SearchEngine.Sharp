@@ -99,7 +99,7 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
 | `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
 | `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
-| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`) |
+| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`); a glob `?` matches one cluster (`caf?` matches a decomposed `café`) |
 
 Indexed text and queries are folded the same way. Both are split at their separators as written, and each token
 or term is then folded on its own: composition (or accent removal), case folding, the per-character lowercase
@@ -245,7 +245,11 @@ A term containing `*` or `?` is matched as a glob against whole indexed tokens
 (anchored at both ends):
 
 - `*`: zero or more characters; consecutive `*` collapse into one
-- `?`: exactly one character
+- `?`: exactly one character of the text as a reader sees it: one code point (an emoji
+  written as a surrogate pair is one, and so is a lone surrogate), or one extended
+  grapheme cluster with `UnicodeMatching.GraphemeBoundaries` (a decomposed `é` or a
+  ZWJ emoji family is one). `*` likewise covers whole code points or clusters, and a
+  match never starts or ends inside one
 - any other character: literal (after lowercasing)
 
 Examples against an index containing tokens `report`, `reporting`, `log`:
@@ -257,7 +261,7 @@ Examples against an index containing tokens `report`, `reporting`, `log`:
 | `l?g` | `log` |
 | `?*?` | any token of length ≥ 2 |
 | `*` | every document |
-| `?` | any single-character token |
+| `?` | any token of one character (one code point, or one grapheme cluster with `GraphemeBoundaries`) |
 
 Limits and edge cases:
 

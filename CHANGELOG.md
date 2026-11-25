@@ -90,6 +90,10 @@ Changed.
   preset. In a preset made by `SearchTokenization.Create` with only one of them, that one splits terms like a space
   and the other is part of its term. Such presets used to throw `ArgumentOutOfRangeException` for `(a) b` or leave
   `NOT` unapplied in `NOT (a b)`. `Default` and `FileMask` are unchanged.
+- A glob `?` matches one code point instead of one UTF-16 code unit, so `?.txt` matches a name made of one emoji and
+  `.txt`, which used to need `??.txt`. With `UnicodeMatching.GraphemeBoundaries`, `?` matches one grapheme cluster
+  (`caf?.txt` matches a decomposed `café.txt`). A `*` and a `Within` match no longer start or end between the two
+  halves of a surrogate pair.
 - Creating an `IndexUpdater` publishes an empty snapshot with its preset, and the providers registered by
   `AddSearchEngine` and `AddKeyedSearchEngine` start with an empty snapshot of the registered preset. Until the
   first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,

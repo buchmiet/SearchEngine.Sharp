@@ -2,9 +2,9 @@ using System.Globalization;
 
 namespace SearchEngine.Sharp.Tests;
 
-// GraphemeBoundaryMap walks a word once and answers every boundary test from that walk. It must answer exactly like
+// TextUnitBoundaries walks a word once for its grapheme clusters and answers every boundary test from that walk. It must answer exactly like
 // the implementation it replaced, which walked the word from its start for every test (kept below as the reference).
-public class GraphemeBoundaryMapTests
+public class TextUnitBoundariesTests
 {
     private static readonly string[] Pool =
     [
@@ -74,7 +74,7 @@ public class GraphemeBoundaryMapTests
     // Positions are tested out of order, as a glob that backtracks does.
     private static bool[] Boundaries(string word)
     {
-        var map = new GraphemeBoundaryMap(word, word.Length < GraphemeBoundaryMap.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        var map = new TextUnitBoundaries(word, graphemeClusters: true, word.Length < TextUnitBoundaries.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
         try
         {
             var result = new bool[word.Length + 1];
@@ -91,7 +91,7 @@ public class GraphemeBoundaryMapTests
     }
 
     [Test]
-    public async Task IndexOfOnGraphemeBoundaries_FindsTheSameOccurrenceAsTheWalkFromTheStart()
+    public async Task IndexOf_WithClusters_FindsTheSameOccurrenceAsTheWalkFromTheStart()
     {
         var random = new Random(11);
         var mismatches = new List<string>();
@@ -100,7 +100,7 @@ public class GraphemeBoundaryMapTests
             int start = random.Next(word.Length);
             string value = word.Substring(start, random.Next(1, Math.Min(6, word.Length - start) + 1));
             int expected = ReferenceIndexOf(word, value);
-            int actual = TextFolder.IndexOfOnGraphemeBoundaries(word, value);
+            int actual = TextUnitBoundaries.IndexOf(word, value, graphemeClusters: true);
             if (actual != expected)
                 mismatches.Add($"{Escape(value)} in {Escape(word)}: {actual}, expected {expected}");
         }

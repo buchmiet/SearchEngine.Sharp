@@ -78,17 +78,17 @@ internal static class QueryMatcher
     internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
     {
         int minLength = GlobMatcher.MinMatchLength(pattern);
-        bool hasStar = pattern.Contains('*');
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
+        int maxLength = GlobMatcher.MaxMatchLength(pattern, graphemeBoundaries);
         var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
         if (!shape.IsSpecialized)
-            return MatchGlobGeneral(pattern, minLength, hasStar, graphemeBoundaries, qc, snapshot);
+            return MatchGlobGeneral(pattern, minLength, maxLength, graphemeBoundaries, qc, snapshot);
 
         var result = qc.RentEmptyBitSet();
         var wordLengths = snapshot.WordLengths.AsSpan();
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
         {
-            if (!hasStar && wordLengths[wordIndex] != pattern.Length)
+            if (wordLengths[wordIndex] > maxLength)
                 continue;
 
             if (shape.IsMatch(snapshot.WordAt(wordIndex)))
@@ -102,7 +102,7 @@ internal static class QueryMatcher
     // slower for general patterns (BenchmarkDotNet, 100k documents, "p?rt*on"). Most words are rejected after one
     // character here, so the words are sliced from spans hoisted out of the loop rather than through
     // IndexSnapshot.WordAt, which measured about 10% slower on this loop.
-    private static FastBitSet MatchGlobGeneral(string pattern, int minLength, bool hasStar, bool graphemeBoundaries, QueryContext qc, IndexSnapshot snapshot)
+    private static FastBitSet MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
         var wordLengths = snapshot.WordLengths.AsSpan();
@@ -111,7 +111,7 @@ internal static class QueryMatcher
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
         {
             int wordLength = wordLengths[wordIndex];
-            if (!hasStar && wordLength != pattern.Length)
+            if (wordLength > maxLength)
                 continue;
 
             if (GlobMatcher.IsWholeWordMatch(pattern, words.Slice(wordEnds[wordIndex] - wordLength, wordLength), graphemeBoundaries))
@@ -121,9 +121,10 @@ internal static class QueryMatcher
         return result;
     }
 
-    // Finds target inside word with one vectorized IndexOf. With UnicodeMatching.GraphemeBoundaries a match must start and end on grapheme cluster boundaries
-    // (TextFolder.IndexOfOnGraphemeBoundaries). Also used by NameMatcher and by *x* globs (GlobMatcher.Shape).
+    // Finds target inside word with a vectorized IndexOf; the match starts and ends on unit boundaries: code points, or
+    // grapheme clusters with UnicodeMatching.GraphemeBoundaries (TextUnitBoundaries.IndexOf). Also used by NameMatcher
+    // and by *x* globs (GlobMatcher.Shape).
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)
-        => (graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, target) : word.IndexOf(target)) >= 0;
+        => TextUnitBoundaries.IndexOf(word, target, graphemeBoundaries) >= 0;
 }

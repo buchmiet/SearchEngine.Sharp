@@ -54,9 +54,10 @@ public enum UnicodeMatching
     /// <summary>
     /// Matches must not split an extended grapheme cluster (UAX #29): a <see cref="WordMatchMethod.Within"/> match
     /// starts and ends on cluster boundaries, and so does every place where a glob <c>*</c> or <c>?</c> meets
-    /// literal text. <c>cafe</c> and <c>cafe*</c> do not match a decomposed <c>café</c>, and one emoji (or
-    /// emoji followed by <c>*</c>) does not match inside a ZWJ sequence. Exact matches without wildcards are whole
-    /// tokens and need no check.
+    /// literal text, and a glob <c>?</c> matches one whole cluster instead of one code point. <c>cafe</c> and
+    /// <c>cafe*</c> do not match a decomposed <c>café</c> while <c>caf?</c> does, and one emoji (or emoji followed by
+    /// <c>*</c>) does not match inside a ZWJ sequence. Exact matches without wildcards are whole tokens and need no
+    /// check.
     /// </summary>
     GraphemeBoundaries = 8,
 }
@@ -321,72 +322,52 @@ internal static class TextFolder
 
         return sb?.ToString() ?? text;
     }
-
-    /// <summary>
-    /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
-    /// extended grapheme cluster boundaries, or -1: the substring match of <see cref="UnicodeMatching.GraphemeBoundaries"/>
-    /// for <see cref="WordMatchMethod.Within"/> and <c>*value*</c> globs.
-    /// </summary>
-    internal static int IndexOfOnGraphemeBoundaries(ReadOnlySpan<char> word, ReadOnlySpan<char> value)
-    {
-        int index = word.IndexOf(value);
-        if (index < 0)
-            return -1;
-
-        var boundaries = new GraphemeBoundaryMap(word, word.Length < GraphemeBoundaryMap.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
-        try
-        {
-            while (index >= 0 && !(boundaries.IsBoundary(index) && boundaries.IsBoundary(index + value.Length)))
-            {
-                int next = word[(index + 1)..].IndexOf(value);
-                index = next < 0 ? -1 : index + 1 + next;
-            }
-
-            return index;
-        }
-        finally
-        {
-            boundaries.Dispose();
-        }
-    }
 }
 
 /// <summary>
-/// The extended grapheme cluster boundaries (UAX #29) of one word. The first test that cannot be answered from the two
-/// characters around the position finds all boundaries in one forward walk; every later test reads that table, so
-/// testing many positions costs one walk instead of one walk per test.
+/// The boundaries of the units of user text in one word: extended grapheme clusters (UAX #29) under
+/// <see cref="UnicodeMatching.GraphemeBoundaries"/>, code points otherwise (a surrogate pair is one unit, a lone
+/// surrogate is one too). A glob <c>?</c> matches one unit, and a match never starts or ends inside one.
 /// </summary>
-/// <remarks>Not copied once used (the table and its state live in the instance), and not declared in a
+/// <remarks>For clusters, the first test that cannot be answered from the two characters around the position finds all
+/// boundaries in one forward walk; every later test reads that table, so testing many positions costs one walk instead
+/// of one walk per test. Not copied once used (the table and its state live in the instance), and not declared in a
 /// <see langword="using"/> statement, whose variable is read-only: call <see cref="Dispose"/> in a
 /// <see langword="finally"/> block.</remarks>
-internal ref struct GraphemeBoundaryMap
+internal ref struct TextUnitBoundaries
 {
-    /// <summary>Words shorter than this get their table on the stack from the caller; longer ones rent it.</summary>
+    /// <summary>Words shorter than this get their cluster table on the stack from the caller; longer ones rent it.</summary>
     internal const int MaxStackLength = 256;
 
     private readonly ReadOnlySpan<char> _word;
+    private readonly bool _graphemeClusters;
     private Span<bool> _isBoundary;
     private bool[]? _rented;
     private bool _built;
 
     /// <param name="word">The word.</param>
+    /// <param name="graphemeClusters">True for clusters, false for code points.</param>
     /// <param name="buffer">Room for <c>word.Length + 1</c> flags, or empty to rent it from the shared pool when
-    /// needed.</param>
-    internal GraphemeBoundaryMap(ReadOnlySpan<char> word, Span<bool> buffer)
+    /// needed. Code points need none.</param>
+    internal TextUnitBoundaries(ReadOnlySpan<char> word, bool graphemeClusters, Span<bool> buffer)
     {
         _word = word;
+        _graphemeClusters = graphemeClusters;
         _isBoundary = buffer;
     }
 
-    /// <summary>True when <paramref name="position"/> (0 to the word's length) is a cluster boundary.</summary>
+    /// <summary>True when <paramref name="position"/> (0 to the word's length) is a unit boundary.</summary>
     internal bool IsBoundary(int position)
     {
         if (position <= 0 || position >= _word.Length)
             return true;
 
-        // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
         char before = _word[position - 1];
         char after = _word[position];
+        if (!_graphemeClusters)
+            return !(char.IsHighSurrogate(before) && char.IsLowSurrogate(after));
+
+        // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
         if (char.IsAscii(before) && char.IsAscii(after))
             return before != '\r' || after != '\n';
 
@@ -394,6 +375,17 @@ internal ref struct GraphemeBoundaryMap
             Build();
 
         return _isBoundary[position];
+    }
+
+    /// <summary>The end of the unit that starts at <paramref name="position"/>, which is a boundary before the end of
+    /// the word.</summary>
+    internal int Next(int position)
+    {
+        int next = position + 1;
+        while (next < _word.Length && !IsBoundary(next))
+            next++;
+
+        return next;
     }
 
     private void Build()
@@ -416,5 +408,35 @@ internal ref struct GraphemeBoundaryMap
             ArrayPool<bool>.Shared.Return(_rented);
 
         _rented = null;
+    }
+
+    /// <summary>
+    /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
+    /// unit boundaries, or -1: the substring match of <see cref="WordMatchMethod.Within"/> and of <c>*value*</c> globs.
+    /// </summary>
+    internal static int IndexOf(ReadOnlySpan<char> word, ReadOnlySpan<char> value, bool graphemeClusters)
+    {
+        int index = word.IndexOf(value);
+
+        // Without clusters only a value that starts with a low surrogate or ends with a high one can split a pair.
+        if (index < 0 || value.IsEmpty || (!graphemeClusters && !char.IsLowSurrogate(value[0]) && !char.IsHighSurrogate(value[^1])))
+            return index;
+
+        var boundaries = new TextUnitBoundaries(word, graphemeClusters,
+            graphemeClusters && word.Length < MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        try
+        {
+            while (index >= 0 && !(boundaries.IsBoundary(index) && boundaries.IsBoundary(index + value.Length)))
+            {
+                int next = word[(index + 1)..].IndexOf(value);
+                index = next < 0 ? -1 : index + 1 + next;
+            }
+
+            return index;
+        }
+        finally
+        {
+            boundaries.Dispose();
+        }
     }
 }

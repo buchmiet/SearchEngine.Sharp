@@ -188,7 +188,8 @@ public class UnicodeMatchingTests
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf*\u0301s", []);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "c*e\u0301s", [5]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "cafe?", []);
-        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf??", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf?", [1, 2]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf??", [5]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*a*e*", [2]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "?a*e\u0301*", [1, 5]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, Man + "*", [4]);
