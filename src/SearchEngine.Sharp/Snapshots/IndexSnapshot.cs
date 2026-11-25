@@ -217,15 +217,7 @@ public sealed class IndexSnapshot
         for (int i = 0; i < computed.Length; i++)
             computed[i] = i;
 
-        var naturalSortKeys = new string[_sortTexts.Length];
-        for (int i = 0; i < _sortTexts.Length; i++)
-            naturalSortKeys[i] = NaturalSortKeyBuilder.Build(_sortTexts[i]);
-
-        Array.Sort(computed, (a, b) =>
-        {
-            int cmp = string.Compare(naturalSortKeys[a], naturalSortKeys[b], StringComparison.Ordinal);
-            return cmp != 0 ? cmp : RecordIds[a].CompareTo(RecordIds[b]); // stable tie-break by ID
-        });
+        NaturalOrder.Sort(computed, _sortTexts, RecordIds);
 
         Interlocked.Increment(ref _sortedPermutationBuildCount);
         return computed;

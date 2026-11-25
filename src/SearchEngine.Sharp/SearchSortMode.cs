@@ -14,8 +14,8 @@ public enum SearchSortMode
 
     /// <summary>
     /// Results are sorted in natural order of <see cref="IndexedEntry.SortText"/>, so <c>file2</c> comes before
-    /// <c>file10</c>; see <see cref="Sorting.NaturalSortKeyBuilder"/> for the rules. The order of entries with equal
-    /// keys is not specified.
+    /// <c>file10</c>; see <see cref="Sorting.NaturalSortKeyBuilder"/> for the rules. Entries whose sort texts compare
+    /// equal come in ascending id order, so the same query on the same entries always returns the same order.
     /// </summary>
     NaturalSortAscending = 1
 }

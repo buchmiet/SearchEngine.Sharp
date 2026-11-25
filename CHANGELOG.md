@@ -81,6 +81,9 @@ Changed.
   digits of other scripts count with their value. `NaturalSortKeyBuilder.Build` returns keys in a new, shorter
   layout; keys stored by an earlier version do not compare with new ones. The order is described in
   [Result ordering](docs/query-semantics.md#result-ordering).
+- `NaturalSortAscending` returned entries with equal sort texts in an unspecified order when the query matched at
+  most 80% of the documents, and in id order otherwise, so the same entries could come out in a different order
+  from one query to the next. Equal sort texts now always come in ascending id order.
 - `AddSearchEngine(initialEntries, ...)` and `AddKeyedSearchEngine(key, initialEntries, ...)` published a first
   snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
   or batch update published an index without them. The updater now starts from the same entries and the same

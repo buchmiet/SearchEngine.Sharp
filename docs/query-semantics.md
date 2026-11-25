@@ -341,7 +341,9 @@ The natural order compares `SortText` part by part, the way file managers order 
 - When every part of one text equals the matching part of the other and one text has
   more parts, the one with fewer parts comes first: `a` before `a 2`.
 - Texts that differ only in case, in leading zeros or in which separator they use are
-  equal: `File2` and `file2`, `007` and `7`, `a_b` and `a b`.
+  equal: `File2` and `file2`, `007` and `7`, `a_b` and `a b`. Equal texts come in
+  ascending id order, whatever the number of hits and whether a filter is applied, so
+  the same query on the same entries always returns the same order.
 
 Examples, in ascending order:
 
