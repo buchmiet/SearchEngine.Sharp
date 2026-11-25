@@ -37,7 +37,7 @@ Requires .NET 11. The public API only gains members; no existing member was chan
   than `MaxStaleness / (1 + AdaptiveMultiplier)`. `StrictMaxStaleness = true` restores the old schedule.
 - The bigram index used by `WordMatchMethod.Within` is built on the first `Within` query against a snapshot
   instead of in every build. Builds are faster, and the first `Within` query after each publish pays the cost
-  (about 0.17 s at 1 million file names). Concurrent first callers share one build.
+  (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
@@ -69,7 +69,8 @@ Requires .NET 11. The public API only gains members; no existing member was chan
 ### Performance
 
 - At 1 million names on x64: suffix and infix globs 3 to 5 times faster (`*.pdf` on whole file names 35 ms to
-  7 ms), `Within` 1.2 to 4 times faster, snapshot build allocations 812 MB to 343 MB and peak memory 1.3 GB to
+  7 ms), `Within` 1.2 to 1.8 times faster for terms of three or more characters and about 4 times for one
+  character, snapshot build allocations 812 MB to 343 MB and peak memory 1.3 GB to
   0.8 GB for file names with facets. Measurements and how to reproduce them: [docs/performance.md](docs/performance.md).
 
 ## [0.5.6] - 2026-08-16
