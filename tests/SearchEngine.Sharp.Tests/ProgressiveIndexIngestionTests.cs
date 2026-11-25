@@ -28,9 +28,11 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 11),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 500,
-                MinInterval = TimeSpan.FromMilliseconds(50),
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 500,
+                    MinInterval = TimeSpan.FromMilliseconds(50),
+                },
             });
 
         await Assert.That(result.CompletedSuccessfully).IsTrue();
@@ -60,8 +62,7 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 3, delayPerEntry: TimeSpan.FromMilliseconds(1)),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.FixedBatch,
-                FixedBatchSize = 400,
+                Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 400 },
             },
             onPublished: evt =>
             {
@@ -87,9 +88,7 @@ public class ProgressiveIndexIngestionTests
             feed,
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.TimeDebounce,
-                MinInterval = TimeSpan.FromMilliseconds(200),
-                FixedBatchSize = 50_000,
+                Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(200) },
             },
             cancellationToken: cts.Token);
 
@@ -115,9 +114,7 @@ public class ProgressiveIndexIngestionTests
             feed,
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.TimeDebounce,
-                MinInterval = TimeSpan.FromMilliseconds(500),
-                FixedBatchSize = 50_000,
+                Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(500) },
                 FlushOnCancellation = false,
             },
             cancellationToken: cts.Token);
@@ -176,10 +173,12 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 99),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 750,
-                MinInterval = TimeSpan.FromMilliseconds(25),
-                AdaptiveMultiplier = 2.0,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 750,
+                    MinInterval = TimeSpan.FromMilliseconds(25),
+                    RebuildMultiplier = 2.0,
+                },
             });
 
         queryCts.Cancel();
@@ -203,8 +202,7 @@ public class ProgressiveIndexIngestionTests
             FacetedPathFeed.EnumerateAsync(count, seed: 17),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.FixedBatch,
-                FixedBatchSize = 300,
+                Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 300 },
             },
             onPublished: _ =>
             {
@@ -228,12 +226,14 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 42),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 2_000,
-                GrowthAwareBatchCap = true,
-                // Only the batch cap may publish: timer publishes depend on machine load.
-                MaxStaleness = TimeSpan.FromHours(1),
-                MinTimerPublishBatch = int.MaxValue,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 2_000,
+                    GrowthAwareBatchCap = true,
+                    // Only the batch cap may publish: timer publishes depend on machine load.
+                    MaxStaleness = TimeSpan.FromHours(1),
+                    MinTimerPublishBatch = int.MaxValue,
+                },
             });
 
         var (_, _, ingestionFixed) = Create();
@@ -241,12 +241,14 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 42),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 2_000,
-                GrowthAwareBatchCap = false,
-                // Only the batch cap may publish: timer publishes depend on machine load.
-                MaxStaleness = TimeSpan.FromHours(1),
-                MinTimerPublishBatch = int.MaxValue,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 2_000,
+                    GrowthAwareBatchCap = false,
+                    // Only the batch cap may publish: timer publishes depend on machine load.
+                    MaxStaleness = TimeSpan.FromHours(1),
+                    MinTimerPublishBatch = int.MaxValue,
+                },
             });
 
         await Assert.That(growth.CompletedSuccessfully).IsTrue();
@@ -266,7 +268,7 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestion.IngestAsync(
             SyntheticPathFeed.EnumerateAsync(1_000, seed: 5),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 250 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 250 } },
             onPublished: e => rebuildDurations.Enqueue(e.RebuildDuration));
 
         await Assert.That(rebuildDurations.Count).IsEqualTo(4);
@@ -342,12 +344,14 @@ public class ProgressiveIndexIngestionTests
             SlowFeed(count: 600, every: 10, delay: TimeSpan.FromMilliseconds(15)),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 1_000_000,
-                MaxStaleness = TimeSpan.FromMilliseconds(30),
-                MinInterval = TimeSpan.Zero,
-                MinTimerPublishBatch = 1,
-                StrictMaxStaleness = strict,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 1_000_000,
+                    MaxStaleness = TimeSpan.FromMilliseconds(30),
+                    MinInterval = TimeSpan.Zero,
+                    MinTimerPublishBatch = 1,
+                    StrictMaxStaleness = strict,
+                },
             },
             onPublished: e => publishEnds.Add((System.Diagnostics.Stopwatch.GetTimestamp(), e.RebuildDuration)));
 
@@ -395,7 +399,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             feed.EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = batch },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = batch } },
             onPublished: where == PublishFault.OnPublishedCallback ? _ => failOnceScannerIsBlocked() : null);
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<InvalidOperationException>();
@@ -424,7 +428,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } });
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
@@ -451,7 +455,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } });
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
@@ -489,7 +493,7 @@ public class ProgressiveIndexIngestionTests
 
             var ingest = ingestion.IngestAsync(
                 Feed(),
-                new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 },
+                new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } },
                 cancellationToken: cts.Token);
 
             if (callerCancelsRightAfter)
@@ -572,7 +576,7 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestion.IngestAsync(
             new CountingFeed(1_000).EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 100 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 100 } },
             onPublished: e =>
             {
                 events.Add(e);
@@ -615,7 +619,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } },
             onPublished: e => firstPublish.TrySetResult(e.IndexedDocumentCount),
             cancellationToken: cts.Token);
 
@@ -654,7 +658,7 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestion.IngestAsync(
             new CountingFeed(count).EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.PerEntry, ChannelCapacity = 1 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.PerEntry(), ChannelCapacity = 1 },
             progress).WaitAsync(TestTimeout);
 
         await Assert.That(reports).IsEqualTo(count);
@@ -684,7 +688,7 @@ public class ProgressiveIndexIngestionTests
         // this thread: start it on the pool.
         var ingest = Task.Run(() => ingestion.IngestAsync(
             feed.EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 10, ChannelCapacity = 50 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 10 }, ChannelCapacity = 50 },
             cancellationToken: cts.Token));
 
         feed.WaitUntilYielded(10 + 50 + 1, TestTimeout);
@@ -772,10 +776,12 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 20,
-                GrowthAwareBatchCap = false,
-                MinTimerPublishBatch = 1,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 20,
+                    GrowthAwareBatchCap = false,
+                    MinTimerPublishBatch = 1,
+                },
             },
             onPublished: e => publishes.Enqueue(e.EntryCount));
 
@@ -831,10 +837,12 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 20,
-                GrowthAwareBatchCap = false,
-                StrictMaxStaleness = strict,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 20,
+                    GrowthAwareBatchCap = false,
+                    StrictMaxStaleness = strict,
+                },
             },
             onPublished: e => publishes.Enqueue(e.EntryCount));
 

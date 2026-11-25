@@ -80,8 +80,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
     /// of this call.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
-    /// thrown before the scan starts.</exception>
     /// <exception cref="ArgumentException">The scan yields a <see langword="null"/> entry. The returned task faults
     /// with it.</exception>
     /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
@@ -97,7 +95,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     {
         ArgumentNullException.ThrowIfNull(entries);
         options ??= new IngestPublishOptions();
-        options.Validate();
         return IngestCoreAsync(
             entries,
             static pair => IndexedEntry.FromText(pair.Key, pair.Value, nameof(entries)),
@@ -120,8 +117,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
     /// of this call.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
-    /// thrown before the scan starts.</exception>
     /// <exception cref="ArgumentException">The scan yields a <see langword="null"/> entry. The returned task faults
     /// with it.</exception>
     /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
@@ -137,7 +132,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     {
         ArgumentNullException.ThrowIfNull(entries);
         options ??= new IngestPublishOptions();
-        options.Validate();
         return IngestCoreAsync(
             entries,
             static pair => IndexedEntry.Require(pair.Key, pair.Value, nameof(entries)),
@@ -277,7 +271,12 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         long lastPublishTimestamp = _timeProvider.GetTimestamp();
         TimeSpan lastRebuildDuration = TimeSpan.Zero;
         bool flushOnCancel = options.FlushOnCancellation;
-        int batchCap = options.FixedBatchSize;
+        int batchCap = options.Policy switch
+        {
+            IngestPublishPolicy.Adaptive adaptive => adaptive.BatchCap,
+            IngestPublishPolicy.FixedBatch fixedBatch => fixedBatch.BatchSize,
+            IngestPublishPolicy.TimeDebounce or IngestPublishPolicy.PerEntry => int.MaxValue,
+        };
 
         // One outstanding read survives timer wake-ups, so a timer publish never leaves an orphaned waiter behind.
         Task<bool>? pendingRead = null;
@@ -442,20 +441,15 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         return options.Policy switch
         {
             IngestPublishPolicy.PerEntry => bufferCount >= 1,
-            IngestPublishPolicy.FixedBatch => bufferCount >= options.FixedBatchSize,
+            IngestPublishPolicy.FixedBatch or IngestPublishPolicy.Adaptive => bufferCount >= batchCap,
             IngestPublishPolicy.TimeDebounce => false,
-            IngestPublishPolicy.Adaptive => bufferCount >= batchCap,
-            _ => false,
         };
     }
 
     private void UpdateBatchCap(IngestPublishOptions options, ref int batchCap)
     {
-        if (options.Policy != IngestPublishPolicy.Adaptive || !options.GrowthAwareBatchCap)
-            return;
-
-        int indexedCount = _updater.EntryCount;
-        batchCap = Math.Max(options.FixedBatchSize, indexedCount);
+        if (options.Policy is IngestPublishPolicy.Adaptive { GrowthAwareBatchCap: true } adaptive)
+            batchCap = Math.Max(adaptive.BatchCap, _updater.EntryCount);
     }
 
     /// <summary>
@@ -472,27 +466,38 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         if (batch.Count == 0)
             return null;
 
+        TimeSpan? maxStaleness = options.Policy switch
+        {
+            IngestPublishPolicy.Adaptive adaptive => adaptive.MaxStaleness,
+            IngestPublishPolicy.TimeDebounce debounce => debounce.MaxStaleness,
+            IngestPublishPolicy.FixedBatch fixedBatch => fixedBatch.MaxStaleness,
+            IngestPublishPolicy.PerEntry => null, // publishes every entry at once
+        };
+
+        if (maxStaleness is not { } staleAfter)
+            return null;
+
         TimeSpan sinceLastPublish = ElapsedSince(lastPublishTimestamp);
-        TimeSpan untilStale = options.MaxStaleness - ElapsedSince(batch.OldestTimestamp);
+        TimeSpan untilStale = staleAfter - ElapsedSince(batch.OldestTimestamp);
 
         // Once one rebuild takes longer than MaxStaleness, every batch is already stale when the
         // previous rebuild finishes; publishing on staleness alone then rebuilds back to back every
         // ChannelCapacity entries and total work becomes quadratic. Under Adaptive, staleness may
-        // not publish sooner than AdaptiveMultiplier x the last rebuild duration after that rebuild.
-        if (options.Policy == IngestPublishPolicy.Adaptive && !options.StrictMaxStaleness)
-            untilStale = Max(untilStale, lastRebuildDuration * options.AdaptiveMultiplier - sinceLastPublish);
+        // not publish sooner than RebuildMultiplier x the last rebuild duration after that rebuild.
+        if (options.Policy is IngestPublishPolicy.Adaptive { StrictMaxStaleness: false } paced)
+            untilStale = Max(untilStale, lastRebuildDuration * paced.RebuildMultiplier - sinceLastPublish);
 
         if (untilStale <= TimeSpan.Zero)
             return TimeSpan.Zero;
 
         return options.Policy switch
         {
-            IngestPublishPolicy.TimeDebounce => EarlierOf(untilStale, options.MinInterval - sinceLastPublish),
-            IngestPublishPolicy.Adaptive when batch.Count >= options.MinTimerPublishBatch => EarlierOf(
+            IngestPublishPolicy.TimeDebounce debounce => EarlierOf(untilStale, debounce.MinInterval - sinceLastPublish),
+            IngestPublishPolicy.Adaptive adaptive when batch.Count >= adaptive.MinTimerPublishBatch => EarlierOf(
                 untilStale,
-                Max(options.MinInterval, lastRebuildDuration * options.AdaptiveMultiplier) - sinceLastPublish),
+                Max(adaptive.MinInterval, lastRebuildDuration * adaptive.RebuildMultiplier) - sinceLastPublish),
             IngestPublishPolicy.Adaptive => untilStale,
-            _ => null, // FixedBatch and PerEntry arm no timer.
+            IngestPublishPolicy.FixedBatch or IngestPublishPolicy.PerEntry => null, // no timer
         };
 
         static TimeSpan EarlierOf(TimeSpan untilStale, TimeSpan untilPace)

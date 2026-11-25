@@ -18,37 +18,38 @@ internal static class IngestionPolicyBenchmark
 
         RunScenario("per-entry", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
-            Policy = IngestPublishPolicy.PerEntry,
+            Policy = new IngestPublishPolicy.PerEntry(),
         }, runOnlyIfSmall: true);
 
         RunScenario("fixed-2k", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
-            Policy = IngestPublishPolicy.FixedBatch,
-            FixedBatchSize = 2_000,
+            Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 2_000 },
         });
 
         RunScenario("debounce-100ms", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
-            Policy = IngestPublishPolicy.TimeDebounce,
-            MinInterval = TimeSpan.FromMilliseconds(100),
-            FixedBatchSize = 50_000,
+            Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(100) },
         });
 
         RunScenario("adaptive", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
-            Policy = IngestPublishPolicy.Adaptive,
-            FixedBatchSize = 2_000,
-            MinInterval = TimeSpan.FromMilliseconds(100),
-            AdaptiveMultiplier = 2.0,
+            Policy = new IngestPublishPolicy.Adaptive
+            {
+                BatchCap = 2_000,
+                MinInterval = TimeSpan.FromMilliseconds(100),
+                RebuildMultiplier = 2.0,
+            },
         });
 
         RunScenario("adaptive-fixed-2k", documentCount, seed, scanDelayMs, new IngestPublishOptions
         {
-            Policy = IngestPublishPolicy.Adaptive,
-            FixedBatchSize = 2_000,
-            MinInterval = TimeSpan.FromMilliseconds(100),
-            AdaptiveMultiplier = 2.0,
-            GrowthAwareBatchCap = false,
+            Policy = new IngestPublishPolicy.Adaptive
+            {
+                BatchCap = 2_000,
+                MinInterval = TimeSpan.FromMilliseconds(100),
+                RebuildMultiplier = 2.0,
+                GrowthAwareBatchCap = false,
+            },
         });
 
         Console.WriteLine();

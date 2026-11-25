@@ -23,8 +23,8 @@ Changed.
   [Unicode matching](docs/query-semantics.md#unicode-matching).
 - `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` builds a facet bag without an intermediate
   dictionary. A duplicate or null name throws `ArgumentException`.
-- `IngestPublishOptions.StrictMaxStaleness` (default `false`) brings back the staleness behaviour of 0.5.6 (see
-  Changed).
+- `IngestPublishPolicy.Adaptive.StrictMaxStaleness` (default `false`) brings back the staleness behaviour of 0.5.6
+  (see Changed).
 
 ### Changed
 
@@ -35,11 +35,38 @@ Changed.
 - The target framework is `net11.0` and the dependency `Microsoft.Extensions.DependencyInjection` is 11.0.0.
   Applications on .NET 10 stay on 0.5.6. Moving to .NET 11 needs no source changes.
 - Progressive ingestion with the `Adaptive` policy: a publish triggered by `MaxStaleness` also waits
-  `AdaptiveMultiplier` times the last rebuild duration after that rebuild. Large scans no longer degrade into
+  `RebuildMultiplier` times the last rebuild duration after that rebuild. Large scans no longer degrade into
   back-to-back full rebuilds once one rebuild takes longer than `MaxStaleness` (a 1 million file scan made 57 to
   74 rebuilds and allocated about 30 GB; it now makes 13 to 18). The worst-case staleness is
-  `max(MaxStaleness, (1 + AdaptiveMultiplier) × rebuild duration)`; nothing changes while a rebuild takes less
-  than `MaxStaleness / (1 + AdaptiveMultiplier)`. `StrictMaxStaleness = true` restores the old schedule.
+  `max(MaxStaleness, (1 + RebuildMultiplier) × rebuild duration)`; nothing changes while a rebuild takes less
+  than `MaxStaleness / (1 + RebuildMultiplier)`. `StrictMaxStaleness = true` restores the old schedule.
+- `IngestPublishPolicy` is a closed record hierarchy instead of an enum, and each policy carries only its own
+  settings: `IngestPublishPolicy.Adaptive`, `TimeDebounce`, `FixedBatch` and `PerEntry`. `IngestPublishOptions`
+  keeps `Policy`, `ChannelCapacity` and `FlushOnCancellation`; the other properties moved to the policies.
+  `FixedBatchSize` is `Adaptive.BatchCap` or `FixedBatch.BatchSize`, and `AdaptiveMultiplier` is
+  `Adaptive.RebuildMultiplier`. `TimeDebounce` has no batch size: it never published by size, and setting
+  `FixedBatchSize` for it did nothing. `PerEntry` has no settings. `IngestPublishOptions` and the policies are
+  records, so `with` works on them, and every setting is checked when it is set: an invalid value throws
+  `ArgumentOutOfRangeException` naming the property where it is set, not when `IngestAsync` starts. A `switch`
+  over the four policies needs no default arm.
+
+  ```csharp
+  // 0.5.6
+  var options = new IngestPublishOptions
+  {
+      Policy = IngestPublishPolicy.FixedBatch,
+      FixedBatchSize = 400,
+      MaxStaleness = TimeSpan.FromSeconds(2),
+      ChannelCapacity = 1_000,
+  };
+
+  // 0.6.0
+  var options = new IngestPublishOptions
+  {
+      Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 400, MaxStaleness = TimeSpan.FromSeconds(2) },
+      ChannelCapacity = 1_000,
+  };
+  ```
 - The bigram index used by `WordMatchMethod.Within` is built on the first `Within` query against a snapshot
   instead of in every build. Builds are faster, and the first `Within` query after each publish pays the cost
   (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
@@ -100,6 +127,8 @@ Changed.
 - `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
   updater, a `Published` or `onPublished` handler, or the progress callback) while the scanner was blocked on a
   full channel. It now cancels the scanner and faults with the original exception.
+- A NaN or infinite `AdaptiveMultiplier` was accepted and made the ingestion fault at its first timer publish. The
+  multiplier, now `IngestPublishPolicy.Adaptive.RebuildMultiplier`, rejects it with `ArgumentOutOfRangeException`.
 - A progress report of `ProgressiveIndexIngestion` could count one entry more in `EntriesPublished` than in
   `EntriesAccepted`: the scanner counted an entry after the publisher could already take and publish it. An entry
   is now counted before it enters the channel.

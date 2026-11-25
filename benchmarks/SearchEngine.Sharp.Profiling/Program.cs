@@ -142,7 +142,7 @@ static class FindRun
             ["label"] = a.Opt("label"),
             ["variant"] = variant,
             ["policy"] = variant is "commander-policy" or "commander-single-pass" ? a.Opt("policy") ?? "adaptive" : null,
-            ["batch"] = variant is "commander-policy" or "commander-single-pass" ? opts.FixedBatchSize : null,
+            ["batch"] = variant is "commander-policy" or "commander-single-pass" ? a.Int("batch", 2_000) : null,
             ["query"] = req.NamePattern,
             ["regex"] = req.UseRegex,
             ["hits"] = hits,
@@ -188,18 +188,24 @@ static class FindRun
         int batch = a.Int("batch", 2_000);
         return (a.Opt("policy") ?? "adaptive") switch
         {
-            "adaptive" => new IngestPublishOptions { FixedBatchSize = batch },
-            "fixed" => new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = batch },
+            "adaptive" => new IngestPublishOptions { Policy = new IngestPublishPolicy.Adaptive { BatchCap = batch } },
+            "fixed" => new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = batch } },
             "debounce" => new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.TimeDebounce, FixedBatchSize = batch,
-                MinInterval = TimeSpan.FromMilliseconds(a.Int("interval", 250)),
-                MaxStaleness = TimeSpan.FromMilliseconds(Math.Max(a.Int("interval", 250) * 2, 1000)),
+                Policy = new IngestPublishPolicy.TimeDebounce
+                {
+                    MinInterval = TimeSpan.FromMilliseconds(a.Int("interval", 250)),
+                    MaxStaleness = TimeSpan.FromMilliseconds(Math.Max(a.Int("interval", 250) * 2, 1000)),
+                },
             },
             // One publish at the end: no live results, minimum rebuild work.
             "single" => new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = int.MaxValue, MaxStaleness = TimeSpan.FromDays(1),
+                Policy = new IngestPublishPolicy.FixedBatch
+                {
+                    BatchSize = int.MaxValue,
+                    MaxStaleness = TimeSpan.FromDays(1),
+                },
                 ChannelCapacity = 10_000,
             },
             var p => throw new ArgumentException(p),

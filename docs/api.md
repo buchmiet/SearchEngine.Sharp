@@ -277,7 +277,7 @@ Task<IngestionResult> IngestAsync(
 - The entries are added to what the updater already holds; an entry replaces the one with the same id.
 - One `IngestAsync` call per instance at a time; the task of a second concurrent call faults with
   `InvalidOperationException`.
-  Invalid options throw `ArgumentOutOfRangeException` before the scan starts.
+- Options and policies check their settings when they are set, so `IngestAsync` never receives invalid ones.
 - The scanner writes into a bounded channel and waits when it is full. Queries on the same provider are safe
   throughout.
 - `Published`, `onPublished` and `progress` run on the publisher task, not on the caller's synchronization
@@ -295,30 +295,46 @@ Task<IngestionResult> IngestAsync(
 - The task completes only after the scanner has stopped, so the scanner must observe the token it receives (an
   `async` iterator with an `[EnumeratorCancellation]` parameter does).
 
-### `IngestPublishPolicy`
-
-`Adaptive` (default), `TimeDebounce`, `FixedBatch`, `PerEntry`. When each one publishes:
-[Policies](performance.md#policies).
-
 ### `IngestPublishOptions`
 
-All properties are `init`-only.
+A `sealed record class`. Every property is `init`-only and checked when it is set.
 
 | Property | Default | Meaning |
 |---|---|---|
-| `Policy` | `Adaptive` | Publish policy |
-| `FixedBatchSize` | 2,000 | Batch size of `FixedBatch`; first batch cap of `Adaptive` |
-| `GrowthAwareBatchCap` | `true` | `Adaptive`: after each publish the batch cap becomes `max(FixedBatchSize, indexed documents)` |
-| `MinInterval` | 100 ms | Shortest time between timer publishes (`TimeDebounce`, `Adaptive`) |
-| `AdaptiveMultiplier` | 2.0 | `Adaptive`: a timer publish waits at least this many times the last rebuild duration |
-| `MinTimerPublishBatch` | 200 | `Adaptive`: fewest buffered entries for a timer publish; staleness overrides it |
-| `MaxStaleness` | 1 s | Longest an accepted entry should wait for its publish to start; see [the worst case](performance.md#maxstaleness-and-the-worst-case) |
-| `StrictMaxStaleness` | `false` | `Adaptive`: publish on staleness even right after a rebuild |
-| `ChannelCapacity` | 10,000 | Size of the queue between scanner and publisher |
+| `Policy` | `new IngestPublishPolicy.Adaptive()` | When to publish, with the policy's own settings; `null` throws `ArgumentNullException` |
+| `ChannelCapacity` | 10,000 | Size of the queue between scanner and publisher; at least 1 |
 | `FlushOnCancellation` | `true` | Publish accepted entries when the scan is cancelled |
 
-`FixedBatchSize`, `MinTimerPublishBatch` and `ChannelCapacity` must be at least 1, `MaxStaleness` positive,
-`AdaptiveMultiplier` finite and positive, and `MinInterval` not negative.
+### `IngestPublishPolicy`
+
+A closed `record class` with four nested cases. Each case is a `sealed record class` that carries only its own
+settings, with defaults. Change settings with an object initializer or `with`; an invalid value throws
+`ArgumentOutOfRangeException` naming the property, also inside `with`. No other assembly can add a case, so a
+`switch` expression over the four is exhaustive. When each case publishes:
+[Policies](performance.md#policies).
+
+```csharp
+var options = new IngestPublishOptions
+{
+    Policy = new IngestPublishPolicy.Adaptive { BatchCap = 500 },
+};
+var debounced = options with { Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(250) } };
+```
+
+| Case | Setting | Default | Meaning |
+|---|---|---|---|
+| `Adaptive` | `BatchCap` | 2,000 | Buffered entries that start a publish; lower bound of the growing cap; at least 1 |
+| | `GrowthAwareBatchCap` | `true` | After each publish the cap becomes `max(BatchCap, indexed documents)` |
+| | `MinInterval` | 100 ms | Shortest time between timer publishes; not negative |
+| | `RebuildMultiplier` | 2.0 | A timer publish waits at least this many times the last rebuild duration; finite and positive |
+| | `MinTimerPublishBatch` | 200 | Fewest buffered entries for a timer publish; staleness overrides it; at least 1 |
+| | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive; see [the worst case](performance.md#maxstaleness-and-the-worst-case) |
+| | `StrictMaxStaleness` | `false` | Publish on staleness even right after a rebuild |
+| `TimeDebounce` | `MinInterval` | 100 ms | Shortest time between publishes; not negative |
+| | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive |
+| `FixedBatch` | `BatchSize` | 2,000 | Buffered entries that start a publish; at least 1 |
+| | `MaxStaleness` | 1 s | Age of the oldest buffered entry beyond which the next arriving entry starts a publish; checked only when an entry arrives, never from a timer; positive |
+| `PerEntry` | none | | Publishes every entry |
 
 ### `IngestionProgress` (struct)
 
