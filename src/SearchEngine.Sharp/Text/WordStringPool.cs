@@ -1,14 +1,14 @@
 namespace SearchEngine.Text;
 
 /// <summary>
-/// Pool for canonicalizing word strings.
-/// Ensures the same word across multiple documents shares a single string instance.
+/// Pool that canonicalizes word strings, so the same word across multiple documents shares a single string
+/// instance.
 /// </summary>
 /// <remarks>
 /// During index build, thousands of documents may contain the same word. Without
 /// canonicalization each occurrence produces a separate string object on the heap.
 /// The pool returns the first-seen instance for any given word, so all references
-/// to, say, "apple" point to the same object, so the memory for a word is paid once
+/// to, say, "apple" point to the same object and the memory for a word is paid once,
 /// however many documents contain it.
 /// </remarks>
 internal sealed class WordStringPool

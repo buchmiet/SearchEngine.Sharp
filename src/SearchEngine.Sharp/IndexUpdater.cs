@@ -6,7 +6,7 @@ namespace SearchEngine;
 // that calls IndexSnapshotProvider.Publish. All mutating operations are serialised
 // through _rebuildGate so concurrent callers never see a partially-updated index.
 //
-// Why full rebuild on every mutation?
+// Reason for a full rebuild on every mutation:
 //   The index data structures (flat arrays, sorted word list, bigram index) do not
 //   support incremental updates: inserting or removing a word would require
 //   re-sorting and re-packing all arrays. A full rebuild is simple and correct, and it is
