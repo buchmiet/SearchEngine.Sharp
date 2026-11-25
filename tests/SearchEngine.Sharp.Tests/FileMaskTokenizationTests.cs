@@ -14,7 +14,7 @@ public class FileMaskTokenizationTests
         return (engine, updater, provider);
     }
 
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateAcceptanceIndex()
+    private static async Task<(SearchEngineSharp engine, IIndexUpdater updater)> CreateAcceptanceIndex()
     {
         var (engine, updater, provider) = CreateEngine();
         updater.RebuildFrom(new Dictionary<int, string>
@@ -25,61 +25,61 @@ public class FileMaskTokenizationTests
             [4] = "notes.txt",
         });
 
-        Assert.Equal(SearchTokenization.FileMask, provider.Current.Tokenization);
+        await Assert.That(provider.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
         return (engine, updater);
     }
 
-    [Theory]
-    [InlineData("system", new[] { 2 })]
-    [InlineData("system*", new[] { 2 })]
-    [InlineData("*.pdf", new[] { 1 })]
-    [InlineData("*system*", new[] { 2, 3 })]
-    [InlineData("*.pdf OR *.txt", new[] { 1, 4 })]
-    [InlineData("* AND NOT *.zip", new[] { 1, 2, 4 })]
-    [InlineData("*", new[] { 1, 2, 3, 4 })]
-    public void FileMask_AcceptanceQueries(string query, int[] expectedIds)
+    [Test]
+    [Arguments("system", new[] { 2 })]
+    [Arguments("system*", new[] { 2 })]
+    [Arguments("*.pdf", new[] { 1 })]
+    [Arguments("*system*", new[] { 2, 3 })]
+    [Arguments("*.pdf OR *.txt", new[] { 1, 4 })]
+    [Arguments("* AND NOT *.zip", new[] { 1, 2, 4 })]
+    [Arguments("*", new[] { 1, 2, 3, 4 })]
+    public async Task FileMask_AcceptanceQueries(string query, int[] expectedIds)
     {
-        var (engine, _) = CreateAcceptanceIndex();
+        var (engine, _) = await CreateAcceptanceIndex();
         var results = engine.Find(query, WordMatchMethod.Exact, enableOperators: true);
-        Assert.Equal(expectedIds.OrderBy(x => x), results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(expectedIds.OrderBy(x => x), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FileMask_Within_MatchesSubstringOfWholeName()
+    [Test]
+    public async Task FileMask_Within_MatchesSubstringOfWholeName()
     {
-        var (engine, _) = CreateAcceptanceIndex();
+        var (engine, _) = await CreateAcceptanceIndex();
         var results = engine.Find("port", WordMatchMethod.Within, enableOperators: false);
-        Assert.Equal(new[] { 1 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FileMask_BareSystem_DoesNotMatchSystemBackupZip()
+    [Test]
+    public async Task FileMask_BareSystem_DoesNotMatchSystemBackupZip()
     {
-        var (engine, _) = CreateAcceptanceIndex();
+        var (engine, _) = await CreateAcceptanceIndex();
         var results = engine.Find("system", WordMatchMethod.Exact, enableOperators: false);
-        Assert.Equal(new[] { 2 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FileMask_ExactSingleWord_UsesPostingFastPath()
+    [Test]
+    public async Task FileMask_ExactSingleWord_UsesPostingFastPath()
     {
         var (engine, provider, _) = CreateEngineWithProvider();
         engine.Find("system", WordMatchMethod.Exact);
-        Assert.True(provider.Current.ExactPostings.ContainsKey("system"));
-        Assert.Equal(new[] { 2 }, engine.Find("system", WordMatchMethod.Exact));
-        Assert.Equal(1, engine.CountMatches("system", WordMatchMethod.Exact));
+        await Assert.That(provider.Current.ExactPostings.ContainsKey("system")).IsTrue();
+        await Assert.That(engine.Find("system", WordMatchMethod.Exact)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
+        await Assert.That(engine.CountMatches("system", WordMatchMethod.Exact)).IsEqualTo(1);
     }
 
-    [Fact]
-    public void FileMask_GlobTerm_BypassesExactFastPath()
+    [Test]
+    public async Task FileMask_GlobTerm_BypassesExactFastPath()
     {
         var (engine, _, _) = CreateEngineWithProvider();
         var results = engine.Find("system*", WordMatchMethod.Exact, enableOperators: false);
-        Assert.Equal(new[] { 2 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FileMask_FacetFilter_WorksUnchanged()
+    [Test]
+    public async Task FileMask_FacetFilter_WorksUnchanged()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
@@ -91,11 +91,11 @@ public class FileMaskTokenizationTests
         });
 
         var filter = FacetFilter.Range("size", 200, long.MaxValue);
-        Assert.Equal(new[] { 2 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FileMask_NaturalSort_WorksUnchanged()
+    [Test]
+    public async Task FileMask_NaturalSort_WorksUnchanged()
     {
         var (engine, updater, _) = CreateEngine();
         updater.RebuildFrom(new Dictionary<int, string>
@@ -111,11 +111,11 @@ public class FileMaskTokenizationTests
             enableOperators: false,
             SearchSortMode.NaturalSortAscending);
 
-        Assert.Equal(new[] { 12, 11, 10 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 12, 11, 10 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void DefaultTokenization_MatchesLegacySeparatorBehavior()
+    [Test]
+    public async Task DefaultTokenization_MatchesLegacySeparatorBehavior()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider, SearchTokenization.Default);
@@ -126,12 +126,12 @@ public class FileMaskTokenizationTests
             [2] = "System",
         });
 
-        Assert.Equal(SearchTokenization.Default, provider.Current.Tokenization);
-        Assert.Equal(new[] { 1 }, engine.Find("report", WordMatchMethod.Within));
-        Assert.Equal(new[] { 1, 2 }, engine.Find("report OR system", WordMatchMethod.Exact, enableOperators: true));
+        await Assert.That(provider.Current.Tokenization).IsEqualTo(SearchTokenization.Default);
+        await Assert.That(engine.Find("report", WordMatchMethod.Within)).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
+        await Assert.That(engine.Find("report OR system", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
+    [Test]
     public async Task ProgressiveIngestion_ProducesFileMaskSnapshots()
     {
         var provider = new IndexSnapshotProvider();
@@ -152,25 +152,25 @@ public class FileMaskTokenizationTests
             Feed(),
             new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 2 });
 
-        Assert.True(result.CompletedSuccessfully);
-        Assert.Equal(SearchTokenization.FileMask, provider.Current.Tokenization);
-        Assert.Equal(new[] { 1 }, engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true));
-        Assert.Equal(new[] { 2 }, engine.Find("system", WordMatchMethod.Exact));
+        await Assert.That(result.CompletedSuccessfully).IsTrue();
+        await Assert.That(provider.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);
+        await Assert.That(engine.Find("*.pdf", WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
+        await Assert.That(engine.Find("system", WordMatchMethod.Exact)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void CustomTokenization_CreateFactory()
+    [Test]
+    public async Task CustomTokenization_CreateFactory()
     {
         var custom = SearchTokenization.Create("-", " ");
-        Assert.Equal("-", custom.IndexSeparators);
-        Assert.Equal(" ", custom.QuerySeparators);
+        await Assert.That(custom.IndexSeparators).IsEqualTo("-");
+        await Assert.That(custom.QuerySeparators).IsEqualTo(" ");
 
         var snapshot = IndexSnapshotBuilder.Build(
             new Dictionary<int, string> { [1] = "a-b-c" },
             custom);
 
-        Assert.Equal(custom, snapshot.Tokenization);
-        Assert.Equal(3, snapshot.UniqueWordCount);
+        await Assert.That(snapshot.Tokenization).IsEqualTo(custom);
+        await Assert.That(snapshot.UniqueWordCount).IsEqualTo(3);
     }
 
     private static (SearchEngineSharp engine, IndexSnapshotProvider provider, IIndexUpdater updater) CreateEngineWithProvider()
@@ -186,8 +186,8 @@ public class FileMaskTokenizationTests
         return (engine, provider, updater);
     }
 
-    [Fact]
-    public void LowercaseWholeNameToken_ReusesTheEntryString_UppercaseNameIsLowercasedCopy()
+    [Test]
+    public async Task LowercaseWholeNameToken_ReusesTheEntryString_UppercaseNameIsLowercasedCopy()
     {
         string lower = string.Concat("x", "report-final.pdf"); // runtime instance, not an interned literal
         string mixed = "Report-Final.PDF";
@@ -195,8 +195,8 @@ public class FileMaskTokenizationTests
             new Dictionary<int, string> { [1] = lower, [2] = mixed },
             SearchTokenization.FileMask);
 
-        Assert.Contains(snapshot.ExactPostings.Keys, key => ReferenceEquals(key, lower));
-        Assert.Contains("report-final.pdf", snapshot.ExactPostings.Keys); // lowercased copy of the mixed-case name
-        Assert.DoesNotContain(snapshot.ExactPostings.Keys, key => ReferenceEquals(key, mixed));
+        await Assert.That(snapshot.ExactPostings.Keys).Contains(key => ReferenceEquals(key, lower));
+        await Assert.That(snapshot.ExactPostings.Keys).Contains("report-final.pdf"); // lowercased copy of the mixed-case name
+        await Assert.That(snapshot.ExactPostings.Keys).DoesNotContain(key => ReferenceEquals(key, mixed));
     }
 }

@@ -19,33 +19,33 @@ public class NameMatcherTests
         return [.. names];
     }
 
-    public static TheoryData<string, WordMatchMethod, bool> Queries() => new()
-    {
-        { "*.pdf", WordMatchMethod.Exact, true },
-        { "report*", WordMatchMethod.Exact, true },
-        { "*port*", WordMatchMethod.Exact, false },
-        { "report", WordMatchMethod.Exact, false },
-        { "report", WordMatchMethod.Within, false },
-        { "img_????.jpg", WordMatchMethod.Exact, true },
-        { "*.jpg OR *.pdf", WordMatchMethod.Exact, true },
-        { "*.cs AND NOT x*", WordMatchMethod.Exact, true },
-        { "NOT *.txt", WordMatchMethod.Exact, true },
-        { "(report OR invoice) AND NOT final", WordMatchMethod.Within, true },
-        { "NOT AND *.pdf", WordMatchMethod.Exact, true },
-        { "pdf invoice", WordMatchMethod.Exact, false },
-        { "re", WordMatchMethod.Within, true },
-        { "zażółć*", WordMatchMethod.Exact, true },
-        { "strasse*", WordMatchMethod.Exact, true },
-        { @"\.(jpg|pdf)$", WordMatchMethod.Regex, false },
-        { "^rep", WordMatchMethod.Regex, false },
-        { "[invalid", WordMatchMethod.Regex, false },
-        { "*", WordMatchMethod.Exact, true },
-        { "   ", WordMatchMethod.Exact, true },
-    };
+    public static IEnumerable<(string Query, WordMatchMethod Method, bool Operators)> Queries() =>
+    [
+        ("*.pdf", WordMatchMethod.Exact, true),
+        ("report*", WordMatchMethod.Exact, true),
+        ("*port*", WordMatchMethod.Exact, false),
+        ("report", WordMatchMethod.Exact, false),
+        ("report", WordMatchMethod.Within, false),
+        ("img_????.jpg", WordMatchMethod.Exact, true),
+        ("*.jpg OR *.pdf", WordMatchMethod.Exact, true),
+        ("*.cs AND NOT x*", WordMatchMethod.Exact, true),
+        ("NOT *.txt", WordMatchMethod.Exact, true),
+        ("(report OR invoice) AND NOT final", WordMatchMethod.Within, true),
+        ("NOT AND *.pdf", WordMatchMethod.Exact, true),
+        ("pdf invoice", WordMatchMethod.Exact, false),
+        ("re", WordMatchMethod.Within, true),
+        ("zażółć*", WordMatchMethod.Exact, true),
+        ("strasse*", WordMatchMethod.Exact, true),
+        (@"\.(jpg|pdf)$", WordMatchMethod.Regex, false),
+        ("^rep", WordMatchMethod.Regex, false),
+        ("[invalid", WordMatchMethod.Regex, false),
+        ("*", WordMatchMethod.Exact, true),
+        ("   ", WordMatchMethod.Exact, true),
+    ];
 
-    [Theory]
-    [MemberData(nameof(Queries))]
-    public void IsMatch_AgreesWithFindOnAnIndex_ForBothPresetsAndUnicodeOptions(string query, WordMatchMethod method, bool operators)
+    [Test]
+    [MethodDataSource(nameof(Queries))]
+    public async Task IsMatch_AgreesWithFindOnAnIndex_ForBothPresetsAndUnicodeOptions(string query, WordMatchMethod method, bool operators)
     {
         SearchTokenization[] presets =
         [
@@ -70,8 +70,8 @@ public class NameMatcherTests
             var matcher = NameMatcher.Create(query, method, operators, preset);
             var actual = Enumerable.Range(0, Names.Length).Where(i => matcher.IsMatch(Names[i])).ToList();
 
-            Assert.True(expected.SequenceEqual(actual),
-                $"{query} / {method} / ops={operators} / {preset.IndexSeparators.Length}:{preset.UnicodeMatching}: index {expected.Count}, matcher {actual.Count}");
+            await Assert.That(actual).IsEquivalentTo(expected, CollectionOrdering.Matching)
+                .Because($"{query} / {method} / ops={operators} / {preset.IndexSeparators.Length}:{preset.UnicodeMatching}: index {expected.Count}, matcher {actual.Count}");
         }
     }
 
@@ -119,8 +119,8 @@ public class NameMatcherTests
             : [],
     ];
 
-    [Fact]
-    public void IsMatch_AgreesWithFindOnAOneEntryIndex()
+    [Test]
+    public async Task IsMatch_AgreesWithFindOnAOneEntryIndex()
     {
         var mismatches = new List<string>();
         int checkedCount = 0;
@@ -159,12 +159,12 @@ public class NameMatcherTests
             }
         }
 
-        Assert.True(mismatches.Count == 0,
-            $"{mismatches.Count} of {checkedCount} combinations differ:\n" + string.Join("\n", mismatches));
+        await Assert.That(mismatches).IsEmpty()
+            .Because($"{mismatches.Count} of {checkedCount} combinations differ:\n" + string.Join("\n", mismatches));
     }
 
-    [Fact]
-    public void IsMatch_RegexTimeoutOnAnyToken_IsNoMatch_LikeTheIndex()
+    [Test]
+    public async Task IsMatch_RegexTimeoutOnAnyToken_IsNoMatch_LikeTheIndex()
     {
         // The lookahead forces the backtracking engine (1 s timeout). "b" matches at once; the second token makes
         // the nested quantifier backtrack exponentially and time out. The index then returns nothing for the
@@ -174,7 +174,7 @@ public class NameMatcherTests
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(new Dictionary<int, string> { [1] = text });
 
-        Assert.Empty(new SearchEngineSharp(provider).Find(pattern, WordMatchMethod.Regex));
-        Assert.False(NameMatcher.Create(pattern, WordMatchMethod.Regex).IsMatch(text));
+        await Assert.That(new SearchEngineSharp(provider).Find(pattern, WordMatchMethod.Regex)).IsEmpty();
+        await Assert.That(NameMatcher.Create(pattern, WordMatchMethod.Regex).IsMatch(text)).IsFalse();
     }
 }

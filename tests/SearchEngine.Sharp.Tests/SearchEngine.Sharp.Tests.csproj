@@ -22,7 +22,7 @@
 
   <!-- Files still written for xunit while the suite moves to TUnit; each is removed from this list when converted. -->
   <ItemGroup>
-    <Compile Remove="BigramIndexTests.cs;FacetFilterTests.cs;FastBitSetEnumerationTests.cs;FileMaskTokenizationTests.cs;GlobMatchingTests.cs;IndexUpdaterTests.cs;NameMatcherTests.cs;NameTokenizerTests.cs;NaturalSortKeyBuilderTests.cs;OperatorCorrectionTests.cs;ProgressiveIndexIngestionTests.cs;RegexMatchingTests.cs;SearchEngineNaturalSortTests.cs;SearchEngineOperatorTests.cs;SelectivityPipelineTests.cs;SingleSemanticWordTests.cs;SnapshotLazyStructureTests.cs;TextNormalizerTests.cs" />
+    <Compile Remove="BigramIndexTests.cs;FacetFilterTests.cs;FastBitSetEnumerationTests.cs;IndexUpdaterTests.cs;NameTokenizerTests.cs;NaturalSortKeyBuilderTests.cs;ProgressiveIndexIngestionTests.cs;SearchEngineNaturalSortTests.cs;SelectivityPipelineTests.cs;SnapshotLazyStructureTests.cs;TextNormalizerTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
