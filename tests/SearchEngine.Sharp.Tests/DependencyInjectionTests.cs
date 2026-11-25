@@ -32,6 +32,19 @@ public class DependencyInjectionTests
         await Assert.That(Ids(engine, "gamma")).IsEquivalentTo([3], CollectionOrdering.Matching);
     }
 
+    // Before anything is published, the index already carries the registered preset: an application that reads
+    // Current.Tokenization (to build a NameMatcher for the same index, say) gets the right one.
+    [Test]
+    public async Task AddSearchEngine_WithoutEntries_StartsWithAnEmptySnapshotOfTheRegisteredPreset()
+    {
+        var preset = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);
+        using var plain = new ServiceCollection().AddSearchEngine(preset).BuildServiceProvider();
+        using var keyed = new ServiceCollection().AddKeyedSearchEngine("files", preset).BuildServiceProvider();
+
+        await Assert.That(plain.GetRequiredService<IIndexSnapshotProvider>().Current.Tokenization).IsSameReferenceAs(preset);
+        await Assert.That(keyed.GetRequiredKeyedService<IIndexSnapshotProvider>("files").Current.Tokenization).IsSameReferenceAs(preset);
+    }
+
     [Test]
     public async Task AddSearchEngine_WithInitialEntries_UpdaterKeepsThem()
     {

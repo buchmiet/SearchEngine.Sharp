@@ -232,6 +232,15 @@ public class IndexUpdaterTests
     }
 
     [Test]
+    public async Task NewUpdater_PublishesAnEmptySnapshotOfItsPreset()
+    {
+        var (_, _, provider) = TestIndex.Create(SearchTokenization.FileMask);
+
+        await Assert.That(provider.Current.Tokenization).IsSameReferenceAs(SearchTokenization.FileMask);
+        await Assert.That(provider.Current.DocumentCount).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task RemovingTheLastEntry_KeepsTheConfigurationOfTheUpdater()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);

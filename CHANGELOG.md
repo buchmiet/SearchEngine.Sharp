@@ -90,6 +90,10 @@ Changed.
   preset. In a preset made by `SearchTokenization.Create` with only one of them, that one splits terms like a space
   and the other is part of its term. Such presets used to throw `ArgumentOutOfRangeException` for `(a) b` or leave
   `NOT` unapplied in `NOT (a b)`. `Default` and `FileMask` are unchanged.
+- Creating an `IndexUpdater` publishes an empty snapshot with its preset, and the providers registered by
+  `AddSearchEngine` and `AddKeyedSearchEngine` start with an empty snapshot of the registered preset. Until the
+  first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,
+  whatever preset the index was configured with.
 
 ### Fixed
 

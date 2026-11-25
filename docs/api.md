@@ -127,7 +127,9 @@ bool ContainsEntry(int id);
 ```
 
 - `tokenization` defaults to `SearchTokenization.Default` and applies to every snapshot this updater publishes,
-  including the empty one after `Clear`.
+  including the empty ones it publishes when it is created and after `Clear`.
+- The constructor replaces the provider's snapshot with an empty one; the updater never reads what the provider
+  held before.
 - A `string` entry is indexed as `new IndexedEntry(text, text)`.
 - `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
   input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
@@ -145,8 +147,14 @@ bool ContainsEntry(int id);
 Holds the current snapshot. Reading `Current` takes no lock; the updater replaces the reference atomically.
 
 ```csharp
-IndexSnapshot Current { get; }   // never null; IndexSnapshot.Empty until the first publish
+IndexSnapshotProvider();
+IndexSnapshot Current { get; }   // never null
 ```
+
+- A new provider holds `IndexSnapshot.Empty`. Creating an `IndexUpdater` for it publishes an empty snapshot with
+  the updater's preset, so `Current.Tokenization` is the index's preset before the first change.
+- The providers registered by `ServiceCollectionExtensions` start with a snapshot of the registered preset: the
+  empty one, or the one built from the initial entries.
 
 ### `IndexedEntry`
 
