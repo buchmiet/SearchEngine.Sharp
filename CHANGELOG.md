@@ -116,6 +116,8 @@ Changed.
   snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
   or batch update published an index without them. The updater now starts from the same entries and the same
   tokenization as the first snapshot.
+- `WordMatchMethod.Within` did not find a term that starts with two U+FFFF characters in a token that also starts
+  with them.
 
 ### Performance
 

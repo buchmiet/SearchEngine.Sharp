@@ -195,11 +195,12 @@ public sealed class IndexSnapshot
         for (int i = 0; i < WordLengths.Length; i++)
         {
             var word = WordAt(i);
-            int prev = -1;
+            // Every int is a valid packed bigram (U+FFFF U+FFFF packs to -1), so "no previous bigram" is a long.
+            long prev = long.MinValue;
             for (int j = 0; j + 1 < word.Length; j++)
             {
                 int bigram = (word[j] << 16) | word[j + 1];
-                if (bigram == prev) continue; // skip duplicate bigrams within same word
+                if (bigram == prev) continue; // skip a bigram repeated right away (aaa)
                 prev = bigram;
                 if (!bigramLists.TryGetValue(bigram, out var list))
                     bigramLists[bigram] = list = [];

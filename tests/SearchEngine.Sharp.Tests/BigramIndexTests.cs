@@ -61,4 +61,25 @@ public class BigramIndexTests
 
         await Assert.That(provider.Current.BigramWordIndices).IsSameReferenceAs(provider.Current.BigramWordIndices);
     }
+
+    // The packed bigram of U+FFFF U+FFFF is all ones, the same bits as -1: a word that starts with it must still be
+    // registered under it, or Within misses it. NameMatcher scans the text and is the reference.
+    [Test]
+    public async Task Within_FindsAWordThatStartsWithTheBigramOfTwoUFFFF()
+    {
+        var (engine, updater, _) = TestIndex.Create();
+        var documents = new Dictionary<int, string>
+        {
+            [1] = "\uFFFF\uFFFF doc",
+            [2] = "other",
+            [3] = "x \uFFFF\uFFFF y",
+        };
+        updater.RebuildFrom(documents);
+        const string query = "\uFFFF\uFFFF";
+        var matcher = NameMatcher.Create(query, WordMatchMethod.Within);
+        int[] expected = [.. documents.Where(d => matcher.IsMatch(d.Value)).Select(d => d.Key)];
+
+        await Assert.That(expected).IsEquivalentTo([1, 3], CollectionOrdering.Matching);
+        await Assert.That(engine.Find(query, WordMatchMethod.Within).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
+    }
 }
