@@ -334,7 +334,7 @@ The natural order compares `SortText` part by part, the way file managers order 
   one-character text part. `IMG_0012.jpg` has the parts `img`, `0012`, `.`, `jpg`.
 - The first parts are compared first; the next pair decides only when they are equal.
 - A number part comes before a text part.
-- Two numbers compare by value, at any length (no limit at 19 or 20 digits). Leading
+- Two numbers compare by value, at any length. Leading
   zeros do not count, so `007` equals `7`. Digits of other scripts count with their
   value: `٣` (Arabic-Indic three) equals `3`.
 - Two text parts compare one UTF-16 code unit at a time after `char.ToLowerInvariant`.
@@ -354,8 +354,7 @@ Examples, in ascending order:
 |---|---|---|
 | `file2` | `file10` | numbers by value |
 | `a 2` | `ab` | `a` is the start of `ab` |
-| `a2` | `ab` | number before text |
-| `x1` | `xa` | number before text |
+| `x 1` | `x a` | number before text |
 | `a b` | `ab` | `a` is the start of `ab` |
 | `a` | `a 2` | fewer parts |
 | `img_0012.jpg` | `img_12a.jpg` | `0012` equals `12`; then `.` before `a` |

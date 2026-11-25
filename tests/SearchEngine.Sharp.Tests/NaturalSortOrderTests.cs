@@ -10,6 +10,7 @@ public class NaturalSortOrderTests
     [InlineData("a 2", "ab")]
     [InlineData("a", "a 2")]
     [InlineData("a2", "ab")]
+    [InlineData("x1", "xa")]
     [InlineData("a-c", "ab")]
     [InlineData("a b", "ab")]
     [InlineData("a.b", "ab")]
@@ -20,7 +21,7 @@ public class NaturalSortOrderTests
     [InlineData("file 2", "file10")]
     [InlineData("0", "1")]
     // A number part comes before a text part at the same position.
-    [InlineData("x1", "xa")]
+    [InlineData("x 1", "x a")]
     [InlineData("1", "(1)")]
     // Numbers longer than 12 digits and longer than a long still compare by value.
     [InlineData("a999999999999", "a1000000000000")]
