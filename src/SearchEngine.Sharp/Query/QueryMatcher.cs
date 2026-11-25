@@ -100,17 +100,22 @@ internal static class QueryMatcher
     }
 
     // Kept apart from the specialized scan on purpose: one loop that picks either matcher per word measured about 30%
-    // slower for general patterns (BenchmarkDotNet, 100k documents, "p?rt*on").
+    // slower for general patterns (BenchmarkDotNet, 100k documents, "p?rt*on"). Most words are rejected after one
+    // character here, so the words are sliced from spans hoisted out of the loop rather than through
+    // IndexSnapshot.WordAt, which measured about 10% slower on this loop.
     private static FastBitSet MatchGlobGeneral(string pattern, int minLength, bool hasStar, bool graphemeBoundaries, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
         var wordLengths = snapshot.WordLengths.AsSpan();
+        var wordEnds = snapshot.WordEnds.AsSpan();
+        var words = snapshot.WordsArray.AsSpan();
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
         {
-            if (!hasStar && wordLengths[wordIndex] != pattern.Length)
+            int wordLength = wordLengths[wordIndex];
+            if (!hasStar && wordLength != pattern.Length)
                 continue;
 
-            if (GlobMatcher.IsWholeWordMatch(pattern, snapshot.WordAt(wordIndex), graphemeBoundaries))
+            if (GlobMatcher.IsWholeWordMatch(pattern, words.Slice(wordEnds[wordIndex] - wordLength, wordLength), graphemeBoundaries))
                 result.AddAll(snapshot.PostingsAt(wordIndex));
         }
 
