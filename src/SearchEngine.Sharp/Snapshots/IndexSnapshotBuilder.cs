@@ -109,15 +109,13 @@ public static class IndexSnapshotBuilder
         var indexSeparators = tokenization.IndexSeparatorValues;
         int entryCount = entries.TryGetNonEnumeratedCount(out int count) ? count : 0;
         var stringPool = new WordStringPool();
-        var invertedIndex = entryCount > 0
-            ? new Dictionary<string, List<int>>(entryCount, StringComparer.Ordinal)
-            : new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        var recordIds = entryCount > 0 ? new List<int>(entryCount) : [];
-        var sortTexts = entryCount > 0 ? new List<string>(entryCount) : [];
-        var uniqueWords = new HashSet<string>(StringComparer.Ordinal);
-        var facetKeys = new HashSet<string>(StringComparer.Ordinal);
-        var pendingFacetValues = new List<PendingFacetValue>();
-        var directFacetColumns = new Dictionary<string, long[]>(StringComparer.Ordinal);
+        Dictionary<string, List<int>> invertedIndex = [with(entryCount, StringComparer.Ordinal)];
+        List<int> recordIds = [with(capacity: entryCount)];
+        List<string> sortTexts = [with(capacity: entryCount)];
+        HashSet<string> uniqueWords = [with(StringComparer.Ordinal)];
+        HashSet<string> facetKeys = [with(StringComparer.Ordinal)];
+        List<PendingFacetValue> pendingFacetValues = [];
+        Dictionary<string, long[]> directFacetColumns = [with(StringComparer.Ordinal)];
 
         int totalWordsLength = 0;
         int totalPostings = 0;
@@ -197,7 +195,7 @@ public static class IndexSnapshotBuilder
         if (recordIds.Count == 0)
             return IndexSnapshot.EmptyFor(tokenization);
 
-        var wordDescriptions = new List<WordDescription>(invertedIndex.Count);
+        List<WordDescription> wordDescriptions = [with(capacity: invertedIndex.Count)];
         foreach (var (word, docIds) in invertedIndex)
             wordDescriptions.Add(new WordDescription(word, docIds));
 
@@ -212,7 +210,7 @@ public static class IndexSnapshotBuilder
         var wordLengths = new int[wordDescriptions.Count];
         var wordEnds = new int[wordDescriptions.Count];
         var postingOffsets = new int[wordDescriptions.Count];
-        var exactPostings = new Dictionary<string, WordPostings>(wordDescriptions.Count, StringComparer.Ordinal);
+        Dictionary<string, WordPostings> exactPostings = [with(wordDescriptions.Count, StringComparer.Ordinal)];
 
         // Phase 3: pack into flat arrays.
         var wordsSpan = wordsArray.AsSpan();
@@ -276,7 +274,7 @@ public static class IndexSnapshotBuilder
         if (facetKeys.Count == 0 && directFacetColumns.Count == 0)
             return [];
 
-        var facetColumns = new Dictionary<string, long[]>(facetKeys.Count + directFacetColumns.Count, StringComparer.Ordinal);
+        Dictionary<string, long[]> facetColumns = [with(facetKeys.Count + directFacetColumns.Count, StringComparer.Ordinal)];
         foreach (var (facetName, column) in directFacetColumns)
         {
             var sized = column;
