@@ -51,6 +51,9 @@ UnicodeMatching UnicodeMatching { get; }                              // None fo
 SearchTokenization WithUnicodeMatching(UnicodeMatching options);      // same separators + options
 ```
 
+`WithUnicodeMatching` throws `PlatformNotSupportedException` for `Compose` or `RemoveDiacritics` in
+globalization-invariant mode, which has no Unicode normalization.
+
 ### `UnicodeMatching` (flags)
 
 ```csharp

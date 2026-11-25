@@ -50,8 +50,22 @@ public sealed class SearchTokenization
     /// <c>SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold)</c>.
     /// The options are stored in each snapshot, so indexed text and queries are always folded alike.
     /// </summary>
+    /// <exception cref="PlatformNotSupportedException">
+    /// <paramref name="options"/> contains <see cref="UnicodeMatching.Compose"/> or
+    /// <see cref="UnicodeMatching.RemoveDiacritics"/> and the process runs in globalization-invariant mode, which has
+    /// no Unicode normalization.
+    /// </exception>
     public SearchTokenization WithUnicodeMatching(UnicodeMatching options)
-        => new(IndexSeparators, QuerySeparators, options);
+    {
+        if ((options & (UnicodeMatching.Compose | UnicodeMatching.RemoveDiacritics)) != 0 && !TextFolder.IsNormalizationAvailable)
+        {
+            throw new PlatformNotSupportedException(
+                "UnicodeMatching.Compose and UnicodeMatching.RemoveDiacritics need Unicode normalization, which is not "
+                + "available in globalization-invariant mode (InvariantGlobalization or DOTNET_SYSTEM_GLOBALIZATION_INVARIANT).");
+        }
+
+        return new(IndexSeparators, QuerySeparators, options);
+    }
 
     internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching, isRegex: false);
 

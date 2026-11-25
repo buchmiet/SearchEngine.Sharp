@@ -49,6 +49,12 @@ internal static class TextFolder
     private static readonly SearchValues<char> CaseFoldSpecials =
         SearchValues.Create("ßẞςİſµϐϑϕϖϰϱϵẛͅﬀﬁﬂﬃﬄﬅﬆ");
 
+    // Globalization-invariant mode (InvariantGlobalization, DOTNET_SYSTEM_GLOBALIZATION_INVARIANT; the default for
+    // some trimmed and container deployments) has no normalization data: string.Normalize returns its input and
+    // IsNormalized reports true, so Compose and RemoveDiacritics would silently match nothing. A decomposed é is not
+    // NFC wherever normalization works.
+    internal static bool IsNormalizationAvailable { get; } = !"e\u0301".IsNormalized(NormalizationForm.FormC);
+
     internal static string Fold(string text, UnicodeMatching normalization, bool isRegex)
     {
         const UnicodeMatching folding = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
