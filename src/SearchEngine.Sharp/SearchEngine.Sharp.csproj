@@ -4,7 +4,6 @@
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>SearchEngine</RootNamespace>
     <AssemblyName>SearchEngine.Sharp</AssemblyName>
 
