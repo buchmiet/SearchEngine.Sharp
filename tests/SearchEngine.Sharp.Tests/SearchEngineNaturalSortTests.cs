@@ -4,19 +4,11 @@ namespace SearchEngine.Sharp.Tests;
 
 public class SearchEngineNaturalSortTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     [Test]
     public async Task Find_NaturalSortAscending_ReturnsCorrectOrder()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {
@@ -44,7 +36,7 @@ public class SearchEngineNaturalSortTests
     public async Task Find_SnapshotOrder_DoesNotSort()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {
@@ -67,7 +59,7 @@ public class SearchEngineNaturalSortTests
     public async Task Find_NaturalSort_SearchTextSeparateFromSortText()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         // SearchText is rich (with synonyms), SortText is clean model name
         var entries = new Dictionary<int, IndexedEntry>
@@ -89,7 +81,7 @@ public class SearchEngineNaturalSortTests
     public async Task Find_ExactMatch_SameHitSet_WithAndWithoutSort()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {
@@ -112,7 +104,7 @@ public class SearchEngineNaturalSortTests
     public async Task Find_WithinMatch_SameHitSet_WithAndWithoutSort()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {
@@ -135,7 +127,7 @@ public class SearchEngineNaturalSortTests
     public async Task Find_StringEntries_WorksAfterIncrementalUpdates()
     {
         // Arrange
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         // Use string entries via AddEntry
         updater.AddEntry(1, "hello world");
@@ -153,7 +145,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_DuplicateSortKeys_TiebreakByRecordId()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         // Same SortText → same NaturalSortKey → tiebreak by record ID
         var entries = new Dictionary<int, IndexedEntry>
@@ -175,7 +167,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_PartialMatch_OnlySortedSubset()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {
@@ -199,7 +191,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_LargeDataset_CorrectOrder()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         // Generate 200 entries with varying model numbers
         var entries = new Dictionary<int, IndexedEntry>();
@@ -227,7 +219,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_AfterAddEntry_StillCorrect()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
@@ -248,7 +240,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_AfterRemoveEntry_StillCorrect()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
@@ -268,7 +260,7 @@ public class SearchEngineNaturalSortTests
     [Test]
     public async Task Find_NaturalSort_MixedPrefixes_SortedCorrectly()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
 
         var entries = new Dictionary<int, IndexedEntry>
         {

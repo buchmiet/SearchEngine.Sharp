@@ -4,17 +4,9 @@ namespace SearchEngine.Sharp.Tests;
 
 public class GlobMatchingTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     private static (SearchEngineSharp engine, IIndexUpdater updater) CreateFileIndex()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",
@@ -39,7 +31,7 @@ public class GlobMatchingTests
     [Test]
     public async Task QuestionMarkAlone_MatchesSingleCharTokens()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "a b cd",
@@ -98,7 +90,7 @@ public class GlobMatchingTests
     [Test]
     public async Task ComplexPattern_QuestionStarQuestion()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "axc",

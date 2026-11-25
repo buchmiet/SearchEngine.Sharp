@@ -4,17 +4,9 @@ namespace SearchEngine.Sharp.Tests;
 
 public class RegexMatchingTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     private static (SearchEngineSharp engine, IIndexUpdater updater) CreateTokenIndex()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",
@@ -45,7 +37,7 @@ public class RegexMatchingTests
     [Test]
     public async Task Regex_IgnoreCase_MatchesNormalizedTokens()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "Report-Final.PDF" });
 
         await Assert.That(engine.Find("REPORT", WordMatchMethod.Regex)).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
@@ -82,7 +74,7 @@ public class RegexMatchingTests
         string searchText,
         int expectedDocId)
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [expectedDocId] = searchText });
 
         await Assert.That(engine.Find(pattern, WordMatchMethod.Regex)).IsEquivalentTo(new[] { expectedDocId }, CollectionOrdering.Matching);
@@ -94,7 +86,7 @@ public class RegexMatchingTests
     {
         // (?=x) forces the backtracking fallback; (a+)+b against a long 'a' run
         // is the classic exponential-backtracking case and trips the 1 s timeout.
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = new string('a', 40) });
 
         await Assert.That(engine.Find(@"(a+)+b(?=x)", WordMatchMethod.Regex)).IsEmpty();
@@ -104,9 +96,7 @@ public class RegexMatchingTests
     [Test]
     public async Task Regex_WithFacetFilter_IntersectsResults()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
             [1] = new("reporting", "reporting", FacetValues.Create("size", 100)),
@@ -120,9 +110,7 @@ public class RegexMatchingTests
     [Test]
     public async Task Regex_NaturalSort_ReturnsSortedSubset()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [10] = "GA-100",
@@ -142,7 +130,7 @@ public class RegexMatchingTests
     [Test]
     public async Task Regex_EmptyIndex_ReturnsEmpty()
     {
-        var (engine, _) = CreateEngine();
+        var (engine, _, _) = TestIndex.Create();
         await Assert.That(engine.Find(".*", WordMatchMethod.Regex)).IsEmpty();
         await Assert.That(engine.CountMatches(".*", WordMatchMethod.Regex)).IsEqualTo(0);
     }
@@ -157,9 +145,7 @@ public class RegexMatchingTests
     [Test]
     public async Task Regex_FileMaskPreset_MatchesWholeNameToken()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",

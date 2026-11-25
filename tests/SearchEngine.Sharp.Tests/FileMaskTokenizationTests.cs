@@ -6,17 +6,9 @@ namespace SearchEngine.Sharp.Tests;
 
 public class FileMaskTokenizationTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater, IndexSnapshotProvider provider) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater, provider);
-    }
-
     private static async Task<(SearchEngineSharp engine, IIndexUpdater updater)> CreateAcceptanceIndex()
     {
-        var (engine, updater, provider) = CreateEngine();
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",
@@ -81,9 +73,7 @@ public class FileMaskTokenizationTests
     [Test]
     public async Task FileMask_FacetFilter_WorksUnchanged()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
             [1] = new("report-final.pdf", "report-final.pdf", FacetValues.Create("size", 100)),
@@ -97,7 +87,7 @@ public class FileMaskTokenizationTests
     [Test]
     public async Task FileMask_NaturalSort_WorksUnchanged()
     {
-        var (engine, updater, _) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [10] = "GA-100",
@@ -117,9 +107,7 @@ public class FileMaskTokenizationTests
     [Test]
     public async Task DefaultTokenization_MatchesLegacySeparatorBehavior()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.Default);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.Default);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",
@@ -134,9 +122,7 @@ public class FileMaskTokenizationTests
     [Test]
     public async Task ProgressiveIngestion_ProducesFileMaskSnapshots()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, SearchTokenization.FileMask);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         var ingestion = new ProgressiveIndexIngestion(updater);
 
         static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Feed()
@@ -175,7 +161,7 @@ public class FileMaskTokenizationTests
 
     private static (SearchEngineSharp engine, IndexSnapshotProvider provider, IIndexUpdater updater) CreateEngineWithProvider()
     {
-        var (engine, updater, provider) = CreateEngine();
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "report-final.pdf",

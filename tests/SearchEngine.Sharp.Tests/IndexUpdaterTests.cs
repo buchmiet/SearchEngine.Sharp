@@ -6,12 +6,6 @@ namespace SearchEngine.Sharp.Tests;
 
 public class IndexUpdaterTests
 {
-    private static (SearchEngineSharp engine, IndexUpdater updater, IndexSnapshotProvider provider) Create(SearchTokenization? tokenization = null)
-    {
-        var provider = new IndexSnapshotProvider();
-        return (new SearchEngineSharp(provider), new IndexUpdater(provider, tokenization), provider);
-    }
-
     // FacetValues validates names on creation, so a bag with a null name can only be forced into
     // existence; it makes the snapshot build throw, like any other component that fails during Build.
     private static IndexedEntry Poisoned
@@ -37,7 +31,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task AddEntry_WhenBuildThrows_KeepsStoredEntriesAndPublishedSnapshot()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
@@ -56,7 +50,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task AddEntry_WhenReplacingAndBuildThrows_RestoresThePreviousEntry()
     {
-        var (engine, updater, _) = Create();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
 
         await Assert.That(() => updater.AddEntry(1, Poisoned)).Throws<Exception>();
@@ -70,7 +64,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task AddOrUpdateEntries_WhenBuildThrows_RollsBackTheWholeBatch()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
@@ -92,7 +86,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task AddOrUpdateEntries_WhenTheSourceEnumerationThrows_RollsBackAppliedEntries()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
         var published = provider.Current;
 
@@ -106,7 +100,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task RefreshEntry_WhenBuildThrows_RestoresThePreviousEntry()
     {
-        var (engine, updater, _) = Create();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
 
         await Assert.That(() => updater.RefreshEntry(1, Poisoned)).Throws<Exception>();
@@ -120,7 +114,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task RebuildFrom_WhenBuildThrows_KeepsThePreviousEntries()
     {
-        var (engine, updater, provider) = Create();
+        var (engine, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha", [2] = "beta" });
         var published = provider.Current;
 
@@ -136,7 +130,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task RebuildFromAsync_WhenBuildThrows_KeepsThePreviousEntries()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "alpha" });
         var published = provider.Current;
 
@@ -173,7 +167,7 @@ public class IndexUpdaterTests
             Skip.Unless(TextFolder.IsNormalizationAvailable, SkipUnlessNormalizationAttribute.SkipReason);
 
         var tokenization = PresetByName(preset);
-        var (engine, updater, provider) = Create(tokenization);
+        var (engine, updater, provider) = TestIndex.Create(tokenization);
         var entries = new Dictionary<int, string>
         {
             [1] = "Report_Final.PDF",
@@ -203,7 +197,7 @@ public class IndexUpdaterTests
     public async Task RemovingTheLastEntry_KeepsTheConfigurationOfTheUpdater()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);
-        var (_, updater, provider) = Create(tokenization);
+        var (_, updater, provider) = TestIndex.Create(tokenization);
         updater.AddEntry(1, "only.txt");
 
         updater.RemoveEntry(1);
@@ -215,7 +209,7 @@ public class IndexUpdaterTests
     [Test]
     public async Task Clear_WithTheDefaultPreset_PublishesTheSharedEmptySnapshot()
     {
-        var (_, updater, provider) = Create();
+        var (_, updater, provider) = TestIndex.Create();
         updater.AddEntry(1, "a");
 
         updater.Clear();

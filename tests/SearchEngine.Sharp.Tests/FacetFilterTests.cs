@@ -4,17 +4,9 @@ namespace SearchEngine.Sharp.Tests;
 
 public class FacetFilterTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     private static (SearchEngineSharp engine, IIndexUpdater updater) CreateFacetIndex()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
             [1] = new("report-final.pdf", "report-final.pdf", Facets(1000, 100, 0x3)),
@@ -133,7 +125,7 @@ public class FacetFilterTests
     [Test]
     public async Task AddEntry_PreservesFacets()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.AddEntry(1, new IndexedEntry("alpha.txt", "alpha.txt", Facets(100, 1, 0)));
         updater.AddEntry(2, new IndexedEntry("beta.txt", "beta.txt", Facets(200, 2, 0)));
 
@@ -180,7 +172,7 @@ public class FacetFilterTests
     [Test]
     public async Task MissingFacetValue_DefaultsToZero()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
             [1] = new("a.txt", "a.txt", Facets(100, 0, 0)),
@@ -232,7 +224,7 @@ public class FacetFilterTests
     [Test]
     public async Task CreateFromPairs_IndexesLikeFromDictionary()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
         {
             [1] = new("a.pdf", "a.pdf", FacetValues.Create([new("size", 10L), new("attrs", 0x1L)])),

@@ -14,11 +14,8 @@ public class ProgressiveIndexIngestionTests
 {
     private static (SearchEngineSharp engine, IIndexUpdater updater, ProgressiveIndexIngestion ingestion) Create()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        var ingestion = new ProgressiveIndexIngestion(updater);
-        return (engine, updater, ingestion);
+        var (engine, updater, _) = TestIndex.Create();
+        return (engine, updater, new ProgressiveIndexIngestion(updater));
     }
 
     [Test]

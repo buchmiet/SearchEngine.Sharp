@@ -8,18 +8,10 @@ namespace SearchEngine.Sharp.Tests;
 /// </summary>
 public class SearchEngineOperatorTests
 {
-    private static (SearchEngineSharp engine, IIndexUpdater updater) CreateEngine()
-    {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
-        return (engine, updater);
-    }
-
     private static (SearchEngineSharp engine, IIndexUpdater updater)
         CreateWatchIndex()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "GA-100 digital watch",
@@ -174,7 +166,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task Parentheses_OverridePrecedence()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "red apple fruit",
@@ -248,7 +240,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task OperatorsDisabled_OrTreatedAsWord()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "this or that",
@@ -265,7 +257,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task OperatorsDisabled_NotTreatedAsWord()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "not applicable",
@@ -285,7 +277,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task Operators_WorkWithExactMatch()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "alpha beta",
@@ -305,7 +297,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task Operators_ExactNotWithin_NoSubstringMatch()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "alphabet",
@@ -326,7 +318,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task Within_DoesNotReturnFalsePositive_WhenBigramsMatchButSubstringDoesNot()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "abxba",
@@ -343,7 +335,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task Within_RepeatedBigram_QueryStillRequiresFullSubstring()
     {
-        var (engine, updater) = CreateEngine();
+        var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string>
         {
             [1] = "aaxaax",
@@ -384,7 +376,7 @@ public class SearchEngineOperatorTests
     [Test]
     public async Task EmptyIndex_ReturnsEmpty()
     {
-        var (engine, _) = CreateEngine();
+        var (engine, _, _) = TestIndex.Create();
 
         var results = engine.Find("test", WordMatchMethod.Within, true);
 
