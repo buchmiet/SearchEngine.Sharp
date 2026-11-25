@@ -48,12 +48,11 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers services and publishes an initial snapshot built from <paramref name="initialEntries"/>.
+    /// Registers services and publishes a first snapshot built from <paramref name="initialEntries"/>.
     /// </summary>
     /// <remarks>
-    /// The snapshot is built when this method is called. The registered <see cref="IIndexUpdater"/> does not hold
-    /// <paramref name="initialEntries"/>: its first mutation rebuilds the snapshot from the entries given to the
-    /// updater only.
+    /// The entries are copied when this method is called. The registered <see cref="IIndexUpdater"/> holds the same
+    /// entries, so its mutations extend or change them.
     /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
@@ -61,30 +60,63 @@ public static class ServiceCollectionExtensions
         => AddSearchEngine(services, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers services with a tokenization preset and publishes an initial snapshot built from
+    /// Registers services with a tokenization preset and publishes a first snapshot built from
     /// <paramref name="initialEntries"/>.
     /// </summary>
     /// <remarks>
-    /// The snapshot is built when this method is called. The registered <see cref="IIndexUpdater"/> does not hold
-    /// <paramref name="initialEntries"/>: its first mutation rebuilds the snapshot from the entries given to the
-    /// updater only.
+    /// The entries are copied when this method is called. The registered <see cref="IIndexUpdater"/> holds the same
+    /// entries and uses the same tokenization, so its mutations extend or change them.
     /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         IDictionary<int, string> initialEntries,
         SearchTokenization tokenization)
     {
-        var snapshot = IndexSnapshotBuilder.Build(initialEntries, tokenization);
+        var initial = new InitialIndex(CopyEntries(initialEntries));
+        return AddIndexServices(services, _ => initial, tokenization);
+    }
 
-        services.AddSingleton<IndexSnapshotProvider>(_ =>
-        {
-            var provider = new IndexSnapshotProvider();
-            provider.Publish(snapshot);
-            return provider;
-        });
+    /// <summary>
+    /// Registers services and publishes a first snapshot built from the entries returned by
+    /// <paramref name="entriesFactory"/>.
+    /// </summary>
+    /// <remarks>
+    /// The factory runs once, when the index or its <see cref="IIndexUpdater"/> is first resolved. The updater
+    /// holds the same entries, so its mutations extend or change them.
+    /// </remarks>
+    public static IServiceCollection AddSearchEngine(
+        this IServiceCollection services,
+        Func<IServiceProvider, IDictionary<int, string>> entriesFactory)
+        => AddSearchEngine(services, entriesFactory, SearchTokenization.Default);
+
+    /// <summary>
+    /// Registers services with a tokenization preset and publishes a first snapshot built from the entries
+    /// returned by <paramref name="entriesFactory"/>.
+    /// </summary>
+    /// <remarks>
+    /// The factory runs once, when the index or its <see cref="IIndexUpdater"/> is first resolved. The updater
+    /// holds the same entries and uses the same tokenization, so its mutations extend or change them.
+    /// </remarks>
+    public static IServiceCollection AddSearchEngine(
+        this IServiceCollection services,
+        Func<IServiceProvider, IDictionary<int, string>> entriesFactory,
+        SearchTokenization tokenization)
+    {
+        ArgumentNullException.ThrowIfNull(entriesFactory);
+
+        return AddIndexServices(services, sp => new InitialIndex(CopyEntries(entriesFactory(sp))), tokenization);
+    }
+
+    private static IServiceCollection AddIndexServices(
+        IServiceCollection services,
+        Func<IServiceProvider, InitialIndex> initialIndex,
+        SearchTokenization tokenization)
+    {
+        services.AddSingleton(initialIndex);
+        services.AddSingleton<IndexSnapshotProvider>(sp => CreateProvider(sp.GetRequiredService<InitialIndex>(), tokenization));
         services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
+        services.AddSingleton<IIndexUpdater>(sp => new IndexUpdater(
+            sp.GetRequiredService<IndexSnapshotProvider>(), tokenization, sp.GetRequiredService<InitialIndex>().Entries));
         services.AddScoped<ISearchEngine, SearchEngineSharp>();
         return services;
     }
@@ -116,8 +148,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers keyed services and publishes an initial snapshot built from <paramref name="initialEntries"/>.
-    /// The keyed <see cref="IIndexUpdater"/> does not hold these entries (see
+    /// Registers keyed services and publishes a first snapshot built from <paramref name="initialEntries"/>.
+    /// The keyed <see cref="IIndexUpdater"/> holds the same entries (see
     /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>).
     /// </summary>
     public static IServiceCollection AddKeyedSearchEngine(
@@ -127,9 +159,9 @@ public static class ServiceCollectionExtensions
         => AddKeyedSearchEngine(services, key, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers keyed services with a tokenization preset and publishes an initial snapshot built from
-    /// <paramref name="initialEntries"/>. The keyed <see cref="IIndexUpdater"/> does not hold these entries (see
-    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>).
+    /// Registers keyed services with a tokenization preset and publishes a first snapshot built from
+    /// <paramref name="initialEntries"/>. The keyed <see cref="IIndexUpdater"/> holds the same entries and uses the
+    /// same tokenization (see <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string}, SearchTokenization)"/>).
     /// </summary>
     public static IServiceCollection AddKeyedSearchEngine(
         this IServiceCollection services,
@@ -137,45 +169,35 @@ public static class ServiceCollectionExtensions
         IDictionary<int, string> initialEntries,
         SearchTokenization tokenization)
     {
-        var snapshot = IndexSnapshotBuilder.Build(initialEntries, tokenization);
+        var initial = new InitialIndex(CopyEntries(initialEntries));
 
-        services.AddKeyedSingleton<IndexSnapshotProvider>(key, (_, _) =>
-        {
-            var provider = new IndexSnapshotProvider();
-            provider.Publish(snapshot);
-            return provider;
-        });
+        services.AddKeyedSingleton<IndexSnapshotProvider>(key, (_, _) => CreateProvider(initial, tokenization));
         services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
             sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
         services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization));
+            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, initial.Entries));
         services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
             new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
         return services;
     }
 
-    /// <summary>
-    /// Registers services and publishes the snapshot returned by <paramref name="snapshotFactory"/>, which runs
-    /// when the <see cref="IndexSnapshotProvider"/> is first resolved.
-    /// </summary>
-    /// <remarks>
-    /// The registered <see cref="IIndexUpdater"/> uses <see cref="SearchTokenization.Default"/> and does not hold
-    /// the entries of the factory's snapshot.
-    /// </remarks>
-    public static IServiceCollection AddSearchEngine(
-        this IServiceCollection services,
-        Func<IServiceProvider, IndexSnapshot> snapshotFactory)
+    // The entries an index starts with: the first snapshot is built from them and the updater starts from them.
+    private sealed record InitialIndex(IReadOnlyDictionary<int, IndexedEntry> Entries);
+
+    private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries)
     {
-        services.AddSingleton<IndexSnapshotProvider>(sp =>
-        {
-            var provider = new IndexSnapshotProvider();
-            var snapshot = snapshotFactory(sp);
-            provider.Publish(snapshot);
-            return provider;
-        });
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater, IndexUpdater>();
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var copy = new Dictionary<int, IndexedEntry>(entries.Count);
+        foreach (var (id, text) in entries)
+            copy[id] = new IndexedEntry(text, text);
+        return copy;
+    }
+
+    private static IndexSnapshotProvider CreateProvider(InitialIndex initial, SearchTokenization tokenization)
+    {
+        var provider = new IndexSnapshotProvider();
+        provider.Publish(IndexSnapshotBuilder.Build(initial.Entries, tokenization));
+        return provider;
     }
 }

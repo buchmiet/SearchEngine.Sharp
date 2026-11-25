@@ -6,7 +6,8 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [0.6.0] - 2026-11-24
 
-Requires .NET 11. The public API only gains members; no existing member was changed or removed.
+Requires .NET 11. The public API gains members; the changes to members that shipped in 0.5.6 are listed under
+Changed.
 
 ### Added
 
@@ -41,6 +42,11 @@ Requires .NET 11. The public API only gains members; no existing member was chan
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
+- `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
+  IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text
+  nor the facet values of its entries, so the updater cannot start from one; the factory now returns the entries,
+  and the index and the updater are both built from them. The index with initial entries is built when the
+  provider is first resolved instead of when `AddSearchEngine` is called.
 
 ### Fixed
 
@@ -65,6 +71,10 @@ Requires .NET 11. The public API only gains members; no existing member was chan
   `ArgumentException`, like `FacetValues.Create`.
 - Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own sort permutation; they
   now share one build.
+- `AddSearchEngine(initialEntries, ...)` and `AddKeyedSearchEngine(key, initialEntries, ...)` published a first
+  snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
+  or batch update published an index without them. The updater now starts from the same entries and the same
+  tokenization as the first snapshot.
 
 ### Performance
 
