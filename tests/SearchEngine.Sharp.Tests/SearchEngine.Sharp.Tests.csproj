@@ -1,27 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- TUnit is a self-hosting Microsoft.Testing.Platform application: the project builds an executable and needs neither
+       Microsoft.NET.Test.Sdk nor a VSTest adapter. global.json at the repository root opts dotnet test into the platform:
+       "dotnet test" with the project option, from the repository root (see README.md). -->
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- A TUnit analyzer warning (an assertion that is not awaited, a blocking wait in a test) fails the build. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="TUnit" Version="1.87.12" />
+    <!-- CollectionOrdering, used for ordered sequence checks: IsEquivalentTo(expected, CollectionOrdering.Matching). -->
+    <Using Include="TUnit.Assertions.Enums" />
   </ItemGroup>
 
+  <!-- Files still written for xunit while the suite moves to TUnit; each is removed from this list when converted. -->
   <ItemGroup>
-    <Using Include="Xunit" />
+    <Compile Remove="BigramIndexTests.cs;FacetFilterTests.cs;FastBitSetEnumerationTests.cs;FileMaskTokenizationTests.cs;GlobMatchingTests.cs;IndexUpdaterTests.cs;NameMatcherTests.cs;NameTokenizerTests.cs;NaturalSortKeyBuilderTests.cs;OperatorCorrectionTests.cs;ProgressiveIndexIngestionTests.cs;RegexMatchingTests.cs;SearchEngineNaturalSortTests.cs;SearchEngineOperatorTests.cs;SelectivityPipelineTests.cs;SingleSemanticWordTests.cs;SnapshotLazyStructureTests.cs;TextNormalizerTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
