@@ -38,6 +38,9 @@ public enum UnicodeMatching
     /// <c>й</c>→<c>и</c>), plus <c>ł</c>→<c>l</c>, <c>ø</c>→<c>o</c>, <c>đ</c>→<c>d</c>, <c>ħ</c>→<c>h</c>,
     /// <c>ı</c>→<c>i</c>, which have no decomposition. Marks of other scripts are part of the letter and stay
     /// (Japanese dakuten: <c>バ</c> ≠ <c>ハ</c>; Thai tone marks; Indic vowel signs). Implies <see cref="Compose"/>.
+    /// Caution: the folding does not know the language. <c>й</c> and <c>ў</c> become <c>и</c> and <c>у</c>, which are
+    /// different letters in Russian and Belarusian, so words that differ only by them match each other; leave this
+    /// option off for such texts.
     /// </summary>
     RemoveDiacritics = 4,
 

@@ -22,8 +22,8 @@ public readonly struct EntryFacets(FindRequest r)
 }
 
 /// <summary>
-/// Variant C (single-threaded) and D (parallel directories) streaming scans without an index. Names are matched by
-/// the package's <see cref="NameMatcher"/> with <see cref="SearchTokenization.FileMask"/>, so a hit is exactly what
+/// Streaming scans without an index: single-threaded (<c>scan</c>) and with parallel directory workers
+/// (<c>scan-parallel</c>). Names are matched by the package's <see cref="NameMatcher"/> with <see cref="SearchTokenization.FileMask"/>, so a hit is exactly what
 /// <c>Find</c> would return on an index of the same names.
 /// </summary>
 public static class StreamingScan

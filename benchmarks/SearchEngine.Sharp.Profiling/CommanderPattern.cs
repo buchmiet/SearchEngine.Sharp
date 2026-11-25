@@ -28,7 +28,7 @@ public sealed class Breakdown
 
 /// <summary>
 /// Faithful copy of Leith.Commander InternalFindNameEngine (read-only reference), with optional
-/// Stopwatch instrumentation and an injectable <see cref="IngestPublishOptions"/> (variant B).
+/// Stopwatch instrumentation and an injectable <see cref="IngestPublishOptions"/> (<c>commander-policy</c> variant).
 /// Logic, call order and allocations are kept identical to the original when instrumentation is off.
 /// </summary>
 public sealed class CommanderPattern(IngestPublishOptions? options, bool instrument, bool fseScan = false)
@@ -224,7 +224,7 @@ public sealed class CommanderPattern(IngestPublishOptions? options, bool instrum
     }
 
     /// <summary>
-    /// Variant E scan: one recursive FileSystemEnumerable pass; size, time and attributes come from the
+    /// Single-pass scan (<c>commander-single-pass</c> variant): one recursive FileSystemEnumerable pass; size, time and attributes come from the
     /// enumeration entry (one lstat per file on Unix), no Directory.Exists, no FileInfo.
     /// Does not follow directory symlinks (the original Directory.Exists check does).
     /// </summary>
