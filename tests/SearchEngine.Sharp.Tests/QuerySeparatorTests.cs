@@ -4,10 +4,9 @@ public class QuerySeparatorTests
 {
     private static SearchEngineSharp Engine(SearchTokenization tokenization, params string[] texts)
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, tokenization);
+        var (engine, updater, _) = TestIndex.Create(tokenization);
         updater.RebuildFrom(texts.Select((text, i) => (i + 1, text)).ToDictionary(p => p.Item1, p => p.text));
-        return new SearchEngineSharp(provider);
+        return engine;
     }
 
     [Test]

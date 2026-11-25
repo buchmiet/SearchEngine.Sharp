@@ -47,9 +47,7 @@ public class DuplicateIdTests
     [Test]
     public async Task AddOrUpdateEntries_keeps_the_last_value_of_a_repeated_id()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.AddOrUpdateEntries([new KeyValuePair<int, string>(5, "first"), new(6, "other"), new(5, "second")]);
 
@@ -62,9 +60,7 @@ public class DuplicateIdTests
     [Test]
     public async Task AddOrUpdateEntries_with_indexed_entries_keeps_the_last_value_of_a_repeated_id()
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         updater.AddOrUpdateEntries(
         [
@@ -87,9 +83,7 @@ public class DuplicateIdTests
             yield return new(9, "second");
         }
 
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
 
         await updater.RebuildFromAsync(Entries());
 

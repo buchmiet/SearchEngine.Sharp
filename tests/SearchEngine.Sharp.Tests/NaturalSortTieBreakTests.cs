@@ -45,7 +45,7 @@ public class NaturalSortTieBreakTests
     public async Task Hits_below_the_sort_threshold_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
@@ -56,7 +56,7 @@ public class NaturalSortTieBreakTests
     public async Task All_documents_break_ties_by_id_through_the_cached_permutation()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var first = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
         var second = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
@@ -70,7 +70,7 @@ public class NaturalSortTieBreakTests
     public async Task Filter_only_queries_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending, FacetFilter.Range("n", 1, 50));
 
@@ -81,7 +81,7 @@ public class NaturalSortTieBreakTests
     public async Task Text_and_filter_queries_break_ties_by_id()
     {
         var snapshot = BuildSnapshot();
-        var engine = new SearchEngineSharp(new FixedProvider(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
 
         var results = engine.Find("odd", WordMatchMethod.Within, false, SearchSortMode.NaturalSortAscending, FacetFilter.Range("n", 20, 170));
 
@@ -112,18 +112,13 @@ public class NaturalSortTieBreakTests
     [Test]
     public async Task Repeated_queries_on_new_snapshots_return_the_same_order()
     {
-        var expected = new SearchEngineSharp(new FixedProvider(BuildSnapshot()))
+        var expected = new SearchEngineSharp(new FixedSnapshotProvider(BuildSnapshot()))
             .Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
         for (int run = 0; run < 5; run++)
         {
-            var engine = new SearchEngineSharp(new FixedProvider(BuildSnapshot()));
+            var engine = new SearchEngineSharp(new FixedSnapshotProvider(BuildSnapshot()));
             await Assert.That(engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending)).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
-    }
-
-    private sealed class FixedProvider(IndexSnapshot snapshot) : IIndexSnapshotProvider
-    {
-        public IndexSnapshot Current => snapshot;
     }
 }
