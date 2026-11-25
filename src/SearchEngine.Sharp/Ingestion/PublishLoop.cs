@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 namespace SearchEngine.Ingestion;
@@ -77,9 +78,11 @@ internal sealed class PublishLoop(
     /// <summary>
     /// Waits for the scanner and, while a timer publish can become due, for the timer too. Returns
     /// <see langword="true"/> when entries may be available. A timer that wakes before its publish is due (timers
-    /// truncate to whole milliseconds) is re-armed for the remaining time by the next pass of the loop.
+    /// truncate to whole milliseconds) is re-armed for the remaining time by the next pass of the loop. It runs on
+    /// every wake-up, so its state machine comes from a pool instead of a new allocation each time it waits.
     /// </summary>
-    private async Task<bool> WaitForEntriesOrTimerAsync(WakeTimer wakeTimer, CancellationToken cancellationToken)
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> WaitForEntriesOrTimerAsync(WakeTimer wakeTimer, CancellationToken cancellationToken)
     {
         _pendingRead ??= WaitForEntryAsync(reader, cancellationToken);
 
