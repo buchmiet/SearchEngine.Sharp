@@ -177,6 +177,9 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
 
 ### Performance
 
+- Natural sort walks the snapshot's sort permutation for every result above 0.5% of the documents once a query has
+  built it, instead of sorting the hits up to 80%. On 100,000 names: 1% of the documents 304 us to 146 us, 10%
+  3.4 ms to 0.25 ms, 50% 19.1 ms to 0.65 ms.
 - At 1 million names on x64: suffix and infix globs 3 to 5 times faster (`*.pdf` on whole file names 35 ms to
   7 ms), `Within` 1.2 to 1.8 times faster for terms of three or more characters and about 4 times for one
   character, snapshot build allocations 812 MB to 343 MB and peak memory 1.3 GB to

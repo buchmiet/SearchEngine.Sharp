@@ -27,10 +27,15 @@ internal static class ResultMaterializer
         if (sortMode != SearchSortMode.NaturalSortAscending)
             return MaterializeSnapshotOrder(resultSet, hitCount, recordIds);
 
-        return SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount)
+        return UsesSortKPath(snapshot, hitCount)
             ? MaterializeNaturalSortKOnly(snapshot, resultSet, hitCount, recordIds)
             : MaterializeNaturalSortFullPermutation(snapshot, resultSet, hitCount, recordIds);
     }
+
+    // The natural sort strategy for hitCount hits: true sorts only the hits, false walks the sort permutation.
+    // The permutation's state is read once, so a build by another thread in between only changes the cost.
+    internal static bool UsesSortKPath(IndexSnapshot snapshot, int hitCount)
+        => SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount, snapshot.IsSortedPermutationBuilt);
 
     private static List<int> MaterializeSnapshotOrder(
         FastBitSet resultSet,

@@ -8,7 +8,8 @@ namespace SearchEngine.Sharp.MicroBenchmarks;
 /// <summary>
 /// Each natural sort strategy of <see cref="ResultMaterializer"/> on its own, by density of the hits, on a snapshot
 /// whose sort permutation is already built (warm). Together with <see cref="NaturalSortColdSelectivityBenchmark"/>
-/// this shows what <see cref="SelectivityThresholds.NaturalSortSortKMaxFraction"/> should be.
+/// this shows what <see cref="SelectivityThresholds.NaturalSortSortKMaxFraction"/> and
+/// <see cref="SelectivityThresholds.NaturalSortBuiltPermutationSortKMaxFraction"/> should be.
 /// </summary>
 [MemoryDiagnoser]
 [WarmupCount(2)]
@@ -19,7 +20,8 @@ public class NaturalSortSelectivityBenchmark
     private FastBitSet _hits = null!;
     private int _hitCount;
 
-    public static IEnumerable<double> Densities => SelectivityCorpus.Densities;
+    // The corpus densities plus finer steps below 1%, where the limit for the built permutation lies.
+    public static IEnumerable<double> Densities => SelectivityCorpus.Densities.Concat([0.002, 0.005]).Order();
 
     [ParamsSource(nameof(Densities))]
     public double Density { get; set; }
