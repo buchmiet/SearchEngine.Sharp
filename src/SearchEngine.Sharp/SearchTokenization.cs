@@ -80,13 +80,15 @@ public sealed class SearchTokenization
         return new(IndexSeparators, QuerySeparators, options);
     }
 
-    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
+    // Indexed text, split at the index separators as written and folded token by token (TextFolder.FoldRuns).
+    internal string FoldIndexText(string text) => TextFolder.FoldRuns(text, UnicodeMatching, IndexSeparatorValues);
 
-    // One query term, after operators have been recognized on the query as typed. Regex patterns are never folded.
+    // One query term, split at the query separators as written, after operators have been recognized on the query
+    // as typed. Regex patterns are never folded.
     internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
         => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
             ? term
-            : TextFolder.Fold(term.ToString(), UnicodeMatching);
+            : TextFolder.Fold(term.ToString(), UnicodeMatching, QuerySeparatorValues);
 
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 

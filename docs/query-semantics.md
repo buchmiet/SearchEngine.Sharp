@@ -5,11 +5,12 @@ patterns, regular expressions, Unicode options, facet filters and result order.
 
 ## Pipeline overview
 
-Indexing: `SearchText` → split on the snapshot's index-side separators → lowercase
-→ unique tokens per document → inverted index (token → posting list of documents).
+Indexing: `SearchText` → split on the snapshot's index-side separators → Unicode options
+applied to each token, if any → lowercase → unique tokens per document → inverted index
+(token → posting list of documents).
 
-Querying: expression → split on the snapshot's query-side separators → each term
-resolves to a document set → sets combined with boolean algebra → optional facet filter
+Querying: expression → split on the snapshot's query-side separators → Unicode options
+applied to each term, if any → lowercase → each term resolves to a document set → sets combined with boolean algebra → optional facet filter
 intersected → results materialized in the requested sort order.
 
 Both separator sets are stored in each `IndexSnapshot` as a `SearchTokenization` preset
@@ -99,6 +100,15 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 | `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
 | `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
 | `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`) |
+
+Indexed text and queries are folded the same way. Both are split at their separators as written, and each token
+or term is then folded on its own: composition (or accent removal), case folding, the per-character lowercase
+that every token gets, and composition once more, because lowercasing can undo it (`T` + U+0308 has no composed
+form, but `t` + U+0308 composes to `ẗ`). So a name, its lowercase form and its composed form all find each other.
+A combining mark after a separator never composes with it: with `=` as a separator, `x=` + U+0338 is the tokens
+`x` and U+0338 on both sides, not `x≠`. When folding produces a separator (U+037E GREEK QUESTION MARK composes to
+`;`), the token or term splits there. Under `Compose` the decomposed `I` + U+0307 is `İ`, which lowercases (and
+case folds) to a plain `i`, so it does not match `i` + U+0307.
 
 Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
 would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so

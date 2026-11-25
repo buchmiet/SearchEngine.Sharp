@@ -349,6 +349,100 @@ public class UnicodeMatchingTests
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Within, "pha\u037Ebe", [1]);
     }
 
+    // Lowercasing after composition can leave text that is not NFC: T + U+0308 has no uppercase precomposed form, but
+    // t + U+0308 composes to U+1E97. The name, its lowercase form and its NFC form must all find each other.
+    [Test]
+    [SkipUnlessNormalization]
+    [Arguments("SALAT\u0308", "salat\u0308")]
+    [Arguments("SALAT\u0308", "sala\u1E97")]
+    [Arguments("J\u030CAN", "j\u030Can")]
+    [Arguments("J\u030CAN", "\u01F0an")]
+    [Arguments("sala\u1E97", "SALAT\u0308")]
+    public async Task Compose_NameMatchesItsLowercaseAndComposedForms(string name, string query)
+    {
+        foreach (var options in new[] { UnicodeMatching.Compose, UnicodeMatching.Compose | UnicodeMatching.CaseFold })
+        {
+            var tokenization = SearchTokenization.Default.WithUnicodeMatching(options);
+            string[] names = [name, "other"];
+            var engine = Index(tokenization, names);
+
+            await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, query, [1]);
+            await AssertFinds(engine, tokenization, names, WordMatchMethod.Within, query, [1]);
+        }
+    }
+
+    // Text and queries are split at the separators as written and then folded, so a combining mark after a
+    // separator never composes with it: x, '=' and U+0338 stay the token x and the token U+0338 y instead of one
+    // token with U+2260 NOT EQUAL TO, on both sides.
+    [Test]
+    [SkipUnlessNormalization]
+    public async Task Compose_ASeparatorFollowedByACombiningMarkSplitsTextAndQueryAlike()
+    {
+        var tokenization = SearchTokenization.Create(" =", " =").WithUnicodeMatching(UnicodeMatching.Compose);
+        string[] names = ["x=\u0338y", "x\u2260y", "other"];
+        var engine = Index(tokenization, names);
+
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "x=\u0338y", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "\u0338y", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "x\u2260y", [2]);
+    }
+
+    // Generated names of letters in both cases, combining marks, characters that fold or compose to separators,
+    // noncharacters and lone surrogates: every name is found by itself and by its per-character lowercase form, on
+    // the index and by NameMatcher. I + U+0307 is left out: under Compose it is U+0130, which folds to a plain i, so
+    // its per-character lowercase i + U+0307 is another word (docs/query-semantics.md, Unicode matching).
+    [Test]
+    [SkipUnlessNormalization]
+    public async Task GeneratedNames_AreFoundByThemselvesAndTheirLowercaseForm()
+    {
+        string[] pool =
+        [
+            "a", "T", "t", "J", "I", "i", "S", "\u00DF", "\u03A3", "\u03C2", "\u0130", "\u212A", " ", "-", ".", "=",
+            "\u0308", "\u030C", "\u0301", "\u0323", "\u0338", "\u0345", "\u037E", "\uFFFF", "\uFDD0", "\uD800",
+            "\uD801\uDC00", "\u1E97", "\u01F0", "e\u0301",
+        ];
+        var random = new Random(1234);
+        var names = new string[300];
+        for (int i = 0; i < names.Length; i++)
+            names[i] = string.Concat(Enumerable.Range(0, random.Next(1, 7)).Select(_ => pool[random.Next(pool.Length)]));
+
+        var failures = new List<string>();
+        foreach (var options in new[]
+                 {
+                     UnicodeMatching.Compose,
+                     UnicodeMatching.Compose | UnicodeMatching.CaseFold,
+                     UnicodeMatching.RemoveDiacritics | UnicodeMatching.CaseFold,
+                 })
+        {
+            foreach (var preset in new[] { SearchTokenization.Default, SearchTokenization.FileMask })
+            {
+                var tokenization = preset.WithUnicodeMatching(options);
+                var engine = Index(tokenization, names);
+                for (int i = 0; i < names.Length; i++)
+                {
+                    // Skipped: a name without tokens after folding (U+037E folds to the separator ';'), and under FileMask
+                    // a name with a space, which a query cannot hold in one term.
+                    if (tokenization.FoldIndexText(names[i]).AsSpan().IndexOfAnyExcept(tokenization.IndexSeparatorValues) < 0
+                        || (preset == SearchTokenization.FileMask && names[i].Contains(' ')))
+                        continue;
+
+                    string lower = string.Concat(names[i].Select(char.ToLowerInvariant));
+                    foreach (string query in new[] { names[i], lower })
+                    {
+                        bool index = engine.Find(query, WordMatchMethod.Exact).Contains(i + 1);
+                        bool matcher = NameMatcher.Create(query, WordMatchMethod.Exact, tokenization: tokenization).IsMatch(names[i]);
+                        if (!index || !matcher)
+                            failures.Add($"{options} {preset.IndexSeparators.Length}: {Escape(names[i])} by {Escape(query)}: index {index}, matcher {matcher}");
+                    }
+                }
+            }
+        }
+
+        await Assert.That(failures).IsEmpty().Because(string.Join("\n", failures.Take(20)));
+
+        static string Escape(string s) => string.Concat(s.Select(c => c < 128 ? c.ToString() : $"\\u{(int)c:X4}"));
+    }
+
     private static async Task AssertFinds(
         SearchEngineSharp engine,
         SearchTokenization tokenization,

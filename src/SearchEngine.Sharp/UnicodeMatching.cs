@@ -71,19 +71,102 @@ internal static class TextFolder
 
     internal const UnicodeMatching FoldingOptions = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
 
-    internal static string Fold(string text, UnicodeMatching normalization)
+    /// <summary>
+    /// Folds indexed text: every run between <paramref name="separators"/> is folded on its own (<see cref="Fold"/>)
+    /// and the separators are kept. Text is split as written, before folding, exactly like a query, so a combining
+    /// mark after a separator never composes with it. Returns <paramref name="text"/> itself when nothing changes.
+    /// </summary>
+    internal static string FoldRuns(string text, UnicodeMatching options, SearchValues<char> separators)
     {
-        if ((normalization & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
+        if ((options & FoldingOptions) == 0 || Ascii.IsValid(text))
             return text;
 
-        bool removeDiacritics = (normalization & UnicodeMatching.RemoveDiacritics) != 0;
-        if (removeDiacritics || (normalization & UnicodeMatching.Compose) != 0)
+        StringBuilder? sb = null;
+        int copied = 0;
+        int position = 0;
+        while (position < text.Length)
+        {
+            int offset = text.AsSpan(position).IndexOfAnyExcept(separators);
+            if (offset < 0)
+                break;
+
+            int start = position + offset;
+            int length = text.AsSpan(start).IndexOfAny(separators);
+            position = length < 0 ? text.Length : start + length;
+            var run = text.AsSpan(start, position - start);
+            if (Ascii.IsValid(run))
+                continue;
+
+            string folded = Fold(run.Length == text.Length ? text : run.ToString(), options, separators);
+            if (folded.AsSpan().SequenceEqual(run))
+                continue;
+
+            sb ??= new StringBuilder(text.Length + 8);
+            sb.Append(text, copied, start - copied).Append(folded);
+            copied = position;
+        }
+
+        return sb?.Append(text, copied, text.Length - copied).ToString() ?? text;
+    }
+
+    /// <summary>
+    /// Folds one run of text that holds no separator as written: a token of indexed text or a query term. The steps
+    /// are composition (or accent removal), case folding, and then, when composing, the per-character lowercase that
+    /// the tokenizer applies anyway followed by composition again: lowercasing can undo NFC (T + U+0308 has no
+    /// precomposed form, t + U+0308 composes to U+1E97), so composition comes last. A character whose lowercase is
+    /// one of <paramref name="separators"/> is left for the tokenizer, so lowercasing here never moves a token
+    /// boundary.
+    /// </summary>
+    internal static string Fold(string text, UnicodeMatching options, SearchValues<char>? separators = null)
+    {
+        if ((options & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
+            return text;
+
+        bool removeDiacritics = (options & UnicodeMatching.RemoveDiacritics) != 0;
+        bool normalize = removeDiacritics || (options & UnicodeMatching.Compose) != 0;
+        if (normalize)
             text = NormalizeWellFormedRuns(text, removeDiacritics);
 
-        if ((normalization & UnicodeMatching.CaseFold) != 0)
+        string composed = text;
+        if ((options & UnicodeMatching.CaseFold) != 0)
             text = ApplyCaseFolding(text);
 
+        // Case folding can undo NFC as well (U+0130 + U+0301 folds to i + U+0301, which composes to U+00ED).
+        if (normalize)
+        {
+            text = Lowercase(text, separators);
+            if (!ReferenceEquals(text, composed))
+                text = NormalizeWellFormedRuns(text, removeDiacritics);
+        }
+
         return text;
+    }
+
+    // TextNormalizer.ToLowerInvariantFast per UTF-16 unit, except for characters whose lowercase is a separator.
+    private static string Lowercase(string text, SearchValues<char>? separators)
+    {
+        int first = 0;
+        while (first < text.Length && !LowersHere(text[first], separators))
+            first++;
+
+        if (first == text.Length)
+            return text;
+
+        return string.Create(text.Length, (text, separators, first), static (destination, state) =>
+        {
+            state.text.AsSpan(0, state.first).CopyTo(destination);
+            for (int i = state.first; i < destination.Length; i++)
+            {
+                char ch = state.text[i];
+                destination[i] = LowersHere(ch, state.separators) ? Tokenizer.TextNormalizer.ToLowerInvariantFast(ch) : ch;
+            }
+        });
+    }
+
+    private static bool LowersHere(char ch, SearchValues<char>? separators)
+    {
+        char lower = Tokenizer.TextNormalizer.ToLowerInvariantFast(ch);
+        return lower != ch && (separators is null || !separators.Contains(lower));
     }
 
     // string.Normalize and string.IsNormalized throw ArgumentException on ill-formed UTF-16 (a lone surrogate, which
