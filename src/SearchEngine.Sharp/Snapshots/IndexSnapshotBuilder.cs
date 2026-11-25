@@ -47,10 +47,11 @@ namespace SearchEngine.Snapshots;
 /// <see cref="IReadOnlyDictionary{TKey, TValue}"/>, whose keys are unique.</para>
 /// <para>A document without a value for a facet that other documents carry gets 0 in that facet.</para>
 /// <para>The progress values are percentages: the first half covers reading the entries, the second half packing
-/// the tokens. When the entries do not expose their count without enumerating, the first half reports 50
-/// throughout. The last report is below 100; the build is complete when the method returns.
-/// <see cref="IProgress{T}.Report"/> is called on the building thread once per entry and once per distinct token, so
-/// keep the handler cheap.</para>
+/// the tokens. <see cref="IProgress{T}.Report"/> is called on the building thread when the value reaches a new whole
+/// percent, so a build of any size makes at most 102 reports, and the last report is 100, made when the snapshot is
+/// complete. Each value is the total progress so far, so a handler that skips reports loses nothing. When the
+/// entries do not expose their count without enumerating, the first half is reported once, as 50, after they are
+/// read. No entries give a single report of 100.</para>
 /// <para>To query a snapshot built here, return it from your own <see cref="IIndexSnapshotProvider"/> and pass that
 /// provider to <see cref="SearchEngineSharp"/>.</para>
 /// </remarks>
@@ -190,6 +191,7 @@ public static class IndexSnapshotBuilder
         int totalPostings = 0;
         int totalSize = entryCount;
         int documentIndex = 0;
+        var reporter = new PercentReporter(progress);
 
         foreach (var (key, entry) in entries)
         {
@@ -260,12 +262,18 @@ public static class IndexSnapshotBuilder
                 }
             }
 
-            progress?.Report(totalSize > 0 ? (float)documentIndex / totalSize * 50.0f : 50.0f);
+            if (totalSize > 0)
+                reporter.Report(Math.Min(50.0f, (float)documentIndex / totalSize * 50.0f));
             documentIndex++;
         }
 
         if (recordIds.Count == 0)
+        {
+            reporter.Complete();
             return IndexSnapshot.EmptyFor(tokenization);
+        }
+
+        reporter.Report(50.0f);
 
         var wordDescriptions = new List<WordDescription>(invertedIndex.Count);
         foreach (var (word, docIds) in invertedIndex)
@@ -311,7 +319,7 @@ public static class IndexSnapshotBuilder
             wordLengths[i] = word.Length;
             wordEnds[i] = wordsOffset; // exclusive end; word starts at wordsOffset - word.Length
 
-            progress?.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
+            reporter.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
         }
 
         // Phase 4 (bigram index) is built lazily by IndexSnapshot on the first Within query:
@@ -320,7 +328,7 @@ public static class IndexSnapshotBuilder
         var recordIdsArr = recordIds.ToArray();
         var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues, directFacetColumns);
 
-        return new IndexSnapshot(
+        var snapshot = new IndexSnapshot(
             recordIds: recordIdsArr,
             exactPostings: exactPostings,
             wordsArray: wordsArray,
@@ -335,6 +343,27 @@ public static class IndexSnapshotBuilder
             documentCount: recordIdsArr.Length,
             uniqueWordCount: stringPool.Count
         );
+
+        reporter.Complete();
+        return snapshot;
+    }
+
+    // Passes a percentage on only when it reaches the next whole percent, so the number of reports does not grow
+    // with the number of entries or tokens.
+    private struct PercentReporter(IProgress<float>? progress)
+    {
+        private int _nextWholePercent;
+
+        public void Report(float percent)
+        {
+            if (progress is null || percent < _nextWholePercent)
+                return;
+
+            progress.Report(percent);
+            _nextWholePercent = (int)percent + 1;
+        }
+
+        public readonly void Complete() => progress?.Report(100.0f);
     }
 
     private static Dictionary<string, long[]> BuildFacetColumns(

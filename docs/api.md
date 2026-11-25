@@ -230,6 +230,9 @@ static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
 - The entries are enumerated once, in the order that becomes `SnapshotOrder`.
 - An id that occurs twice throws `ArgumentException` naming the id. Dictionaries are not checked, because their
   keys are unique.
+- `progress` receives percentages on the building thread, once each time the value reaches a new whole percent
+  (at most 102 reports per build). The last report is 100, made when the snapshot is complete. `RebuildFromAsync`
+  reports its rebuild the same way.
 
 ## Namespace `SearchEngine.Ingestion`
 

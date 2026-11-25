@@ -48,6 +48,10 @@ Changed.
 - `SearchTokenization.Default` splits queries at a tab too, like indexed text. A query pasted with a tab
   between its words used to be one term that could never match. `FileMask` is unchanged: a tab stays part of the
   mask.
+- The `IProgress<float>` of `IndexSnapshotBuilder.Build` and `IIndexUpdater.RebuildFromAsync` is called when the
+  value reaches a new whole percent, at most 102 times per build, and the last report is 100. It used to be called
+  once per entry and once per distinct token (about 209,000 calls for 100,000 file names), which flooded the UI
+  thread when the handler was a `Progress<T>`. The values are cumulative, so nothing is lost between reports.
 - `IndexSnapshotBuilder.Build` throws `ArgumentException` naming the id when an id occurs more than once in the
   entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
   because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the
