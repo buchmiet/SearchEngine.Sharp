@@ -148,25 +148,29 @@ public class IndexUpdaterTests
         }
     }
 
-    public static IEnumerable<string> Presets() => ["default", "filemask", "custom", "unicode"];
-
     private static SearchTokenization PresetByName(string name) => name switch
     {
         "default" => SearchTokenization.Default,
         "filemask" => SearchTokenization.FileMask,
-        "custom" => SearchTokenization.Create("_", " "),
-        _ => SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
+        _ => SearchTokenization.Create("_", " "),
     };
 
     [Test]
-    [MethodDataSource(nameof(Presets))]
-    public async Task Clear_KeepsTheConfigurationOfTheUpdater(string preset)
-    {
-        // The unicode preset composes, which needs Unicode normalization.
-        if (preset == "unicode")
-            Skip.Unless(TextFolder.IsNormalizationAvailable, SkipUnlessNormalizationAttribute.SkipReason);
+    [Arguments("default")]
+    [Arguments("filemask")]
+    [Arguments("custom")]
+    public Task Clear_KeepsTheConfigurationOfTheUpdater(string preset)
+        => AssertClearKeepsTheConfiguration(PresetByName(preset));
 
-        var tokenization = PresetByName(preset);
+    // Compose needs Unicode normalization, so this preset is skipped in globalization-invariant mode.
+    [Test]
+    [SkipUnlessNormalization]
+    public Task Clear_KeepsTheConfigurationOfTheUpdater_WithUnicodeMatching()
+        => AssertClearKeepsTheConfiguration(
+            SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold));
+
+    private static async Task AssertClearKeepsTheConfiguration(SearchTokenization tokenization)
+    {
         var (engine, updater, provider) = TestIndex.Create(tokenization);
         var entries = new Dictionary<int, string>
         {

@@ -82,10 +82,10 @@ internal static class IngestionPolicyBenchmark
         double scanMs = Stopwatch.GetElapsedTime(scanStarted).TotalMilliseconds;
 
         double oneShotMs = MeasureOneShotRebuildMs(documentCount, seed);
-        double overhead = oneShotMs > 0 ? result.TotalRebuildCpu.TotalMilliseconds / oneShotMs : 0;
+        double overhead = oneShotMs > 0 ? result.TotalRebuildDuration.TotalMilliseconds / oneShotMs : 0;
 
         Console.WriteLine(
-            $"{label,-18} {scanMs,10:F0} {result.TotalRebuildCpu.TotalMilliseconds,11:F0} {result.PublishCount,10} {result.WorstCaseStaleness.TotalMilliseconds,13:F0} {overhead,10:F2}");
+            $"{label,-18} {scanMs,10:F0} {result.TotalRebuildDuration.TotalMilliseconds,11:F0} {result.PublishCount,10} {result.MaxObservedStaleness.TotalMilliseconds,13:F0} {overhead,10:F2}");
     }
 
     private static double MeasureOneShotRebuildMs(int documentCount, int seed)

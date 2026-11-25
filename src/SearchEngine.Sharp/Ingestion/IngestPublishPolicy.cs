@@ -1,24 +1,26 @@
 namespace SearchEngine.Ingestion;
 
 /// <summary>
-/// Controls when buffered scan results are published to the search index.
+/// Decides when <see cref="ProgressiveIndexIngestion"/> publishes the buffered entries of a scan. Every policy also
+/// publishes what is left when the scan ends.
 /// </summary>
 public enum IngestPublishPolicy
 {
     /// <summary>
-    /// Publishes after every entry. Intended only as a baseline for small collections;
-    /// total rebuild cost grows quadratically with document count.
+    /// Publishes after every entry. Meant only as a baseline for small collections: total rebuild cost grows with
+    /// the square of the document count.
     /// </summary>
     PerEntry,
 
     /// <summary>
-    /// Publishes when the pending buffer reaches <see cref="IngestPublishOptions.FixedBatchSize"/>.
+    /// Publishes when the buffer reaches <see cref="IngestPublishOptions.FixedBatchSize"/> entries, or, when the
+    /// next entry arrives, if the oldest buffered entry is older than <see cref="IngestPublishOptions.MaxStaleness"/>.
     /// </summary>
     FixedBatch,
 
     /// <summary>
-    /// Publishes when the pending buffer is non-empty and
-    /// <see cref="IngestPublishOptions.MinInterval"/> has elapsed since the last publish.
+    /// Publishes when the buffer is not empty and <see cref="IngestPublishOptions.MinInterval"/> has passed since the
+    /// last publish, or when the oldest buffered entry reaches <see cref="IngestPublishOptions.MaxStaleness"/>.
     /// </summary>
     TimeDebounce,
 

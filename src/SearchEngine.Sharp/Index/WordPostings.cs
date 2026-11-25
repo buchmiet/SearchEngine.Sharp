@@ -1,7 +1,7 @@
 namespace SearchEngine.Index;
 
 /// <summary>
-/// Represents posting list location in the flattened indices array.
+/// Location of a posting list in the flattened indices array.
 /// </summary>
 internal readonly struct WordPostings(int offset, int count)
 {

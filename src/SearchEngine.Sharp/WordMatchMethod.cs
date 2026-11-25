@@ -19,11 +19,11 @@ public enum WordMatchMethod
     Within = 1,
 
     /// <summary>
-    /// The entire expression is one .NET regular expression matched against indexed tokens
-    /// via standard unanchored <see cref="System.Text.RegularExpressions.Regex.IsMatch(ReadOnlySpan{char})"/>.
-    /// Boolean parsing and token separators are bypassed. The pattern is compiled case-insensitive and, when the
-    /// pattern supports it, non-backtracking, with a one-second match timeout. An invalid pattern or a timeout
-    /// gives an empty result.
+    /// The whole expression is one .NET regular expression, matched against each indexed token with unanchored
+    /// <see cref="System.Text.RegularExpressions.Regex.IsMatch(ReadOnlySpan{char})"/>; a document matches when one
+    /// of its tokens does. Operators and query separators do not apply. The pattern is compiled case-insensitive
+    /// and culture-invariant, non-backtracking when the pattern allows it, with a one-second timeout for each
+    /// token. An invalid pattern, or a timeout on any token, gives an empty result.
     /// </summary>
     Regex = 2,
 }

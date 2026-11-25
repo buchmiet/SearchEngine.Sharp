@@ -255,7 +255,22 @@ public class ProgressiveIndexIngestionTests
             .Because($"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
         await Assert.That(growth.PublishCount).IsEqualTo(5);      // 2k, 4k, 8k, 16k, final 20k
         await Assert.That(fixedBatch.PublishCount).IsEqualTo(10); // every 2k
-        await Assert.That(growth.TotalRebuildCpu).IsLessThan(fixedBatch.TotalRebuildCpu);
+        await Assert.That(growth.TotalRebuildDuration).IsLessThan(fixedBatch.TotalRebuildDuration);
+    }
+
+    [Test]
+    public async Task Ingest_TotalRebuildDuration_IsTheSumOfTheRebuildDurationsOfAllPublishes()
+    {
+        var (_, _, ingestion) = Create();
+        var rebuildDurations = new ConcurrentQueue<TimeSpan>();
+
+        var result = await ingestion.IngestAsync(
+            SyntheticPathFeed.EnumerateAsync(1_000, seed: 5),
+            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 250 },
+            onPublished: e => rebuildDurations.Enqueue(e.RebuildDuration));
+
+        await Assert.That(rebuildDurations.Count).IsEqualTo(4);
+        await Assert.That(result.TotalRebuildDuration).IsEqualTo(TimeSpan.FromTicks(rebuildDurations.Sum(d => d.Ticks)));
     }
 
     [Test]
@@ -623,7 +638,7 @@ public class ProgressiveIndexIngestionTests
         var result = await ingest.WaitAsync(TestTimeout);
 
         await Assert.That(publishes.ToArray()).IsEquivalentTo([20, 5], CollectionOrdering.Matching);
-        await Assert.That(result.WorstCaseStaleness).IsEqualTo(TimeSpan.FromMilliseconds(expectedStalenessMs));
+        await Assert.That(result.MaxObservedStaleness).IsEqualTo(TimeSpan.FromMilliseconds(expectedStalenessMs));
     }
 
     /// <summary>

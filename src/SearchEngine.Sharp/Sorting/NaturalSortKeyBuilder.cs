@@ -1,23 +1,23 @@
 namespace SearchEngine.Sorting;
 
 /// <summary>
-/// Builds a natural sort key from a string so that ordinal comparison produces natural ordering.
+/// Builds the key that <see cref="SearchSortMode.NaturalSortAscending"/> compares ordinally, so that
+/// <c>file2</c> sorts before <c>file10</c>.
 /// </summary>
 /// <remarks>
-/// Rules:
+/// <para>The text is split into parts:</para>
 /// <list type="number">
-/// <item>The input is split into tokens at separators (-, space, _, /).</item>
-/// <item>Consecutive letters and digits within a segment are split into separate tokens.</item>
-/// <item>Any other character (punctuation, symbols) forms a one-character text token.</item>
-/// <item>Numeric tokens sort before text tokens at the same position.</item>
-/// <item>Numbers are compared numerically (via zero-padded representation).</item>
-/// <item>Text tokens are compared case-insensitively.</item>
-/// <item>Shorter token sequences sort before longer ones when all compared tokens are equal.</item>
+/// <item>The characters <c>-</c>, space, <c>_</c> and <c>/</c> separate parts and are dropped.</item>
+/// <item>Each run of letters and each run of digits (<see cref="char.IsLetter(char)"/>,
+/// <see cref="char.IsDigit(char)"/>) is a part of its own.</item>
+/// <item>Any other character (punctuation, symbols) is a one-character text part.</item>
 /// </list>
-///
-/// Key format: tokens joined by '|', each prefixed with '0:' (number) or '1:' (text).
-/// Numbers are zero-padded to 12 digits. A digit run longer than 12 digits is kept in full, so numbers
-/// above 12 digits are not ordered numerically against numbers of a different length.
+/// <para>The key joins the parts with <c>|</c>. A number part is written as <c>0:</c> followed by the digits
+/// zero-padded to 12; a text part as <c>1:</c> followed by its invariant lowercase. So a number sorts before text at
+/// the same position, numbers of up to 12 digits compare by value, text compares case-insensitively, and a text
+/// whose parts all equal the start of a longer one sorts first. A digit run longer than 12 digits is kept in full and
+/// is not ordered by value against numbers of a different length. Numbers that differ only in leading zeros get the
+/// same key.</para>
 /// </remarks>
 public static class NaturalSortKeyBuilder
 {
@@ -28,9 +28,12 @@ public static class NaturalSortKeyBuilder
     private const int MaxCharsPerInputChar = NumericPadding + 3; // 15
 
     /// <summary>
-    /// Builds a natural sort key for the given sort text.
-    /// Uses stackalloc for short inputs to avoid heap allocation.
+    /// Builds the natural sort key of <paramref name="sortText"/>.
     /// </summary>
+    /// <param name="sortText">The text to build the key for, usually <see cref="IndexedEntry.SortText"/>.</param>
+    /// <returns>The key, or an empty string for a <see langword="null"/> or empty text.</returns>
+    /// <remarks>For texts of up to 64 characters the only allocation is the returned string. The method is
+    /// thread-safe.</remarks>
     public static string Build(string sortText)
     {
         if (string.IsNullOrEmpty(sortText))

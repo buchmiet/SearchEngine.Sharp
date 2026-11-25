@@ -1,28 +1,64 @@
 namespace SearchEngine;
 
 /// <summary>
-/// Executes search queries against the current index snapshot.
-/// Stateless: all state comes from IIndexSnapshotProvider.
+/// Runs queries against the current snapshot of an <see cref="IIndexSnapshotProvider"/>.
 /// </summary>
+/// <remarks>
+/// <para>Each call reads <see cref="IIndexSnapshotProvider.Current"/> once, so it sees the index either before or
+/// after a publish, never a mix. Implementations keep no state of their own and are safe to call from many threads
+/// at once.</para>
+/// <para>An expression is split into terms at the query separators of the snapshot's
+/// <see cref="SearchTokenization"/>. Adjacent terms are joined with AND. A term that contains <c>*</c> or <c>?</c>
+/// is a glob that must match a whole token. With <c>enableOperators</c> set, the words <c>and</c>, <c>or</c> and
+/// <c>not</c> (ASCII case-insensitive) and balanced parentheses are operators; a malformed expression is corrected,
+/// never rejected. Under <see cref="WordMatchMethod.Regex"/> the whole expression is one pattern and
+/// <c>enableOperators</c> is ignored.</para>
+/// <para>A <see langword="null"/>, empty or whitespace expression matches nothing, unless a non-empty facet filter
+/// is given; then every document that passes the filter matches.</para>
+/// <para>The first <see cref="WordMatchMethod.Within"/> query and the first
+/// <see cref="SearchSortMode.NaturalSortAscending"/> query on a snapshot can build a lookup structure for that
+/// snapshot, so they take longer than later ones.</para>
+/// </remarks>
 public interface ISearchEngine
 {
     /// <summary>
-    /// Searches for entries matching the given expression.
+    /// Returns the ids of the documents that match <paramref name="expression"/>, in snapshot order.
     /// </summary>
-    /// <param name="expression">Search expression.</param>
-    /// <param name="method">Matching method (Exact, Within, or Regex).</param>
-    /// <param name="enableOperators">Enable AND/OR/NOT operators in the expression. Ignored for Regex.</param>
-    /// <returns>List of matching document IDs.</returns>
+    /// <param name="expression">The query.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false);
 
     /// <summary>
-    /// Searches for entries matching the given expression with sort control.
+    /// Returns the ids of the documents that match <paramref name="expression"/>, in the order given by
+    /// <paramref name="sortMode"/>.
     /// </summary>
+    /// <param name="expression">The query.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="sortMode">The order of the returned ids.</param>
+    /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode);
 
     /// <summary>
-    /// Searches for entries matching the given expression with optional facet filtering.
+    /// Returns the ids of the documents that match <paramref name="expression"/> and pass
+    /// <paramref name="filter"/>, in the order given by <paramref name="sortMode"/>.
     /// </summary>
+    /// <param name="expression">The query. When it is empty or whitespace and <paramref name="filter"/> is not empty,
+    /// every document that passes the filter matches.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="sortMode">The order of the returned ids.</param>
+    /// <param name="filter">Facet predicates applied after the expression, or <see langword="null"/> for none.
+    /// Pass <see langword="null"/> rather than <see cref="Filters.FacetFilter.None"/> when there are no
+    /// predicates.</param>
+    /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
+    /// <exception cref="ArgumentException"><paramref name="filter"/> names a facet that no document in the snapshot
+    /// carries. The check is skipped when the index is empty or the expression matches nothing.</exception>
     List<int> Find(
         string expression,
         WordMatchMethod method,
@@ -31,22 +67,38 @@ public interface ISearchEngine
         Filters.FacetFilter? filter);
 
     /// <summary>
-    /// Counts entries matching the given expression without materializing document IDs.
+    /// Returns the number of documents that match <paramref name="expression"/> without building the list of ids.
     /// </summary>
+    /// <param name="expression">The query.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <returns>The number of ids that <see cref="Find(string, WordMatchMethod, bool)"/> would return.</returns>
     int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false);
 
     /// <summary>
-    /// Counts entries matching the given expression with optional facet filtering.
+    /// Returns the number of documents that match <paramref name="expression"/> and pass <paramref name="filter"/>
+    /// without building the list of ids.
     /// </summary>
+    /// <param name="expression">The query. When it is empty or whitespace and <paramref name="filter"/> is not empty,
+    /// every document that passes the filter is counted.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="filter">Facet predicates applied after the expression, or <see langword="null"/> for none.</param>
+    /// <returns>The number of ids that
+    /// <see cref="Find(string, WordMatchMethod, bool, SearchSortMode, Filters.FacetFilter?)"/> would return.</returns>
+    /// <exception cref="ArgumentException"><paramref name="filter"/> names a facet that no document in the snapshot
+    /// carries. The check is skipped when the index is empty or the expression matches nothing.</exception>
     int CountMatches(string expression, WordMatchMethod method, bool enableOperators, Filters.FacetFilter? filter);
 
     /// <summary>
-    /// Gets the number of indexed documents in the current snapshot.
+    /// Gets the number of documents in the current snapshot.
     /// </summary>
     int DocumentCount { get; }
 
     /// <summary>
-    /// Gets the number of unique words in the current snapshot.
+    /// Gets the number of distinct tokens in the current snapshot.
     /// </summary>
     int UniqueWordCount { get; }
 }

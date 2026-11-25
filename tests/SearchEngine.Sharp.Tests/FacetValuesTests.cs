@@ -111,7 +111,7 @@ public class FacetValuesTests
         }
         finally
         {
-            stop.Cancel();
+            await stop.CancelAsync();
             await mutator;
         }
 

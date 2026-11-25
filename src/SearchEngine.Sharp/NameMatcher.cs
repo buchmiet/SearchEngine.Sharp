@@ -8,14 +8,13 @@ namespace SearchEngine;
 /// <summary>
 /// Matches one text (typically a file name) against a query without building an index.
 /// <see cref="IsMatch"/> returns the same answer as <see cref="ISearchEngine.Find(string, WordMatchMethod, bool)"/>
-/// on an index that contains only that text, built with the same <see cref="SearchTokenization"/>:
-/// the same boolean grammar, glob rules, exact / within / regex semantics and Unicode options.
+/// on an index that holds only that text and was built with the same <see cref="SearchTokenization"/>: the same
+/// operators, glob rules, <see cref="WordMatchMethod"/> semantics and Unicode options.
 /// </summary>
 /// <remarks>
-/// Use it for one-shot searches that read every name once anyway (a directory scan): filtering names while
-/// they are enumerated is cheaper than indexing them (see docs/file-search-guide.md). Instances are immutable
-/// and safe for concurrent use. Facet criteria are not part of the expression; apply them to the metadata
-/// you already have.
+/// Use it for one-shot searches that read every name once anyway, such as a directory scan: filtering names while
+/// they are enumerated is cheaper than indexing them first. Facet criteria are not part of the expression; check
+/// them against the metadata you already have. Instances are immutable and safe to share between threads.
 /// </remarks>
 public sealed class NameMatcher
 {
@@ -45,11 +44,16 @@ public sealed class NameMatcher
         }
     }
 
-    /// <summary>Compiles <paramref name="expression"/> once for many <see cref="IsMatch"/> calls.</summary>
-    /// <param name="expression">Query as passed to <c>Find</c>.</param>
-    /// <param name="method">Match method as passed to <c>Find</c>.</param>
-    /// <param name="enableOperators">As passed to <c>Find</c>.</param>
-    /// <param name="tokenization">Preset of the index this matcher stands in for; <see cref="SearchTokenization.Default"/> when null.</param>
+    /// <summary>Parses <paramref name="expression"/> once for many <see cref="IsMatch"/> calls.</summary>
+    /// <param name="expression">The query, as it would be passed to <c>Find</c>.</param>
+    /// <param name="method">How terms match tokens, as it would be passed to <c>Find</c>.</param>
+    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
+    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="tokenization">The preset of the index this matcher stands in for;
+    /// <see cref="SearchTokenization.Default"/> when <see langword="null"/>.</param>
+    /// <returns>A matcher for the expression. An empty or whitespace expression, or an invalid regular expression,
+    /// gives a matcher that matches nothing.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     public static NameMatcher Create(string expression, WordMatchMethod method, bool enableOperators = false, SearchTokenization? tokenization = null)
     {
         ArgumentNullException.ThrowIfNull(expression);
@@ -67,7 +71,13 @@ public sealed class NameMatcher
         return new NameMatcher(tokenization, method, postfix?.ToArray(), null);
     }
 
-    /// <summary>True when an index holding only <paramref name="text"/> would return it for this query.</summary>
+    /// <summary>Returns whether an index that holds only <paramref name="text"/> would return it for this
+    /// query.</summary>
+    /// <param name="text">The text to test, used as <see cref="IndexedEntry.SearchText"/>.</param>
+    /// <returns><see langword="true"/> when the text matches. A regular expression that times out on any token
+    /// gives <see langword="false"/>.</returns>
+    /// <remarks>Texts of up to 256 characters are lowercased on the stack; longer ones use a pooled buffer. A text
+    /// with non-ASCII characters allocates a folded copy when the preset has Unicode options.</remarks>
     public bool IsMatch(ReadOnlySpan<char> text)
     {
         if (_postfix is null && _regex is null)
@@ -84,8 +94,7 @@ public sealed class NameMatcher
         // separator that lowercasing would create or remove does not move a token boundary.
         char[]? rented = text.Length > 256 ? ArrayPool<char>.Shared.Rent(text.Length) : null;
         Span<char> lower = rented is null ? stackalloc char[text.Length] : rented.AsSpan(0, text.Length);
-        for (int i = 0; i < text.Length; i++)
-            lower[i] = TextNormalizer.ToLowerInvariantFast(text[i]);
+        TextNormalizer.ToLowerInvariantFast(text, lower);
 
         try
         {

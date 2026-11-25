@@ -3,17 +3,17 @@ using System.Buffers;
 namespace SearchEngine.Filters;
 
 /// <summary>
-/// Immutable facet name/value pairs attached to an indexed document.
+/// The named <see langword="long"/> values of one indexed document, tested by a <see cref="FacetFilter"/>.
+/// Names compare ordinally, so they are case-sensitive.
 /// </summary>
 /// <remarks>
-/// Stored as two small parallel arrays rather than a dictionary: a document carries a handful of
-/// facets, the index builder only enumerates them, and one instance is created per indexed entry,
-/// so per-entry allocation matters more than lookup speed.
+/// Instances are immutable and safe to share between threads and documents. They hold two small arrays and no
+/// dictionary, because the index builder only enumerates them and one instance is created per entry.
 /// </remarks>
 public sealed class FacetValues
 {
     /// <summary>
-    /// Empty facet bag with no entries.
+    /// Gets an instance with no values.
     /// </summary>
     public static FacetValues Empty { get; } = new([], []);
 
@@ -27,14 +27,17 @@ public sealed class FacetValues
     }
 
     /// <summary>
-    /// Creates facet values from a dictionary. Returns <see langword="null"/> when empty.
+    /// Creates facet values from the pairs of a dictionary.
     /// </summary>
+    /// <param name="values">The facet names and values, or <see langword="null"/>.</param>
+    /// <returns>The facet values, or <see langword="null"/> when <paramref name="values"/> is
+    /// <see langword="null"/> or empty.</returns>
     /// <remarks>
-    /// The entries are enumerated once into a buffer, so the result is consistent even when
-    /// <paramref name="values"/> is a concurrent dictionary that changes during the call.
-    /// Names are validated like <see cref="Create(ReadOnlySpan{KeyValuePair{string, long}})"/>.
+    /// The dictionary is enumerated once, so the result is consistent even when <paramref name="values"/> is a
+    /// concurrent dictionary that another thread changes during the call.
     /// </remarks>
-    /// <exception cref="ArgumentException">A facet name is null or appears more than once.</exception>
+    /// <exception cref="ArgumentException">A facet name is <see langword="null"/> or appears more than
+    /// once.</exception>
     public static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values)
     {
         if (values is null || values.Count == 0)
@@ -67,8 +70,12 @@ public sealed class FacetValues
     }
 
     /// <summary>
-    /// Creates facet values from a single pair.
+    /// Creates facet values with one pair.
     /// </summary>
+    /// <param name="facet">The facet name.</param>
+    /// <param name="value">The value of the facet.</param>
+    /// <returns>A new instance with one pair.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="facet"/> is <see langword="null"/>.</exception>
     public static FacetValues Create(string facet, long value)
     {
         ArgumentNullException.ThrowIfNull(facet);
@@ -76,10 +83,12 @@ public sealed class FacetValues
     }
 
     /// <summary>
-    /// Creates facet values from name/value pairs without an intermediate dictionary.
-    /// Returns <see cref="Empty"/> when <paramref name="values"/> is empty.
+    /// Creates facet values from name and value pairs without an intermediate dictionary.
     /// </summary>
-    /// <exception cref="ArgumentException">A facet name is null or appears more than once.</exception>
+    /// <param name="values">The facet names and values.</param>
+    /// <returns>A new instance, or <see cref="Empty"/> when <paramref name="values"/> is empty.</returns>
+    /// <exception cref="ArgumentException">A facet name is <see langword="null"/> or appears more than
+    /// once.</exception>
     public static FacetValues Create(params ReadOnlySpan<KeyValuePair<string, long>> values)
     {
         if (values.IsEmpty)

@@ -21,16 +21,17 @@ public sealed class IngestionResult
     public required int PublishCount { get; init; }
 
     /// <summary>
-    /// Total wall-clock time spent inside index rebuilds.
+    /// Total wall-clock time spent inside index rebuilds: the sum of
+    /// <see cref="IngestionPublishEvent.RebuildDuration"/> over all publishes.
     /// </summary>
-    public required TimeSpan TotalRebuildCpu { get; init; }
+    public required TimeSpan TotalRebuildDuration { get; init; }
 
     /// <summary>
     /// Longest observed delay between the scanner handing an entry over and the start of the publish
     /// that makes it searchable (that publish's rebuild, <see cref="IngestionPublishEvent.RebuildDuration"/>,
     /// comes on top).
     /// </summary>
-    public required TimeSpan WorstCaseStaleness { get; init; }
+    public required TimeSpan MaxObservedStaleness { get; init; }
 
     /// <summary>
     /// <see langword="true"/> when the scan completed without cancellation.

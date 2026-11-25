@@ -7,9 +7,11 @@ using SearchEngine.Snapshots;
 namespace SearchEngine;
 
 /// <summary>
-/// Stateless search engine that executes queries against the current snapshot.
-/// Thread-safe for concurrent queries.
+/// Runs queries against the current snapshot of an <see cref="IIndexSnapshotProvider"/>. The engine keeps no
+/// state of its own and is safe to call from many threads at once.
 /// </summary>
+/// <param name="snapshotProvider">The provider whose <see cref="IIndexSnapshotProvider.Current"/> snapshot each
+/// query reads.</param>
 public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) : ISearchEngine
 {
     /// <inheritdoc />
@@ -31,20 +33,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return 0;
 
-        if (method == WordMatchMethod.Exact)
-        {
-            if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
-                    expression.AsSpan(),
-                    enableOperators,
-                    snapshot.Tokenization,
-                    out var singleWord)
-                && !GlobMatcher.ContainsMetacharacters(singleWord!))
-            {
-                return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
-                    ? exactMatches.Length
-                    : 0;
-            }
-        }
+        if (TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
+            return exactMatches.Length;
 
         using var queryContext = new QueryContext(snapshot.DocumentCount);
         var resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
@@ -63,14 +53,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             if (string.IsNullOrWhiteSpace(expression))
                 return FacetFilterEvaluator.CountFilterOnly(filter, snapshot);
 
-            if (TryGetExactFacetCount(
-                    expression,
-                    method,
-                    enableOperators,
-                    filter,
-                    snapshot,
-                    out int exactFacetCount))
-                return exactFacetCount;
+            if (TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
+                return FacetFilterEvaluator.CountMatchingOrdinals(filter, snapshot, exactMatches);
         }
 
         using var queryContext = new QueryContext(snapshot.DocumentCount);
@@ -85,19 +69,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return [];
 
-        if (method == WordMatchMethod.Exact
-            && sortMode == SearchSortMode.SnapshotOrder
-            && QueryExpressionEvaluator.TryGetSingleSemanticWord(
-                expression.AsSpan(),
-                enableOperators,
-                snapshot.Tokenization,
-                out var singleWord)
-            && !GlobMatcher.ContainsMetacharacters(singleWord!))
-        {
-            return TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches)
-                ? PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, exactMatches)
-                : [];
-        }
+        if (sortMode == SearchSortMode.SnapshotOrder
+            && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
+            return PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, exactMatches);
 
         using var queryContext = new QueryContext(snapshot.DocumentCount);
         var resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
@@ -124,15 +98,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             if (string.IsNullOrWhiteSpace(expression))
                 return FacetFilterEvaluator.MaterializeFilterOnly(filter, snapshot, sortMode);
 
-            if (TryFindExactWithFacetFastPath(
-                    expression,
-                    method,
-                    enableOperators,
-                    sortMode,
-                    filter,
-                    snapshot,
-                    out var exactFacetResults))
-                return exactFacetResults;
+            if (sortMode == SearchSortMode.SnapshotOrder
+                && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
+                return FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
         }
 
         using var queryContext = new QueryContext(snapshot.DocumentCount);
@@ -146,55 +114,27 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     private static bool HasQueryInput(string expression, FacetFilter? filter)
         => !string.IsNullOrWhiteSpace(expression) || filter is not null && !filter.IsEmpty;
 
-    private static bool TryGetExactFacetCount(
+    // Fast path of an Exact query for one plain word (no glob metacharacters): its postings are read straight from
+    // the snapshot, without a bitset. False when the query is not such a word; empty postings when the word is not
+    // indexed.
+    private static bool TryGetExactWordPostings(
         string expression,
         WordMatchMethod method,
         bool enableOperators,
-        FacetFilter filter,
         IndexSnapshot snapshot,
-        out int count)
+        out ReadOnlySpan<int> postings)
     {
-        count = 0;
+        postings = default;
         if (method != WordMatchMethod.Exact
             || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
                 enableOperators,
                 snapshot.Tokenization,
-                out var singleWord)
-            || GlobMatcher.ContainsMetacharacters(singleWord!))
+                out var word)
+            || GlobMatcher.ContainsMetacharacters(word!))
             return false;
 
-        if (!TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches))
-            return true;
-
-        count = FacetFilterEvaluator.CountMatchingOrdinals(filter, snapshot, exactMatches);
-        return true;
-    }
-
-    private static bool TryFindExactWithFacetFastPath(
-        string expression,
-        WordMatchMethod method,
-        bool enableOperators,
-        SearchSortMode sortMode,
-        FacetFilter filter,
-        IndexSnapshot snapshot,
-        out List<int> results)
-    {
-        results = [];
-        if (method != WordMatchMethod.Exact
-            || sortMode != SearchSortMode.SnapshotOrder
-            || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
-                expression.AsSpan(),
-                enableOperators,
-                snapshot.Tokenization,
-                out var singleWord)
-            || GlobMatcher.ContainsMetacharacters(singleWord!))
-            return false;
-
-        if (!TryGetExactPostingSpan(singleWord!, snapshot, out var exactMatches))
-            return true;
-
-        results = FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
+        postings = snapshot.PostingsOf(word!);
         return true;
     }
 
@@ -231,18 +171,6 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         }
 
         return resultSet;
-    }
-
-    private static bool TryGetExactPostingSpan(string word, IndexSnapshot snapshot, out ReadOnlySpan<int> postings)
-    {
-        if (snapshot.ExactPostings.TryGetValue(word, out var wordPostings))
-        {
-            postings = snapshot.PostingDocIds.AsSpan(wordPostings.Offset, wordPostings.Count);
-            return true;
-        }
-
-        postings = default;
-        return false;
     }
 
     private static FastBitSet? EvaluateExpression(

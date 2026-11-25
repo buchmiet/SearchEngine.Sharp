@@ -252,7 +252,9 @@ Task<IngestionResult> IngestAsync(
     CancellationToken cancellationToken = default);
 ```
 
-- One `IngestAsync` call per instance at a time; a second concurrent call throws `InvalidOperationException`.
+- The entries are added to what the updater already holds; an entry replaces the one with the same id.
+- One `IngestAsync` call per instance at a time; the task of a second concurrent call faults with
+  `InvalidOperationException`.
   Invalid options throw `ArgumentOutOfRangeException` before the scan starts.
 - The scanner writes into a bounded channel and waits when it is full. Queries on the same provider are safe
   throughout.
@@ -322,14 +324,14 @@ Reported after each publish.
 | `EntriesAccepted` | Entries taken from the scan |
 | `EntriesPublished` | Entries published (equals `EntriesAccepted` after a successful scan) |
 | `PublishCount` | Number of publishes |
-| `TotalRebuildCpu` | Total wall-clock time spent in rebuilds |
-| `WorstCaseStaleness` | Longest time between the scanner handing over an entry and the start of the publish that contains it |
+| `TotalRebuildDuration` | Wall-clock time spent in rebuilds, summed over all publishes |
+| `MaxObservedStaleness` | Longest observed time between the scanner handing over an entry and the start of the publish that contains it |
 | `CompletedSuccessfully` | `true` when the scan ran to its end |
 | `WasCancelled` | `true` when cancellation ended the scan |
 
 ### `SyntheticPathFeed`
 
-Deterministic synthetic paths (6 to 7 tokens each) for tests, demos and benchmarks.
+Deterministic synthetic paths (5 to 8 tokens each, joined with `-`) for tests, demos and benchmarks.
 
 ```csharp
 static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(int count, int seed = 42, TimeSpan delayPerEntry = default, CancellationToken cancellationToken = default);
@@ -391,7 +393,8 @@ static IServiceCollection AddSearchEngine(this IServiceCollection services);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries, SearchTokenization tokenization);
-static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IndexSnapshot> snapshotFactory);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IDictionary<int, string>> entriesFactory);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IDictionary<int, string>> entriesFactory, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngineTransient(this IServiceCollection services);
 static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key);
@@ -403,9 +406,10 @@ static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services,
 - `IndexSnapshotProvider`, `IIndexSnapshotProvider` and `IIndexUpdater` are singletons. `ISearchEngine` is scoped,
   or transient with `AddSearchEngineTransient`.
 - The keyed overloads register independent indexes; inject them with `[FromKeyedServices("key")]`.
-- The `initialEntries` overloads build the first snapshot when they are called; `snapshotFactory` runs when the
-  provider is first resolved, and its updater uses `SearchTokenization.Default`.
-- The registered `IIndexUpdater` does not hold the initial entries or the factory's entries. Its first mutation
-  publishes a snapshot built only from the entries given to the updater, so the initial content disappears. If
-  you will change the index later, register without initial entries and call `RebuildFrom` on the updater
-  instead.
+- The `initialEntries` overloads copy the dictionary when they are called. `entriesFactory` runs once, when the
+  index or its updater is first resolved. In both cases the first snapshot is built from these entries with the
+  given tokenization (`SearchTokenization.Default` when omitted), and the registered `IIndexUpdater` starts from
+  the same entries and the same tokenization. A mutation of the updater therefore extends or changes the initial
+  entries; it does not drop them.
+- There is no overload that takes a ready-made `IndexSnapshot`. A snapshot keeps neither the search text nor the
+  facet values of its entries, so an updater could not start from it.

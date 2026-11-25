@@ -3,46 +3,43 @@ using System.Threading.Channels;
 namespace SearchEngine.Ingestion;
 
 /// <summary>
-/// Buffers scan results and publishes them to <see cref="IIndexUpdater"/> according to a
-/// configurable policy so progressive search stays cheap during large directory scans.
+/// Feeds a running scan into an <see cref="IIndexUpdater"/> in batches, so the index can be queried while the scan
+/// is still going. A publish policy decides when each batch is published.
 /// </summary>
+/// <param name="updater">The updater that receives the batches through
+/// <see cref="IIndexUpdater.AddOrUpdateEntries(IEnumerable{KeyValuePair{int, IndexedEntry}})"/>.</param>
 /// <remarks>
-/// <para><b>Concurrency contract</b></para>
+/// <para>Concurrency</para>
 /// <list type="bullet">
-///   <item>Only one <c>IngestAsync</c> call may run per instance at a time.</item>
-///   <item>The scanner feeds a bounded channel; when the channel is full the scanner awaits
-///         (backpressure) until the publisher drains entries.</item>
-///   <item>Concurrent <see cref="ISearchEngine"/> queries against the same
-///         <see cref="IIndexSnapshotProvider"/> are safe while ingestion runs.</item>
-///   <item><see cref="Published"/> and <c>onPublished</c> callbacks run on the publisher task,
-///         not on the caller's synchronization context.</item>
+///   <item>Only one <c>IngestAsync</c> call may run on an instance at a time.</item>
+///   <item>The scan writes into a bounded channel. When the channel is full, the scan waits until the publisher has
+///         taken entries from it.</item>
+///   <item>Queries through an <see cref="ISearchEngine"/> on the same <see cref="IIndexSnapshotProvider"/> are safe
+///         while the ingestion runs.</item>
+///   <item><see cref="Published"/>, <c>onPublished</c> and <c>progress</c> run on the publisher task, not on the
+///         caller's synchronization context. Marshal to a UI thread yourself.</item>
 /// </list>
-/// <para><b>Cancellation contract</b></para>
+/// <para>Completion and cancellation</para>
 /// <list type="bullet">
-///   <item>When the <c>cancellationToken</c> passed to <c>IngestAsync</c> is signaled, the scan stops accepting new
-///         entries.</item>
-///   <item>When <see cref="IngestPublishOptions.FlushOnCancellation"/> is <see langword="true"/>
-///         (default), every accepted entry that is not yet published, including entries still queued in
-///         the channel, is published before the task completes.</item>
-///   <item>When <see langword="false"/>, accepted-but-unpublished entries are discarded.</item>
-///   <item>Entries already published remain in the index.</item>
+///   <item>When the scan ends, the remaining buffer is published.</item>
+///   <item>When the scan throws, the buffer is published first and the task then faults with the scan's
+///         exception.</item>
+///   <item>When the <c>cancellationToken</c> passed to <c>IngestAsync</c> is cancelled, the scan stops. With
+///         <see cref="IngestPublishOptions.FlushOnCancellation"/> set (the default), every accepted entry that is
+///         not yet published, including entries still in the channel, is published before the task completes;
+///         otherwise those entries are discarded. Entries already published stay in the index. The task completes
+///         with <see cref="IngestionResult.WasCancelled"/> set and does not throw.</item>
 /// </list>
-/// <para><b>Completion contract</b></para>
+/// <para>Failures</para>
 /// <list type="bullet">
-///   <item>On successful scan completion, any remaining buffer is always flushed (final publish).</item>
-///   <item>Scan exceptions are propagated after attempting a final buffer flush.</item>
-/// </list>
-/// <para><b>Failure contract</b></para>
-/// <list type="bullet">
-///   <item>An exception from the <see cref="IIndexUpdater"/>, a <see cref="Published"/> or
-///         <c>onPublished</c> handler, or <see cref="IProgress{T}.Report"/> stops the publisher. The scan is
-///         cancelled through the token passed to its <see cref="IAsyncEnumerable{T}"/>, its enumerator is
-///         disposed, and the returned task faults with that exception. Entries already published remain in the
-///         index; buffered ones are not published.</item>
-///   <item>If the scanner and the publisher both fail (for example, the final flush after a scan error fails),
-///         the scanner's exception is the one that surfaces.</item>
-///   <item>The task completes only after the scanner has stopped, so the scanner must observe the token it
-///         receives in <c>GetAsyncEnumerator</c> (an iterator marked <c>[EnumeratorCancellation]</c> does); an
+///   <item>An exception from the <see cref="IIndexUpdater"/>, a <see cref="Published"/> or <c>onPublished</c>
+///         handler, or <see cref="IProgress{T}.Report"/> stops the publisher. The scan is cancelled through the token
+///         passed to its enumerator, the enumerator is disposed, and the task faults with that exception. Entries
+///         already published stay in the index; buffered ones are not published.</item>
+///   <item>If the scan and the publisher both fail (for example, the final publish after a scan error fails), the
+///         scan's exception is the one that surfaces.</item>
+///   <item>The task completes only after the scan has stopped, so the scan must observe the token it receives in
+///         <c>GetAsyncEnumerator</c> (an iterator with an <c>[EnumeratorCancellation]</c> parameter does). An
 ///         enumerator that ignores it and never yields again keeps the task pending.</item>
 /// </list>
 /// </remarks>
@@ -63,13 +60,29 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     }
 
     /// <summary>
-    /// Raised after each successful index publish. Optional; use for UI or diagnostics.
+    /// Raised after each publish, on the publisher task. An exception from a handler stops the ingestion.
     /// </summary>
     public event Action<IngestionPublishEvent>? Published;
 
     /// <summary>
-    /// Streams entries from a scan into the index with progressive publishing.
+    /// Reads string entries from a scan and publishes them to the updater in batches. Each text is indexed as
+    /// <c>new IndexedEntry(text, text)</c>.
     /// </summary>
+    /// <param name="entries">The scan. It must observe the cancellation token it receives.</param>
+    /// <param name="options">The publish policy and its settings; the defaults when <see langword="null"/>.</param>
+    /// <param name="progress">Receives counters after each publish, or <see langword="null"/>.</param>
+    /// <param name="onPublished">Called after each publish, after the <see cref="Published"/> event, or
+    /// <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Stops the scan. The task then completes with
+    /// <see cref="IngestionResult.WasCancelled"/> set.</param>
+    /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
+    /// of this call.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
+    /// thrown before the scan starts.</exception>
+    /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
+    /// The returned task faults with it.</exception>
+    /// <remarks>The entries are added to what the updater already holds, and an entry replaces the one with the
+    /// same id. Use <see cref="IIndexUpdater.Clear"/> first to start from an empty index.</remarks>
     public Task<IngestionResult> IngestAsync(
         IAsyncEnumerable<KeyValuePair<int, string>> entries,
         IngestPublishOptions? options = null,
@@ -89,8 +102,23 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     }
 
     /// <summary>
-    /// Streams <see cref="IndexedEntry"/> values from a scan into the index.
+    /// Reads <see cref="IndexedEntry"/> values from a scan and publishes them to the updater in batches.
     /// </summary>
+    /// <param name="entries">The scan. It must observe the cancellation token it receives.</param>
+    /// <param name="options">The publish policy and its settings; the defaults when <see langword="null"/>.</param>
+    /// <param name="progress">Receives counters after each publish, or <see langword="null"/>.</param>
+    /// <param name="onPublished">Called after each publish, after the <see cref="Published"/> event, or
+    /// <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Stops the scan. The task then completes with
+    /// <see cref="IngestionResult.WasCancelled"/> set.</param>
+    /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
+    /// of this call.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
+    /// thrown before the scan starts.</exception>
+    /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
+    /// The returned task faults with it.</exception>
+    /// <remarks>The entries are added to what the updater already holds, and an entry replaces the one with the
+    /// same id. Use <see cref="IIndexUpdater.Clear"/> first to start from an empty index.</remarks>
     public Task<IngestionResult> IngestAsync(
         IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         IngestPublishOptions? options = null,
@@ -482,7 +510,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         public int EntriesAccepted { get; private set; }
         public int EntriesPublished { get; private set; }
         public int PublishCount { get; private set; }
-        public TimeSpan TotalRebuildCpu { get; private set; }
+        public TimeSpan TotalRebuildDuration { get; private set; }
 
         public void IncrementAccepted() => EntriesAccepted++;
 
@@ -490,7 +518,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             EntriesPublished += count;
             PublishCount++;
-            TotalRebuildCpu += rebuildDuration;
+            TotalRebuildDuration += rebuildDuration;
         }
 
         public void ObserveStaleness(List<long> bufferedAt, long publishStarted)
@@ -517,8 +545,8 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 EntriesAccepted = EntriesAccepted,
                 EntriesPublished = EntriesPublished,
                 PublishCount = PublishCount,
-                TotalRebuildCpu = TotalRebuildCpu,
-                WorstCaseStaleness = new TimeSpan(Volatile.Read(ref _worstStalenessTicks)),
+                TotalRebuildDuration = TotalRebuildDuration,
+                MaxObservedStaleness = new TimeSpan(Volatile.Read(ref _worstStalenessTicks)),
                 CompletedSuccessfully = completed,
                 WasCancelled = cancelled,
             };

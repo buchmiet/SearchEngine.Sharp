@@ -38,13 +38,18 @@ namespace SearchEngine.Snapshots;
 // readers always see a consistent snapshot.
 
 /// <summary>
-/// Immutable snapshot of the search index.
-/// Thread-safe for concurrent reads. Its content never changes after construction.
+/// An immutable index built by <see cref="IndexSnapshotBuilder"/> or an <see cref="IndexUpdater"/>. Any number of
+/// threads may query one snapshot at once.
 /// </summary>
+/// <remarks>
+/// The content never changes after construction. Two lookup structures are built on first use instead: one for
+/// <see cref="WordMatchMethod.Within"/> terms and one for <see cref="SearchSortMode.NaturalSortAscending"/>. Each is
+/// built once per snapshot; concurrent first callers wait for that build.
+/// </remarks>
 public sealed class IndexSnapshot
 {
     /// <summary>
-    /// Empty snapshot singleton.
+    /// Gets a shared empty snapshot that uses <see cref="SearchTokenization.Default"/>.
     /// </summary>
     public static readonly IndexSnapshot Empty = CreateEmpty(SearchTokenization.Default);
 
@@ -99,6 +104,18 @@ public sealed class IndexSnapshot
     // PostingCounts[i]: number of documents that contain word i.
     internal readonly int[] PostingCounts;
 
+    // Word i, read from WordsArray.
+    internal ReadOnlySpan<char> WordAt(int wordIndex)
+        => WordsArray.AsSpan(WordEnds[wordIndex] - WordLengths[wordIndex], WordLengths[wordIndex]);
+
+    // Ordinals of the documents that contain word i.
+    internal ReadOnlySpan<int> PostingsAt(int wordIndex)
+        => PostingDocIds.AsSpan(PostingOffsets[wordIndex], PostingCounts[wordIndex]);
+
+    // Ordinals of the documents that contain exactly this word; empty when the word is not indexed.
+    internal ReadOnlySpan<int> PostingsOf(string word)
+        => ExactPostings.TryGetValue(word, out var postings) ? PostingDocIds.AsSpan(postings.Offset, postings.Count) : default;
+
     // Bigram index: first two characters of query packed as (char0 << 16 | char1)
     // → int[] of word indices that contain that bigram, in length-descending order.
     // Used by MatchWithin to skip words that cannot possibly match (pruning).
@@ -130,10 +147,13 @@ public sealed class IndexSnapshot
     // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
     internal readonly Dictionary<string, long[]> FacetColumns;
 
-    /// <summary>Tokenization preset used when this snapshot was built.</summary>
+    /// <summary>Gets the preset this snapshot was built with. Every query on the snapshot uses it.</summary>
     public SearchTokenization Tokenization { get; }
 
+    /// <summary>Gets the number of documents in the snapshot, one for each entry the builder enumerated.</summary>
     public int DocumentCount { get; }
+
+    /// <summary>Gets the number of distinct tokens across all documents of the snapshot.</summary>
     public int UniqueWordCount { get; }
 
     internal IndexSnapshot(
@@ -172,10 +192,9 @@ public sealed class IndexSnapshot
     private Dictionary<int, int[]> BuildBigramWordIndices()
     {
         var bigramLists = new Dictionary<int, List<int>>();
-        var words = WordsArray.AsSpan();
         for (int i = 0; i < WordLengths.Length; i++)
         {
-            var word = words.Slice(WordEnds[i] - WordLengths[i], WordLengths[i]);
+            var word = WordAt(i);
             int prev = -1;
             for (int j = 0; j + 1 < word.Length; j++)
             {

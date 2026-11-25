@@ -1,50 +1,54 @@
 namespace SearchEngine.Ingestion;
 
 /// <summary>
-/// Tunables for <see cref="ProgressiveIndexIngestion"/>.
+/// Settings for <see cref="ProgressiveIndexIngestion"/>. All properties are init-only; they are validated when
+/// <c>IngestAsync</c> starts.
 /// </summary>
 public sealed class IngestPublishOptions
 {
     /// <summary>
-    /// Publish policy. Defaults to <see cref="IngestPublishPolicy.Adaptive"/>.
+    /// Gets the publish policy. Defaults to <see cref="IngestPublishPolicy.Adaptive"/>.
     /// </summary>
     public IngestPublishPolicy Policy { get; init; } = IngestPublishPolicy.Adaptive;
 
     /// <summary>
-    /// Batch size for <see cref="IngestPublishPolicy.FixedBatch"/>: a publish happens when this many entries are
-    /// pending. Under <see cref="IngestPublishPolicy.Adaptive"/> it is the initial batch cap and the lower bound
-    /// of the cap (see <see cref="GrowthAwareBatchCap"/>). <see cref="IngestPublishPolicy.PerEntry"/> and
-    /// <see cref="IngestPublishPolicy.TimeDebounce"/> ignore it. Defaults to 2,000.
+    /// Gets the batch size for <see cref="IngestPublishPolicy.FixedBatch"/>: a publish happens when this many
+    /// entries are pending. Under <see cref="IngestPublishPolicy.Adaptive"/> it is the initial batch cap and the
+    /// lower bound of the cap (see <see cref="GrowthAwareBatchCap"/>). <see cref="IngestPublishPolicy.PerEntry"/> and
+    /// <see cref="IngestPublishPolicy.TimeDebounce"/> ignore it. Must be at least 1. Defaults to 2,000.
     /// </summary>
     public int FixedBatchSize { get; init; } = 2_000;
 
     /// <summary>
-    /// Minimum delay between publishes for <see cref="IngestPublishPolicy.TimeDebounce"/>
-    /// and the floor for <see cref="IngestPublishPolicy.Adaptive"/>. Defaults to 100 ms.
+    /// Gets the shortest time between timer publishes under <see cref="IngestPublishPolicy.TimeDebounce"/>, and the
+    /// lower bound of the interval under <see cref="IngestPublishPolicy.Adaptive"/>. A publish caused by
+    /// <see cref="MaxStaleness"/> or by a full batch does not wait for it. Must not be negative. Defaults to
+    /// 100 ms.
     /// </summary>
     public TimeSpan MinInterval { get; init; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// Multiplier <c>k</c> in the adaptive interval
-    /// <c>max(MinInterval, k × lastRebuildDuration)</c>. Defaults to 2.
+    /// Gets the multiplier <c>k</c> of the adaptive interval <c>max(MinInterval, k × lastRebuildDuration)</c>,
+    /// which also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be positive. Defaults to 2.
     /// </summary>
     public double AdaptiveMultiplier { get; init; } = 2.0;
 
     /// <summary>
-    /// Bounded channel capacity between the scanner and publisher. When full, the scanner
-    /// awaits until the publisher drains entries (backpressure). Defaults to 10,000.
+    /// Gets the capacity of the channel between the scan and the publisher. When it is full, the scan waits until
+    /// the publisher takes entries from it. Must be at least 1. Defaults to 10,000.
     /// </summary>
     public int ChannelCapacity { get; init; } = 10_000;
 
     /// <summary>
-    /// When <see langword="true"/> (default), a cancelled ingestion flushes any buffered
-    /// entries before completing. When <see langword="false"/>, buffered entries are discarded.
+    /// Gets whether a cancelled ingestion publishes the accepted entries that are not yet published, including those
+    /// still in the channel, before it completes. When <see langword="false"/>, they are discarded. Defaults to
+    /// <see langword="true"/>.
     /// </summary>
     public bool FlushOnCancellation { get; init; } = true;
 
     /// <summary>
-    /// Maximum time an accepted entry may remain unpublished before a staleness-triggered
-    /// publish is forced. Defaults to 1 second.
+    /// Gets the longest time an accepted entry should wait before the publish that contains it starts. Must be
+    /// positive. Defaults to 1 second.
     /// </summary>
     /// <remarks>
     /// <para>Under <see cref="IngestPublishPolicy.Adaptive"/> and <see cref="IngestPublishPolicy.TimeDebounce"/>
@@ -52,7 +56,7 @@ public sealed class IngestPublishOptions
     /// <see cref="IngestPublishPolicy.PerEntry"/> arm no timer: a stale buffer is published when the next entry
     /// arrives or the scan ends, so an idle scanner can leave entries unpublished longer than this.</para>
     /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish
-    /// that contains it starts (see <see cref="IngestionResult.WorstCaseStaleness"/>); that publish's own
+    /// that contains it starts (see <see cref="IngestionResult.MaxObservedStaleness"/>); that publish's own
     /// rebuild comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
     /// <para>Under <see cref="IngestPublishPolicy.Adaptive"/> (unless <see cref="StrictMaxStaleness"/> is set)
     /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last rebuild
@@ -66,26 +70,25 @@ public sealed class IngestPublishOptions
     public TimeSpan MaxStaleness { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Minimum buffered entries required for a timer-triggered publish under
-    /// <see cref="IngestPublishPolicy.Adaptive"/> (staleness always overrides this).
-    /// Defaults to 200.
+    /// Gets the fewest buffered entries for a timer publish under <see cref="IngestPublishPolicy.Adaptive"/>. A
+    /// publish caused by <see cref="MaxStaleness"/> ignores it. Must be at least 1. Defaults to 200.
     /// </summary>
     public int MinTimerPublishBatch { get; init; } = 200;
 
     /// <summary>
-    /// When <see langword="true"/> (default) and <see cref="Policy"/> is
-    /// <see cref="IngestPublishPolicy.Adaptive"/>, the batch cap grows after each publish to
-    /// <c>max(FixedBatchSize, indexed document count)</c>, so the number of full rebuilds stays low as the
-    /// index grows. When <see langword="false"/> the cap stays at <see cref="FixedBatchSize"/>.
+    /// Gets whether the batch cap of <see cref="IngestPublishPolicy.Adaptive"/> grows with the index. When
+    /// <see langword="true"/> (the default), the cap becomes, after each publish,
+    /// <c>max(FixedBatchSize, number of entries the updater holds)</c>, so the number of full rebuilds stays low as
+    /// the index grows. When <see langword="false"/>, the cap stays at <see cref="FixedBatchSize"/>.
     /// </summary>
     public bool GrowthAwareBatchCap { get; init; } = true;
 
     /// <summary>
-    /// When <see langword="true"/>, <see cref="IngestPublishPolicy.Adaptive"/> publishes as soon as the
+    /// Gets whether <see cref="IngestPublishPolicy.Adaptive"/> publishes as soon as the
     /// oldest buffered entry exceeds <see cref="MaxStaleness"/>, even when that means starting a full
     /// rebuild immediately after the previous one. Once a single rebuild takes longer than
-    /// <see cref="MaxStaleness"/>, every batch is stale when the previous rebuild ends, so rebuilds run back to
-    /// back and total rebuild work grows quadratically with the index size. Defaults to
+    /// <see cref="MaxStaleness"/>, every batch is stale when the previous rebuild ends, so with this set rebuilds run
+    /// back to back and total rebuild work grows with the square of the index size. Defaults to
     /// <see langword="false"/>, which applies the pacing described under <see cref="MaxStaleness"/>.
     /// </summary>
     public bool StrictMaxStaleness { get; init; }

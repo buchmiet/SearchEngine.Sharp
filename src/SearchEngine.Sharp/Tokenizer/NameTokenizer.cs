@@ -1,15 +1,26 @@
 namespace SearchEngine.Tokenizer;
 
 /// <summary>
-/// Reduces a name to its distinct lowercase tokens.
+/// Reduces a name to its distinct lowercase tokens, as an optional preprocessing step for
+/// <see cref="IndexedEntry.SearchText"/>.
 /// </summary>
 public static class NameTokenizer
 {
     /// <summary>
-    /// Splits <paramref name="name"/> at every character that is not a letter or digit, lowercases each token
-    /// (invariant culture), drops repeated tokens (the first occurrence stays) and joins the rest with
-    /// <paramref name="joinCharacter"/>. Returns an empty string for a null, empty or whitespace name.
+    /// Splits <paramref name="name"/> at every character that is not a letter or digit (by
+    /// <see cref="char.IsLetterOrDigit(char)"/>, so <c>_</c> splits too), lowercases each token (invariant
+    /// culture), drops repeated tokens (the first occurrence stays) and joins the rest with
+    /// <paramref name="joinCharacter"/>.
     /// </summary>
+    /// <param name="name">The name to tokenize.</param>
+    /// <param name="joinCharacter">The text placed between tokens.</param>
+    /// <returns>The joined tokens, or an empty string for a <see langword="null"/>, empty or whitespace
+    /// name.</returns>
+    /// <remarks>
+    /// Do not apply it to a query: it removes <c>*</c> and <c>?</c>. The test works on UTF-16 code units, so a
+    /// character outside the Basic Multilingual Plane (an emoji, or a letter encoded as a surrogate pair) also
+    /// splits and is dropped.
+    /// </remarks>
     public static string TokenizeName(string? name, string joinCharacter = "-")
     {
         if (string.IsNullOrWhiteSpace(name))
