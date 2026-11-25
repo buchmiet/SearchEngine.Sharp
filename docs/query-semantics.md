@@ -5,11 +5,12 @@ patterns, regular expressions, Unicode options, facet filters and result order.
 
 ## Pipeline overview
 
-Indexing: `SearchText` → split on the snapshot's index-side separators → lowercase
-→ unique tokens per document → inverted index (token → posting list of documents).
+Indexing: `SearchText` → split on the snapshot's index-side separators → Unicode options
+applied to each token, if any → lowercase → unique tokens per document → inverted index
+(token → posting list of documents).
 
-Querying: expression → split on the snapshot's query-side separators → each term
-resolves to a document set → sets combined with boolean algebra → optional facet filter
+Querying: expression → split on the snapshot's query-side separators → Unicode options
+applied to each term, if any → lowercase → each term resolves to a document set → sets combined with boolean algebra → optional facet filter
 intersected → results materialized in the requested sort order.
 
 Both separator sets are stored in each `IndexSnapshot` as a `SearchTokenization` preset
@@ -98,7 +99,16 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
 | `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
 | `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
-| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`) |
+| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`); a glob `?` matches one cluster (`caf?` matches a decomposed `café`) |
+
+Indexed text and queries are folded the same way. Both are split at their separators as written, and each token
+or term is then folded on its own: composition (or accent removal), case folding, the per-character lowercase
+that every token gets, and composition once more, because lowercasing can undo it (`T` + U+0308 has no composed
+form, but `t` + U+0308 composes to `ẗ`). So a name, its lowercase form and its composed form all find each other.
+A combining mark after a separator never composes with it: with `=` as a separator, `x=` + U+0338 is the tokens
+`x` and U+0338 on both sides, not `x≠`. When folding produces a separator (U+037E GREEK QUESTION MARK composes to
+`;`), the token or term splits there. Under `Compose` the decomposed `I` + U+0307 is `İ`, which lowercases (and
+case folds) to a plain `i`, so it does not match `i` + U+0307.
 
 Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
 would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so
@@ -110,8 +120,11 @@ under `Compose`. `SortText` is never folded.
 trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
 for them there; `CaseFold` and `GraphemeBoundaries` work in every mode.
 
-Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and U+FFFE cannot be normalized: those code
-units are kept as they are and the text around them is folded, so such a name still matches itself.
+Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and the noncharacters (U+FDD0 to U+FDEF and the
+last two code points of every plane, such as U+FFFE and U+FFFF) are kept as they are, and the text around them is
+folded, so such a name still matches itself. ICU refuses to normalize U+FFFE and Windows NLS
+(`DOTNET_SYSTEM_GLOBALIZATION_USENLS=1`) refuses every noncharacter; leaving them all out gives the same result
+with either library.
 
 ## Index-side tokenization (Default preset)
 
@@ -155,8 +168,12 @@ Rules:
    - `not term` matches all documents in the snapshot except those matching `term`.
    - Precedence: `NOT` binds tighter than `AND`, which binds tighter than `OR`.
      Same-precedence operators evaluate left to right.
-   - Parentheses group subexpressions, but only when balanced across the whole
-     expression. If unbalanced, every parenthesis degrades to a plain separator.
+   - Parentheses group subexpressions when both `(` and `)` are query separators
+     (as in `Default`) and they balance across the whole expression. If they do not
+     balance, every parenthesis is a plain separator. A preset that has only one of
+     them among its query separators never groups: that one splits terms like a
+     space, and the other is a character of its term (`SearchTokenization.Create(" ", " )")`
+     reads `(a b)` as the terms `(a` and `b`).
 4. With `enableOperators: false` (the default), `and` / `or` / `not` are ordinary
    search terms and parentheses are plain separators.
 5. Malformed expressions are corrected, not rejected. The start and end of a
@@ -167,7 +184,8 @@ Rules:
      (`a AND NOT b`). Any other pair of adjacent operators collapses to `AND`,
      wherever it occurs: `a AND AND b`, `a OR OR b`, `a NOT AND b` and
      `a AND NOT AND b` all mean `a AND b`.
-   - An empty group `()` is dropped.
+   - An empty group `()` is dropped, and what follows it meets what came before
+     it: `a () OR b` = `a OR b`, `a AND () OR b` = `a AND OR b` = `a AND b`.
 6. An expression that is empty, whitespace, or reduces to nothing after correction
    returns no results unless a non-empty facet filter is supplied
    (see [filter-only queries](#filter-only-queries)).
@@ -227,7 +245,11 @@ A term containing `*` or `?` is matched as a glob against whole indexed tokens
 (anchored at both ends):
 
 - `*`: zero or more characters; consecutive `*` collapse into one
-- `?`: exactly one character
+- `?`: exactly one character of the text as a reader sees it: one code point (an emoji
+  written as a surrogate pair is one, and so is a lone surrogate), or one extended
+  grapheme cluster with `UnicodeMatching.GraphemeBoundaries` (a decomposed `é` or a
+  ZWJ emoji family is one). `*` likewise covers whole code points or clusters, and a
+  match never starts or ends inside one
 - any other character: literal (after lowercasing)
 
 Examples against an index containing tokens `report`, `reporting`, `log`:
@@ -239,7 +261,7 @@ Examples against an index containing tokens `report`, `reporting`, `log`:
 | `l?g` | `log` |
 | `?*?` | any token of length ≥ 2 |
 | `*` | every document |
-| `?` | any single-character token |
+| `?` | any token of one character (one code point, or one grapheme cluster with `GraphemeBoundaries`) |
 
 Limits and edge cases:
 

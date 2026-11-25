@@ -35,6 +35,7 @@ public sealed class SearchTokenization
         QuerySeparators = querySeparators;
         IndexSeparatorValues = SearchValues.Create(indexSeparators);
         QuerySeparatorValues = SearchValues.Create(querySeparators);
+        ParenthesesGroup = querySeparators.Contains('(') && querySeparators.Contains(')');
     }
 
     /// <summary>Gets the characters that split indexed text into tokens.</summary>
@@ -46,6 +47,10 @@ public sealed class SearchTokenization
     internal SearchValues<char> IndexSeparatorValues { get; }
 
     internal SearchValues<char> QuerySeparatorValues { get; }
+
+    // Parentheses can group terms only when both are query separators; otherwise a separator parenthesis splits
+    // terms like a space and the other one is a character of its term.
+    internal bool ParenthesesGroup { get; }
 
     /// <summary>Gets the Unicode options of this preset. <see cref="UnicodeMatching.None"/> for <see cref="Default"/>,
     /// <see cref="FileMask"/> and presets made by <see cref="Create"/>.</summary>
@@ -75,13 +80,23 @@ public sealed class SearchTokenization
         return new(IndexSeparators, QuerySeparators, options);
     }
 
-    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
+    // Indexed text, split at the index separators as written and folded token by token (TextFolder.FoldRuns).
+    internal string FoldIndexText(string text) => TextFolder.FoldRuns(text, UnicodeMatching, IndexSeparatorValues);
 
-    // One query term, after operators have been recognized on the query as typed. Regex patterns are never folded.
+    // The entry as IndexUpdater stores it: SearchText folded once, when the entry comes in, so that rebuilds after
+    // later changes do not fold it again (IndexSnapshotBuilder.BuildFolded). SortText and Facets stay as given.
+    internal IndexedEntry FoldEntry(IndexedEntry entry)
+    {
+        string folded = FoldIndexText(entry.SearchText);
+        return ReferenceEquals(folded, entry.SearchText) ? entry : entry with { SearchText = folded };
+    }
+
+    // One query term, split at the query separators as written, after operators have been recognized on the query
+    // as typed. Regex patterns are never folded.
     internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
         => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
             ? term
-            : TextFolder.Fold(term.ToString(), UnicodeMatching);
+            : TextFolder.Fold(term.ToString(), UnicodeMatching, QuerySeparatorValues);
 
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine;
@@ -22,37 +23,48 @@ namespace SearchEngine;
 //
 // Atomicity:
 //   A mutation either completes (new snapshot published, _entries updated) or leaves both
-//   untouched. Single-entry and batch mutations record the previous value of every id they
-//   change and restore it if building the snapshot (or enumerating the caller's entries)
-//   throws; full rebuilds fill a new dictionary and only swap it in after the build succeeded.
+//   untouched. Batch mutations read the caller's sequence before taking the lock, so a failing
+//   or re-entrant enumeration changes nothing. Single-entry and batch mutations then record the
+//   previous value of every id they change and restore it if building the snapshot throws (Apply);
+//   full rebuilds fill a new dictionary and only swap it in after the build succeeded.
 
 /// <summary>
 /// Keeps the entries of an index and publishes a new snapshot to the <see cref="IndexSnapshotProvider"/> after
 /// each change. Changes are serialized; queries read the published snapshot without taking the lock.
 /// </summary>
-/// <param name="provider">The provider that receives every snapshot this updater builds. Use one updater per
-/// provider: two updaters on one provider overwrite each other's snapshots.</param>
-/// <param name="tokenization">The preset of every snapshot this updater builds, including the empty one published
-/// by <see cref="Clear"/>; <see cref="SearchTokenization.Default"/> when <see langword="null"/>.</param>
-/// <remarks>
-/// The updater starts empty and does not read the snapshot that <paramref name="provider"/> already holds: its first
-/// change publishes a snapshot built only from the entries given to the updater. All members are safe to call from
-/// several threads.
-/// </remarks>
-/// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
-public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null) : IIndexUpdater
+/// <remarks>All members are safe to call from several threads.</remarks>
+public sealed class IndexUpdater : IIndexUpdater
 {
-    private readonly IndexSnapshotProvider _provider = provider ?? throw new ArgumentNullException(nameof(provider));
-    private readonly SearchTokenization _tokenization = tokenization ?? SearchTokenization.Default;
+    private readonly IndexSnapshotProvider _provider;
+    private readonly SearchTokenization _tokenization;
     private readonly Lock _rebuildGate = new();
-    private Dictionary<int, IndexedEntry> _entries = [];
+    // Every entry is stored with its SearchText folded (SearchTokenization.FoldEntry), so a rebuild folds nothing.
+    private Dictionary<int, IndexedEntry> _entries;
 
-    // Starts from entries whose snapshot was published by the caller (dependency injection), so the first
-    // mutation rebuilds from them instead of dropping them.
-    internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization, IReadOnlyDictionary<int, IndexedEntry> seed)
-        : this(provider, tokenization)
+    /// <summary>Creates an empty updater and publishes an empty snapshot with its preset to
+    /// <paramref name="provider"/>, so queries use that preset from the start.</summary>
+    /// <param name="provider">The provider that receives every snapshot this updater builds. Use one updater per
+    /// provider: two updaters on one provider overwrite each other's snapshots.</param>
+    /// <param name="tokenization">The preset of every snapshot this updater builds, including the empty ones it
+    /// publishes when it is created and on <see cref="Clear"/>; <see cref="SearchTokenization.Default"/> when
+    /// <see langword="null"/>.</param>
+    /// <remarks>The updater does not read the snapshot that <paramref name="provider"/> already holds: it replaces
+    /// it with an empty one, and every later snapshot is built only from the entries given to the updater.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
+    public IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null)
+        : this(provider, tokenization, seed: null)
     {
-        _entries = new Dictionary<int, IndexedEntry>(seed);
+        _provider.Publish(IndexSnapshot.EmptyFor(_tokenization));
+    }
+
+    // Dependency injection: the provider already holds the snapshot of seed (or, without seed, the empty snapshot of
+    // the preset), so nothing is published here and the first mutation rebuilds from seed instead of dropping it.
+    // The entries of seed are folded with tokenization already (SearchTokenization.FoldEntry).
+    internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization, IReadOnlyDictionary<int, IndexedEntry>? seed)
+    {
+        _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+        _tokenization = tokenization ?? SearchTokenization.Default;
+        _entries = seed is null ? [] : new Dictionary<int, IndexedEntry>(seed);
     }
 
     /// <inheritdoc />
@@ -75,7 +87,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
         ArgumentNullException.ThrowIfNull(entries);
         var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = IndexedEntry.FromText(key, value, nameof(entries));
+            next[key] = _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)));
 
         lock (_rebuildGate)
             ReplaceAll(next);
@@ -96,7 +108,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
         ArgumentNullException.ThrowIfNull(entries);
         var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = IndexedEntry.Require(key, value, nameof(entries));
+            next[key] = _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)));
 
         lock (_rebuildGate)
             ReplaceAll(next);
@@ -119,7 +131,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         var buffer = new Dictionary<int, IndexedEntry>();
         await foreach (var (key, value) in entries.WithCancellation(ct).ConfigureAwait(false))
-            buffer[key] = toEntry(key, value);
+            buffer[key] = _tokenization.FoldEntry(toEntry(key, value));
 
         lock (_rebuildGate)
             ReplaceAll(buffer, progress);
@@ -138,43 +150,11 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     public void AddEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>(1);
-            try
-            {
-                Set(id, entry, undo);
-                RebuildAndPublish();
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
+        Apply([new Change(id, _tokenization.FoldEntry(entry))]);
     }
 
     /// <inheritdoc />
-    public bool RemoveEntry(int id)
-    {
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>(1);
-            try
-            {
-                if (!Unset(id, undo))
-                    return false;
-
-                RebuildAndPublish();
-                return true;
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
-    }
+    public bool RemoveEntry(int id) => Apply([new Change(id, null)]).Count > 0;
 
     /// <inheritdoc />
     public bool RefreshEntry(int id, string text)
@@ -187,21 +167,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     public bool RefreshEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>(1);
-            try
-            {
-                bool existed = Set(id, entry, undo);
-                RebuildAndPublish();
-                return existed;
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
+        return Apply([new Change(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
     }
 
     // ── Batch operations (single rebuild) ──
@@ -210,69 +176,33 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>();
-            try
-            {
-                foreach (var (key, value) in entries)
-                    Set(key, IndexedEntry.FromText(key, value, nameof(entries)), undo);
+        List<Change> changes = [];
+        foreach (var (key, value) in entries)
+            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)))));
 
-                RebuildAndPublish();
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
+        Apply(CollectionsMarshal.AsSpan(changes));
     }
 
     /// <inheritdoc />
     public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>();
-            try
-            {
-                foreach (var (key, value) in entries)
-                    Set(key, IndexedEntry.Require(key, value, nameof(entries)), undo);
+        List<Change> changes = [];
+        foreach (var (key, value) in entries)
+            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)))));
 
-                RebuildAndPublish();
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
+        Apply(CollectionsMarshal.AsSpan(changes));
     }
 
     /// <inheritdoc />
     public int RemoveEntries(IEnumerable<int> ids)
     {
         ArgumentNullException.ThrowIfNull(ids);
-        lock (_rebuildGate)
-        {
-            var undo = new List<Undo>();
-            try
-            {
-                foreach (var id in ids)
-                    Unset(id, undo);
+        List<Change> changes = [];
+        foreach (int id in ids)
+            changes.Add(new Change(id, null));
 
-                if (undo.Count > 0)
-                    RebuildAndPublish();
-
-                return undo.Count;
-            }
-            catch
-            {
-                Rollback(undo);
-                throw;
-            }
-        }
+        return Apply(CollectionsMarshal.AsSpan(changes)).Count;
     }
 
     /// <inheritdoc />
@@ -287,47 +217,65 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
 
     private void RebuildAndPublish(IProgress<float>? progress = null)
     {
-        var snapshot = IndexSnapshotBuilder.Build(_entries, _tokenization, progress);
+        var snapshot = IndexSnapshotBuilder.BuildFolded(_entries, _tokenization, progress);
         _provider.Publish(snapshot);
     }
 
     // Full rebuild: the new entries become the source of truth only after their snapshot was built.
     private void ReplaceAll(Dictionary<int, IndexedEntry> next, IProgress<float>? progress = null)
     {
-        _provider.Publish(IndexSnapshotBuilder.Build(next, _tokenization, progress));
+        _provider.Publish(IndexSnapshotBuilder.BuildFolded(next, _tokenization, progress));
         _entries = next;
     }
 
-    // Stores the entry and records the value it replaced. Returns true when the id already existed.
-    private bool Set(int id, IndexedEntry entry, List<Undo> undo)
+    // Applies the changes in order under the lock and publishes one snapshot when any entry changed. When the build
+    // throws, the changed entries are restored and the published snapshot stays as it was, because publishing is the
+    // last step. The callers read the caller's sequence into the changes first: enumerating it under the lock would
+    // let code inside the enumeration (on this thread, the lock is re-entrant) publish a half-applied batch that a
+    // later rollback could not take back. Returns what was changed, one record per entry that existed or was added.
+    private List<Undo> Apply(ReadOnlySpan<Change> changes)
     {
-        bool existed = _entries.TryGetValue(id, out var previous);
-        undo.Add(new Undo(id, previous));
-        _entries[id] = entry;
-        return existed;
-    }
-
-    private bool Unset(int id, List<Undo> undo)
-    {
-        if (!_entries.Remove(id, out var previous))
-            return false;
-
-        undo.Add(new Undo(id, previous));
-        return true;
-    }
-
-    // Puts back what a failed mutation changed; the published snapshot is untouched because publishing is the last step.
-    private void Rollback(List<Undo> undo)
-    {
-        for (int i = undo.Count - 1; i >= 0; i--)
+        lock (_rebuildGate)
         {
-            var (id, previous) = undo[i];
-            if (previous is null)
-                _entries.Remove(id);
-            else
-                _entries[id] = previous;
+            List<Undo> undo = [with(capacity: changes.Length)];
+            try
+            {
+                foreach (var (id, entry) in changes)
+                {
+                    if (entry is not null)
+                    {
+                        undo.Add(new Undo(id, _entries.GetValueOrDefault(id)));
+                        _entries[id] = entry;
+                    }
+                    else if (_entries.Remove(id, out var removed))
+                    {
+                        undo.Add(new Undo(id, removed));
+                    }
+                }
+
+                if (undo.Count > 0)
+                    RebuildAndPublish();
+
+                return undo;
+            }
+            catch
+            {
+                for (int i = undo.Count - 1; i >= 0; i--)
+                {
+                    var (id, previous) = undo[i];
+                    if (previous is null)
+                        _entries.Remove(id);
+                    else
+                        _entries[id] = previous;
+                }
+
+                throw;
+            }
         }
     }
+
+    // One change of a mutation: Entry stores or replaces the entry of Id; null removes it.
+    private readonly record struct Change(int Id, IndexedEntry? Entry);
 
     private readonly record struct Undo(int Id, IndexedEntry? Previous);
 }

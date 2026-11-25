@@ -81,7 +81,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(initialEntries);
         ArgumentNullException.ThrowIfNull(tokenization);
-        return AddIndexServices(services, key: null, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
+        return AddIndexServices(services, key: null, CopiedNow(initialEntries, tokenization), tokenization, ServiceLifetime.Scoped);
     }
 
     /// <summary>
@@ -129,6 +129,7 @@ public static class ServiceCollectionExtensions
             key: null,
             sp => new InitialIndex(CopyEntries(
                 entriesFactory(sp) ?? throw new InvalidOperationException("The entries factory returned null."),
+                tokenization,
                 nameof(entriesFactory))),
             tokenization,
             ServiceLifetime.Scoped);
@@ -192,12 +193,13 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(initialEntries);
         ArgumentNullException.ThrowIfNull(tokenization);
-        return AddIndexServices(services, key, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
+        return AddIndexServices(services, key, CopiedNow(initialEntries, tokenization), tokenization, ServiceLifetime.Scoped);
     }
 
     // The one registration of an index, keyed or not: a null key registers ordinary (non-keyed) services, and a
-    // keyed lookup with a null key resolves them. initialIndex null: the index starts empty and nothing is published.
-    // Otherwise the first snapshot and the updater start from the same InitialIndex, built once per container.
+    // keyed lookup with a null key resolves them. The provider starts with a snapshot of the registered preset: empty
+    // when initialIndex is null, otherwise built from the same InitialIndex the updater starts from (built once per
+    // container). The updater then publishes nothing until its first change.
     private static IServiceCollection AddIndexServices(
         IServiceCollection services,
         string? key,
@@ -207,15 +209,15 @@ public static class ServiceCollectionExtensions
     {
         if (initialIndex is null)
         {
-            services.AddKeyedSingleton(key, (_, _) => new IndexSnapshotProvider());
+            services.AddKeyedSingleton(key, (_, _) => new IndexSnapshotProvider(IndexSnapshot.EmptyFor(tokenization)));
             services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-                new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization));
+                new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, seed: null));
         }
         else
         {
             services.AddKeyedSingleton(key, (sp, _) => initialIndex(sp));
-            services.AddKeyedSingleton(key, (sp, k) =>
-                CreateProvider(sp.GetRequiredKeyedService<InitialIndex>(k), tokenization));
+            services.AddKeyedSingleton(key, (sp, k) => new IndexSnapshotProvider(
+                IndexSnapshotBuilder.BuildFolded(sp.GetRequiredKeyedService<InitialIndex>(k).Entries, tokenization)));
             services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) => new IndexUpdater(
                 sp.GetRequiredKeyedService<IndexSnapshotProvider>(k),
                 tokenization,
@@ -232,28 +234,22 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // The entries an index starts with: the first snapshot is built from them and the updater starts from them.
+    // The entries an index starts with, folded once: the first snapshot is built from them and the updater starts
+    // from them.
     private sealed record InitialIndex(IReadOnlyDictionary<int, IndexedEntry> Entries);
 
     // Copies the entries at registration, so later changes to the caller's dictionary do not reach the index.
-    private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> initialEntries)
+    private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> initialEntries, SearchTokenization tokenization)
     {
-        var initial = new InitialIndex(CopyEntries(initialEntries, nameof(initialEntries)));
+        var initial = new InitialIndex(CopyEntries(initialEntries, tokenization, nameof(initialEntries)));
         return _ => initial;
     }
 
-    private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries, string paramName)
+    private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries, SearchTokenization tokenization, string paramName)
     {
         var copy = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (id, text) in entries)
-            copy[id] = IndexedEntry.FromText(id, text, paramName);
+            copy[id] = tokenization.FoldEntry(IndexedEntry.FromText(id, text, paramName));
         return copy;
-    }
-
-    private static IndexSnapshotProvider CreateProvider(InitialIndex initial, SearchTokenization tokenization)
-    {
-        var provider = new IndexSnapshotProvider();
-        provider.Publish(IndexSnapshotBuilder.Build(initial.Entries, tokenization));
-        return provider;
     }
 }

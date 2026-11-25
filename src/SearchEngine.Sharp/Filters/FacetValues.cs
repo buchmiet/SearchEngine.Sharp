@@ -40,19 +40,22 @@ public sealed class FacetValues
     /// once.</exception>
     public static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values)
     {
-        if (values is null || values.Count == 0)
+        // Count is read once and only sizes the buffer: a concurrent dictionary can report another count on every
+        // read, so the enumeration alone decides what is copied.
+        int expected = values?.Count ?? 0;
+        if (expected == 0)
             return null;
 
         var pool = ArrayPool<KeyValuePair<string, long>>.Shared;
-        var buffer = pool.Rent(values.Count);
+        var buffer = pool.Rent(expected);
         int count = 0;
         try
         {
-            foreach (var pair in values)
+            foreach (var pair in values!)
             {
                 if (count == buffer.Length)
                 {
-                    var larger = pool.Rent(count * 2);
+                    var larger = pool.Rent(Math.Max(4, count * 2));
                     buffer.AsSpan(0, count).CopyTo(larger);
                     pool.Return(buffer, clearArray: true);
                     buffer = larger;

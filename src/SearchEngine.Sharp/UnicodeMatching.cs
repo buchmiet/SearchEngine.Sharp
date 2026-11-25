@@ -54,9 +54,10 @@ public enum UnicodeMatching
     /// <summary>
     /// Matches must not split an extended grapheme cluster (UAX #29): a <see cref="WordMatchMethod.Within"/> match
     /// starts and ends on cluster boundaries, and so does every place where a glob <c>*</c> or <c>?</c> meets
-    /// literal text. <c>cafe</c> and <c>cafe*</c> do not match a decomposed <c>café</c>, and one emoji (or
-    /// emoji followed by <c>*</c>) does not match inside a ZWJ sequence. Exact matches without wildcards are whole
-    /// tokens and need no check.
+    /// literal text, and a glob <c>?</c> matches one whole cluster instead of one code point. <c>cafe</c> and
+    /// <c>cafe*</c> do not match a decomposed <c>café</c> while <c>caf?</c> does, and one emoji (or emoji followed by
+    /// <c>*</c>) does not match inside a ZWJ sequence. Exact matches without wildcards are whole tokens and need no
+    /// check.
     /// </summary>
     GraphemeBoundaries = 8,
 }
@@ -71,27 +72,113 @@ internal static class TextFolder
 
     internal const UnicodeMatching FoldingOptions = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
 
-    internal static string Fold(string text, UnicodeMatching normalization)
+    /// <summary>
+    /// Folds indexed text: every run between <paramref name="separators"/> is folded on its own (<see cref="Fold"/>)
+    /// and the separators are kept. Text is split as written, before folding, exactly like a query, so a combining
+    /// mark after a separator never composes with it. Returns <paramref name="text"/> itself when nothing changes.
+    /// </summary>
+    internal static string FoldRuns(string text, UnicodeMatching options, SearchValues<char> separators)
     {
-        if ((normalization & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
+        if ((options & FoldingOptions) == 0 || Ascii.IsValid(text))
             return text;
 
-        bool removeDiacritics = (normalization & UnicodeMatching.RemoveDiacritics) != 0;
-        if (removeDiacritics || (normalization & UnicodeMatching.Compose) != 0)
+        StringBuilder? sb = null;
+        int copied = 0;
+        int position = 0;
+        while (position < text.Length)
+        {
+            int offset = text.AsSpan(position).IndexOfAnyExcept(separators);
+            if (offset < 0)
+                break;
+
+            int start = position + offset;
+            int length = text.AsSpan(start).IndexOfAny(separators);
+            position = length < 0 ? text.Length : start + length;
+            var run = text.AsSpan(start, position - start);
+            if (Ascii.IsValid(run))
+                continue;
+
+            string folded = Fold(run.Length == text.Length ? text : run.ToString(), options, separators);
+            if (folded.AsSpan().SequenceEqual(run))
+                continue;
+
+            sb ??= new StringBuilder(text.Length + 8);
+            sb.Append(text, copied, start - copied).Append(folded);
+            copied = position;
+        }
+
+        return sb?.Append(text, copied, text.Length - copied).ToString() ?? text;
+    }
+
+    /// <summary>
+    /// Folds one run of text that holds no separator as written: a token of indexed text or a query term. The steps
+    /// are composition (or accent removal), case folding, and then, when composing, the per-character lowercase that
+    /// the tokenizer applies anyway followed by composition again: lowercasing can undo NFC (T + U+0308 has no
+    /// precomposed form, t + U+0308 composes to U+1E97), so composition comes last. A character whose lowercase is
+    /// one of <paramref name="separators"/> is left for the tokenizer, so lowercasing here never moves a token
+    /// boundary.
+    /// </summary>
+    internal static string Fold(string text, UnicodeMatching options, SearchValues<char>? separators = null)
+    {
+        if ((options & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
+            return text;
+
+        bool removeDiacritics = (options & UnicodeMatching.RemoveDiacritics) != 0;
+        bool normalize = removeDiacritics || (options & UnicodeMatching.Compose) != 0;
+        if (normalize)
             text = NormalizeWellFormedRuns(text, removeDiacritics);
 
-        if ((normalization & UnicodeMatching.CaseFold) != 0)
+        string composed = text;
+        if ((options & UnicodeMatching.CaseFold) != 0)
             text = ApplyCaseFolding(text);
+
+        // Case folding can undo NFC as well (U+0130 + U+0301 folds to i + U+0301, which composes to U+00ED).
+        if (normalize)
+        {
+            text = Lowercase(text, separators);
+            if (!ReferenceEquals(text, composed))
+                text = NormalizeWellFormedRuns(text, removeDiacritics);
+        }
 
         return text;
     }
 
+    // TextNormalizer.ToLowerInvariantFast per UTF-16 unit, except for characters whose lowercase is a separator.
+    private static string Lowercase(string text, SearchValues<char>? separators)
+    {
+        int first = 0;
+        while (first < text.Length && !LowersHere(text[first], separators))
+            first++;
+
+        if (first == text.Length)
+            return text;
+
+        return string.Create(text.Length, (text, separators, first), static (destination, state) =>
+        {
+            state.text.AsSpan(0, state.first).CopyTo(destination);
+            for (int i = state.first; i < destination.Length; i++)
+            {
+                char ch = state.text[i];
+                destination[i] = LowersHere(ch, state.separators) ? Tokenizer.TextNormalizer.ToLowerInvariantFast(ch) : ch;
+            }
+        });
+    }
+
+    private static bool LowersHere(char ch, SearchValues<char>? separators)
+    {
+        char lower = Tokenizer.TextNormalizer.ToLowerInvariantFast(ch);
+        return lower != ch && (separators is null || !separators.Contains(lower));
+    }
+
     // string.Normalize and string.IsNormalized throw ArgumentException on ill-formed UTF-16 (a lone surrogate, which
-    // file systems such as NTFS allow in names) and on U+FFFE. Such a code unit takes no part in composition, so it is
-    // kept as it is and the well-formed runs around it are normalized on their own: the text still matches itself.
+    // file systems such as NTFS allow in names) and on noncharacters: ICU rejects U+FFFE, Windows NLS
+    // (DOTNET_SYSTEM_GLOBALIZATION_USENLS) all 66 of them. Such a code point takes no part in composition (it has no
+    // decomposition, combining class 0 and no composition partner), so it is kept as it is and the runs around it are
+    // normalized on their own. The result is the one ICU gives for the whole text, on every backend, and the text
+    // still matches itself.
     private static string NormalizeWellFormedRuns(string text, bool removeDiacritics)
     {
-        int invalid = IndexOfUnnormalizable(text);
+        int invalid = IndexOfUnnormalizable(text, out int length);
         if (invalid < 0)
             return Normalize(text, removeDiacritics);
 
@@ -99,31 +186,41 @@ internal static class TextFolder
         int start = 0;
         while (invalid >= 0)
         {
-            sb.Append(Normalize(text[start..invalid], removeDiacritics)).Append(text[invalid]);
-            start = invalid + 1;
-            int next = IndexOfUnnormalizable(text.AsSpan(start));
+            sb.Append(Normalize(text[start..invalid], removeDiacritics)).Append(text, invalid, length);
+            start = invalid + length;
+            int next = IndexOfUnnormalizable(text.AsSpan(start), out length);
             invalid = next < 0 ? -1 : start + next;
         }
 
         return sb.Append(Normalize(text[start..], removeDiacritics)).ToString();
     }
 
-    private static int IndexOfUnnormalizable(ReadOnlySpan<char> text)
+    // Index and length (1 or 2 UTF-16 units) of the first lone surrogate or noncharacter, or -1.
+    private static int IndexOfUnnormalizable(ReadOnlySpan<char> text, out int length)
     {
-        if (!text.ContainsAnyInRange('\uD800', '\uDFFF') && !text.Contains('\uFFFE'))
+        length = 1;
+        if (!text.ContainsAnyInRange('\uD800', '\uDFFF') && !text.ContainsAnyInRange('\uFDD0', '\uFDEF') && !text.ContainsAny('\uFFFE', '\uFFFF'))
             return -1;
 
         for (int i = 0; i < text.Length; i++)
         {
-            char ch = text[i];
-            if (char.IsHighSurrogate(ch) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-                i++;
-            else if (char.IsSurrogate(ch) || ch == '\uFFFE')
+            if (Rune.DecodeFromUtf16(text[i..], out Rune rune, out int consumed) != OperationStatus.Done)
+                return i; // a lone surrogate
+
+            if (IsNoncharacter(rune.Value))
+            {
+                length = consumed;
                 return i;
+            }
+
+            i += consumed - 1;
         }
 
         return -1;
     }
+
+    // U+FDD0 to U+FDEF and the last two code points of every plane (Unicode 15.1, section 23.7).
+    private static bool IsNoncharacter(int codePoint) => codePoint is >= 0xFDD0 and <= 0xFDEF || (codePoint & 0xFFFE) == 0xFFFE;
 
     private static string Normalize(string text, bool removeDiacritics)
     {
@@ -225,40 +322,121 @@ internal static class TextFolder
 
         return sb?.ToString() ?? text;
     }
+}
 
-    /// <summary>True when <paramref name="position"/> is an extended grapheme cluster boundary of <paramref name="word"/> (UAX #29).</summary>
-    internal static bool IsGraphemeBoundary(ReadOnlySpan<char> word, int position)
+/// <summary>
+/// The boundaries of the units of user text in one word: extended grapheme clusters (UAX #29) under
+/// <see cref="UnicodeMatching.GraphemeBoundaries"/>, code points otherwise (a surrogate pair is one unit, a lone
+/// surrogate is one too). A glob <c>?</c> matches one unit, and a match never starts or ends inside one.
+/// </summary>
+/// <remarks>For clusters, the first test that cannot be answered from the two characters around the position finds all
+/// boundaries in one forward walk; every later test reads that table, so testing many positions costs one walk instead
+/// of one walk per test. Not copied once used (the table and its state live in the instance), and not declared in a
+/// <see langword="using"/> statement, whose variable is read-only: call <see cref="Dispose"/> in a
+/// <see langword="finally"/> block.</remarks>
+internal ref struct TextUnitBoundaries
+{
+    /// <summary>Words shorter than this get their cluster table on the stack from the caller; longer ones rent it.</summary>
+    internal const int MaxStackLength = 256;
+
+    private readonly ReadOnlySpan<char> _word;
+    private readonly bool _graphemeClusters;
+    private Span<bool> _isBoundary;
+    private bool[]? _rented;
+    private bool _built;
+
+    /// <param name="word">The word.</param>
+    /// <param name="graphemeClusters">True for clusters, false for code points.</param>
+    /// <param name="buffer">Room for <c>word.Length + 1</c> flags, or empty to rent it from the shared pool when
+    /// needed. Code points need none.</param>
+    internal TextUnitBoundaries(ReadOnlySpan<char> word, bool graphemeClusters, Span<bool> buffer)
     {
-        if (position == 0 || position >= word.Length)
+        _word = word;
+        _graphemeClusters = graphemeClusters;
+        _isBoundary = buffer;
+    }
+
+    /// <summary>True when <paramref name="position"/> (0 to the word's length) is a unit boundary.</summary>
+    internal bool IsBoundary(int position)
+    {
+        if (position <= 0 || position >= _word.Length)
             return true;
 
+        char before = _word[position - 1];
+        char after = _word[position];
+        if (!_graphemeClusters)
+            return !(char.IsHighSurrogate(before) && char.IsLowSurrogate(after));
+
         // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
-        char before = word[position - 1];
-        char after = word[position];
         if (char.IsAscii(before) && char.IsAscii(after))
             return before != '\r' || after != '\n';
 
-        int boundary = 0;
-        while (boundary < position)
-            boundary += StringInfo.GetNextTextElementLength(word[boundary..]);
+        if (!_built)
+            Build();
 
-        return boundary == position;
+        return _isBoundary[position];
+    }
+
+    /// <summary>The end of the unit that starts at <paramref name="position"/>, which is a boundary before the end of
+    /// the word.</summary>
+    internal int Next(int position)
+    {
+        int next = position + 1;
+        while (next < _word.Length && !IsBoundary(next))
+            next++;
+
+        return next;
+    }
+
+    private void Build()
+    {
+        if (_isBoundary.Length < _word.Length + 1)
+            _isBoundary = _rented = ArrayPool<bool>.Shared.Rent(_word.Length + 1);
+
+        _isBoundary[.._word.Length].Clear();
+        for (int boundary = 0; boundary < _word.Length; boundary += StringInfo.GetNextTextElementLength(_word[boundary..]))
+            _isBoundary[boundary] = true;
+
+        _isBoundary[_word.Length] = true;
+        _built = true;
+    }
+
+    /// <summary>Returns a rented table to the pool.</summary>
+    public void Dispose()
+    {
+        if (_rented is not null)
+            ArrayPool<bool>.Shared.Return(_rented);
+
+        _rented = null;
     }
 
     /// <summary>
     /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
-    /// extended grapheme cluster boundaries, or -1: the substring match of <see cref="UnicodeMatching.GraphemeBoundaries"/>
-    /// for <see cref="WordMatchMethod.Within"/> and <c>*value*</c> globs.
+    /// unit boundaries, or -1: the substring match of <see cref="WordMatchMethod.Within"/> and of <c>*value*</c> globs.
     /// </summary>
-    internal static int IndexOfOnGraphemeBoundaries(ReadOnlySpan<char> word, ReadOnlySpan<char> value)
+    internal static int IndexOf(ReadOnlySpan<char> word, ReadOnlySpan<char> value, bool graphemeClusters)
     {
         int index = word.IndexOf(value);
-        while (index >= 0 && !(IsGraphemeBoundary(word, index) && IsGraphemeBoundary(word, index + value.Length)))
-        {
-            int next = word[(index + 1)..].IndexOf(value);
-            index = next < 0 ? -1 : index + 1 + next;
-        }
 
-        return index;
+        // Without clusters only a value that starts with a low surrogate or ends with a high one can split a pair.
+        if (index < 0 || value.IsEmpty || (!graphemeClusters && !char.IsLowSurrogate(value[0]) && !char.IsHighSurrogate(value[^1])))
+            return index;
+
+        var boundaries = new TextUnitBoundaries(word, graphemeClusters,
+            graphemeClusters && word.Length < MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        try
+        {
+            while (index >= 0 && !(boundaries.IsBoundary(index) && boundaries.IsBoundary(index + value.Length)))
+            {
+                int next = word[(index + 1)..].IndexOf(value);
+                index = next < 0 ? -1 : index + 1 + next;
+            }
+
+            return index;
+        }
+        finally
+        {
+            boundaries.Dispose();
+        }
     }
 }

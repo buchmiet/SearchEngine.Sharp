@@ -2,23 +2,46 @@ namespace SearchEngine.Query;
 
 /// <summary>
 /// Zero-allocation glob matching for whole indexed tokens.
-/// <c>*</c> matches zero or more characters; <c>?</c> matches exactly one character.
-/// Patterns are anchored at both ends (full token match).
+/// <c>*</c> matches zero or more units of text; <c>?</c> matches exactly one. A unit is a code point (a surrogate pair
+/// counts once, a lone surrogate too), or an extended grapheme cluster under
+/// <see cref="UnicodeMatching.GraphemeBoundaries"/> (<see cref="TextUnitBoundaries"/>). Every position where a wildcard
+/// meets literal text is a unit boundary. Patterns are anchored at both ends (full token match).
 /// </summary>
 internal static class GlobMatcher
 {
     internal static bool ContainsMetacharacters(ReadOnlySpan<char> pattern) => pattern.ContainsAny('*', '?');
 
-    // Every character but '*' consumes exactly one character of the word.
+    // Every character but '*' consumes at least one UTF-16 unit of the word.
     internal static int MinMatchLength(ReadOnlySpan<char> pattern) => pattern.Length - pattern.Count('*');
+
+    // The longest word in UTF-16 units that the pattern can match: a literal consumes one unit and '?' one code point,
+    // at most two units. Unbounded with '*' or when '?' is a grapheme cluster.
+    internal static int MaxMatchLength(ReadOnlySpan<char> pattern, bool graphemeBoundaries)
+        => graphemeBoundaries || pattern.Contains('*') ? int.MaxValue : pattern.Length + pattern.Count('?');
 
     /// <summary>
     /// Returns true when <paramref name="word"/> fully matches <paramref name="pattern"/>.
-    /// Consecutive <c>*</c> in the pattern are treated as a single wildcard. With
-    /// <paramref name="graphemeBoundaries"/>, every position where a wildcard meets literal text must be a grapheme
-    /// cluster boundary of <paramref name="word"/> (<see cref="UnicodeMatching.GraphemeBoundaries"/>).
+    /// Consecutive <c>*</c> in the pattern are treated as a single wildcard. <paramref name="graphemeBoundaries"/>
+    /// makes the units grapheme clusters instead of code points (<see cref="UnicodeMatching.GraphemeBoundaries"/>).
     /// </summary>
     internal static bool IsWholeWordMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, bool graphemeBoundaries = false)
+    {
+        var units = new TextUnitBoundaries(word, graphemeBoundaries,
+            graphemeBoundaries && word.Length < TextUnitBoundaries.MaxStackLength ? stackalloc bool[word.Length + 1] : default);
+        try
+        {
+            return Match(pattern, word, ref units);
+        }
+        finally
+        {
+            units.Dispose();
+        }
+    }
+
+    // A star remembers where it started and gives up one more unit whenever the rest of the pattern fails. A star and
+    // a question mark always start on a unit boundary: the word starts on one, a question mark and a star end on one,
+    // and a literal before a wildcard must end on one (MayCrossAt).
+    private static bool Match(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, ref TextUnitBoundaries units)
     {
         int patternIndex = 0;
         int wordIndex = 0;
@@ -27,8 +50,7 @@ internal static class GlobMatcher
 
         while (wordIndex < word.Length)
         {
-            if (patternIndex < pattern.Length
-                && (!graphemeBoundaries || MayCrossAt(pattern, patternIndex, word, wordIndex)))
+            if (patternIndex < pattern.Length && MayCrossAt(pattern, patternIndex, wordIndex, ref units))
             {
                 char patternChar = pattern[patternIndex];
                 if (patternChar == '*')
@@ -41,7 +63,14 @@ internal static class GlobMatcher
                     continue;
                 }
 
-                if (patternChar == '?' || patternChar == word[wordIndex])
+                if (patternChar == '?')
+                {
+                    patternIndex++;
+                    wordIndex = units.Next(wordIndex);
+                    continue;
+                }
+
+                if (patternChar == word[wordIndex])
                 {
                     patternIndex++;
                     wordIndex++;
@@ -51,7 +80,7 @@ internal static class GlobMatcher
 
             if (starPatternIndex >= 0)
             {
-                starWordIndex++;
+                starWordIndex = units.Next(starWordIndex);
                 wordIndex = starWordIndex;
                 patternIndex = starPatternIndex + 1;
                 while (patternIndex < pattern.Length && pattern[patternIndex] == '*')
@@ -68,13 +97,13 @@ internal static class GlobMatcher
         return patternIndex == pattern.Length;
     }
 
-    // The pattern moves from a literal to a wildcard (or back) at patternIndex: word must have a grapheme cluster
-    // boundary there. Leftmost placement of each literal run stays correct, because the check depends only on where
-    // that run is placed.
-    private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, ReadOnlySpan<char> word, int wordIndex)
+    // The pattern moves from a literal to a wildcard (or back) at patternIndex: word must have a unit boundary there.
+    // Leftmost placement of each literal run stays correct, because the check depends only on where that run is
+    // placed.
+    private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, int wordIndex, ref TextUnitBoundaries units)
         => patternIndex == 0
             || IsWildcard(pattern[patternIndex]) == IsWildcard(pattern[patternIndex - 1])
-            || TextFolder.IsGraphemeBoundary(word, wordIndex);
+            || units.IsBoundary(wordIndex);
 
     private static bool IsWildcard(char ch) => ch is '*' or '?';
 
@@ -154,15 +183,26 @@ internal static class GlobMatcher
         {
             // First-character check before the vectorized compare: most words differ there.
             Kind.Prefix => word.Length >= _headLength && word[0] == _pattern[_headStart] && word.StartsWith(Head)
-                && IsBoundary(word, _headLength),
-            Kind.Suffix => word.EndsWith(Tail) && IsBoundary(word, word.Length - _tailLength),
+                && AreBoundaries(word, _headLength, _headLength),
+            Kind.Suffix => word.EndsWith(Tail) && AreBoundaries(word, word.Length - _tailLength, word.Length - _tailLength),
             Kind.Contains => QueryMatcher.ContainsWithin(word, Head, _graphemeBoundaries),
             Kind.PrefixSuffix => word.Length >= _headLength + _tailLength && word.StartsWith(Head) && word.EndsWith(Tail)
-                && IsBoundary(word, _headLength) && IsBoundary(word, word.Length - _tailLength),
+                && AreBoundaries(word, _headLength, word.Length - _tailLength),
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
-        private bool IsBoundary(ReadOnlySpan<char> word, int position)
-            => !_graphemeBoundaries || TextFolder.IsGraphemeBoundary(word, position);
+        // Both positions are unit boundaries of word.
+        private bool AreBoundaries(ReadOnlySpan<char> word, int first, int second)
+        {
+            var boundaries = new TextUnitBoundaries(word, _graphemeBoundaries, default);
+            try
+            {
+                return boundaries.IsBoundary(first) && boundaries.IsBoundary(second);
+            }
+            finally
+            {
+                boundaries.Dispose();
+            }
+        }
     }
 }

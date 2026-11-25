@@ -10,8 +10,8 @@ namespace SearchEngine;
 /// <para>An expression is split into terms at the query separators of the snapshot's
 /// <see cref="SearchTokenization"/>. Adjacent terms are joined with AND. A term that contains <c>*</c> or <c>?</c>
 /// is a glob that must match a whole token. With <c>enableOperators</c> set, the words <c>and</c>, <c>or</c> and
-/// <c>not</c> (ASCII case-insensitive) and balanced parentheses are operators; a malformed expression is corrected,
-/// never rejected. Under <see cref="WordMatchMethod.Regex"/> the whole expression is one pattern and
+/// <c>not</c> (ASCII case-insensitive) are operators, and so are parentheses when both are query separators and
+/// they balance; a malformed expression is corrected, never rejected. Under <see cref="WordMatchMethod.Regex"/> the whole expression is one pattern and
 /// <c>enableOperators</c> is ignored.</para>
 /// <para>An empty or whitespace expression matches nothing, unless a non-empty facet filter is given; then every
 /// document that passes the filter matches. A <see langword="null"/> expression throws

@@ -160,7 +160,9 @@ internal static class QueryExpressionEvaluator
         var separators = tokenization.QuerySeparatorValues;
         var tokens = new List<QueryToken>();
         int wordStart = -1;
-        bool allowParentheses = !enableOperators || HasValidParentheses(expression);
+        // Both parentheses are separators here, so counting the characters counts the tokens: the token list is
+        // balanced whenever it gets parenthesis tokens at all.
+        bool groups = enableOperators && tokenization.ParenthesesGroup && HasValidParentheses(expression);
 
         for (int i = 0; i < expression.Length; i++)
         {
@@ -176,7 +178,7 @@ internal static class QueryExpressionEvaluator
             EmitWord(expression, wordStart, i, enableOperators, tokenization, tokens);
             wordStart = -1;
 
-            if (enableOperators && allowParentheses && ch is '(' or ')')
+            if (groups && ch is '(' or ')')
             {
                 Append(tokens, QueryToken.CreateOperation(
                     ch == '(' ? WordOperations.OpenParenthesis : WordOperations.CloseParenthesis));
@@ -233,7 +235,8 @@ internal static class QueryExpressionEvaluator
     //   - NOT NOT counts as one NOT; a binary operator followed by NOT is kept (NOT binds to what follows);
     //   - any other pair of adjacent operators collapses to AND, which is then checked against the token before it
     //     ("a AND NOT AND b" = "a AND b", "(NOT AND a)" = "(a)");
-    //   - ")" drops the operators in front of it, and an empty group is dropped.
+    //   - ")" drops the operators in front of it, and an empty group is dropped with the implicit AND in front of
+    //     it, so what follows the group meets what preceded it ("a () OR b" = "a OR b").
     // Trailing operators at the end of the expression are dropped by DropTrailingOperators once all tokens are in.
     private static void Append(List<QueryToken> tokens, QueryToken token)
     {
@@ -246,7 +249,7 @@ internal static class QueryExpressionEvaluator
             case WordOperations.OpenParenthesis:
             case WordOperations.Not:
                 if (afterOperand)
-                    tokens.Add(QueryToken.CreateOperation(WordOperations.And));
+                    tokens.Add(new QueryToken(string.Empty, WordOperations.And, Implicit: token.Operation == WordOperations.OpenParenthesis));
                 else if (token.Operation == WordOperations.Not && last == WordOperations.Not)
                     return;
 
@@ -269,10 +272,17 @@ internal static class QueryExpressionEvaluator
 
             case WordOperations.CloseParenthesis:
                 DropTrailingOperators(tokens);
-                if (tokens[^1].Operation == WordOperations.OpenParenthesis)
-                    tokens.RemoveAt(tokens.Count - 1);
-                else
+                if (tokens[^1].Operation != WordOperations.OpenParenthesis)
+                {
                     tokens.Add(token);
+                    return;
+                }
+
+                // An empty group is dropped together with the AND inserted for it, so "a () OR b" = "a OR b". An AND
+                // that was typed stays, as it would without the group.
+                tokens.RemoveAt(tokens.Count - 1);
+                if (tokens.Count > 0 && tokens[^1].Implicit)
+                    tokens.RemoveAt(tokens.Count - 1);
                 return;
         }
     }
@@ -396,7 +406,8 @@ internal static class QueryExpressionEvaluator
         return true;
     }
 
-    internal readonly record struct QueryToken(string Word, WordOperations Operation)
+    // Implicit: an AND that Append inserted in front of "(" and takes back when the group turns out empty.
+    internal readonly record struct QueryToken(string Word, WordOperations Operation, bool Implicit = false)
     {
         public static QueryToken CreateWord(string word) => new(word, WordOperations.None);
         public static QueryToken CreateOperation(WordOperations operation) => new(string.Empty, operation);

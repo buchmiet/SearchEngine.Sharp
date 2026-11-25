@@ -96,8 +96,8 @@ public interface IIndexUpdater
     /// <param name="entries">The entries to store. When an id occurs more than once, the last value wins.</param>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <remarks>An exception thrown while <paramref name="entries"/> is enumerated undoes the entries already
-    /// stored by this call.</remarks>
+    /// <remarks><paramref name="entries"/> is read in full before anything is stored, without holding the updater's
+    /// lock. An exception thrown while it is enumerated leaves the index unchanged.</remarks>
     void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries);
 
     /// <inheritdoc cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, string}})"/>
@@ -107,6 +107,8 @@ public interface IIndexUpdater
     /// <param name="ids">The ids to remove. Ids that are not present are skipped.</param>
     /// <exception cref="ArgumentNullException"><paramref name="ids"/> is <see langword="null"/>.</exception>
     /// <returns>The number of entries removed. When it is 0, nothing is rebuilt.</returns>
+    /// <remarks><paramref name="ids"/> is read in full before anything is removed, without holding the updater's
+    /// lock. An exception thrown while it is enumerated leaves the index unchanged.</remarks>
     int RemoveEntries(IEnumerable<int> ids);
 
     // ── Utility ──

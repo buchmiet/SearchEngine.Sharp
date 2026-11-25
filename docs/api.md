@@ -127,16 +127,19 @@ bool ContainsEntry(int id);
 ```
 
 - `tokenization` defaults to `SearchTokenization.Default` and applies to every snapshot this updater publishes,
-  including the empty one after `Clear`.
+  including the empty ones it publishes when it is created and after `Clear`.
+- The constructor replaces the provider's snapshot with an empty one; the updater never reads what the provider
+  held before.
 - A `string` entry is indexed as `new IndexedEntry(text, text)`.
 - `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
   input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
   `RefreshEntry` returns whether the id existed before (it adds the entry either way).
 - `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither rebuilds then.
   `RemoveEntries` returns the number of ids removed.
-- The async methods read the whole input before taking the updater's lock. They do not resume on the caller's
-  synchronization context: when the stream completes a step asynchronously, the reading and the rebuild
-  continue on a thread-pool thread, and a UI thread is not blocked by the rebuild.
+- The batch methods and the async methods read the whole input before taking the updater's lock, so an input
+  that throws while it is read changes nothing, and code inside it may call the updater. The async methods do not
+  resume on the caller's synchronization context: when the stream completes a step asynchronously, the reading
+  and the rebuild continue on a thread-pool thread, and a UI thread is not blocked by the rebuild.
 - The updater keeps its own copy of every entry, and that copy is the source of each rebuild.
 
 ### `IIndexSnapshotProvider`, `IndexSnapshotProvider`
@@ -144,8 +147,14 @@ bool ContainsEntry(int id);
 Holds the current snapshot. Reading `Current` takes no lock; the updater replaces the reference atomically.
 
 ```csharp
-IndexSnapshot Current { get; }   // never null; IndexSnapshot.Empty until the first publish
+IndexSnapshotProvider();
+IndexSnapshot Current { get; }   // never null
 ```
+
+- A new provider holds `IndexSnapshot.Empty`. Creating an `IndexUpdater` for it publishes an empty snapshot with
+  the updater's preset, so `Current.Tokenization` is the index's preset before the first change.
+- The providers registered by `ServiceCollectionExtensions` start with a snapshot of the registered preset: the
+  empty one, or the one built from the initial entries.
 
 ### `IndexedEntry`
 
@@ -165,7 +174,8 @@ public sealed record IndexedEntry(string SearchText, string SortText, FacetValue
 | `Within` | A term matches a substring of an indexed token. |
 | `Regex` | The whole expression is one .NET regular expression, matched against each indexed token with `Regex.IsMatch` (unanchored, case-insensitive). Operators and query separators do not apply. An invalid pattern or a match timeout returns no results. |
 
-With `Exact` and `Within`, a term that contains `*` or `?` is a glob that must match a whole token. Details:
+With `Exact` and `Within`, a term that contains `*` or `?` is a glob that must match a whole token. `?` matches one
+code point, or one grapheme cluster with `UnicodeMatching.GraphemeBoundaries`. Details:
 [Term matching](query-semantics.md#term-matching) and
 [Regular expressions](query-semantics.md#regular-expressions-wordmatchmethodregex).
 
@@ -215,7 +225,9 @@ static FacetFilter Combine(params FacetFilter[] filters);
 
 ### `IndexSnapshot`
 
-An immutable index. Any number of threads may query one snapshot at once.
+An index whose content never changes. Any number of threads may query one snapshot at once. The lookup structures
+for `Within` and for `NaturalSortAscending` are built on the first query that needs them, once per snapshot;
+concurrent first callers wait for that build.
 
 ```csharp
 static readonly IndexSnapshot Empty;    // empty snapshot with SearchTokenization.Default

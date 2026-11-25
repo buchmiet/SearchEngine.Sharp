@@ -177,4 +177,21 @@ public class NameMatcherTests
         await Assert.That(new SearchEngineSharp(provider).Find(pattern, WordMatchMethod.Regex)).IsEmpty();
         await Assert.That(NameMatcher.Create(pattern, WordMatchMethod.Regex).IsMatch(text)).IsFalse();
     }
+
+    // GraphemeBoundaries alone folds nothing, so a non-ASCII text is matched without a folded copy.
+    [Test]
+    public async Task IsMatch_WithGraphemeBoundariesOnly_DoesNotCopyTheText()
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
+        var matcher = NameMatcher.Create("caf*", WordMatchMethod.Exact, tokenization: tokenization);
+        const string name = "caf\u00E9.txt";
+        matcher.IsMatch(name);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool matched = matcher.IsMatch(name);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        await Assert.That(matched).IsTrue();
+        await Assert.That(allocated).IsEqualTo(0);
+    }
 }

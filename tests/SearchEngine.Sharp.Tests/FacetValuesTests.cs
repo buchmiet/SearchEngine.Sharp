@@ -119,6 +119,55 @@ public class FacetValuesTests
         await Assert.That(duplicateNames).IsEqualTo(0);
     }
 
+    // The count can change between two reads (a concurrent dictionary whose only key is removed and added again):
+    // only the enumeration decides what is copied.
+    [Test]
+    public async Task FromDictionary_CopiesThePairsWhenTheCountDropsToZeroAfterTheFirstRead()
+    {
+        var values = new PairList([new("size", 7L)], new Queue<int>([1, 0]));
+
+        var facets = FacetValues.FromDictionary(values);
+
+        await Assert.That(facets).IsNotNull();
+        await Assert.That(facets!.Count).IsEqualTo(1);
+        await Assert.That(facets.NameAt(0)).IsEqualTo("size");
+        await Assert.That(facets.ValueAt(0)).IsEqualTo(7L);
+    }
+
+    [Test]
+    public async Task FromDictionary_IsSafeWhileTheOnlyKeyIsRemovedAndAddedAgain()
+    {
+        var source = new ConcurrentDictionary<string, long>();
+        using var stop = new CancellationTokenSource();
+        var mutator = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                source["size"] = 1;
+                source.TryRemove("size", out _);
+            }
+        });
+
+        // Counted here and asserted once after the mutator stops, like FromDictionary_IsSafeWhileTheSourceIsMutated.
+        int wrongNames = 0;
+        try
+        {
+            for (int call = 0; call < 200_000; call++)
+            {
+                var facets = FacetValues.FromDictionary(source);
+                if (facets is not null && facets.NameAt(0) != "size")
+                    wrongNames++;
+            }
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await mutator;
+        }
+
+        await Assert.That(wrongNames).IsEqualTo(0);
+    }
+
     private sealed class ReferenceStringComparer : IEqualityComparer<string>
     {
         public bool Equals(string? x, string? y) => ReferenceEquals(x, y);
@@ -127,9 +176,11 @@ public class FacetValuesTests
     }
 
     // Minimal read-only dictionary that can hold what a Dictionary cannot: a null key.
-    private sealed class PairList(KeyValuePair<string, long>[] pairs) : IReadOnlyDictionary<string, long>
+    // countReads, when given, answers Count instead of the pairs: a concurrent dictionary can report a different
+    // count on every read.
+    private sealed class PairList(KeyValuePair<string, long>[] pairs, Queue<int>? countReads = null) : IReadOnlyDictionary<string, long>
     {
-        public int Count => pairs.Length;
+        public int Count => countReads is { Count: > 0 } ? countReads.Dequeue() : pairs.Length;
 
         public IEnumerable<string> Keys => pairs.Select(p => p.Key);
 

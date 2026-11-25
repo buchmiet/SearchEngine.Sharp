@@ -13,8 +13,9 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [0.6.0] - 2026-11-24
 
-Requires .NET 11. The public API gains members; the changes to members that shipped in 0.5.6 are listed under
-Changed.
+Requires .NET 11. Code written for 0.5.6 may need changes: two members of `IngestionResult` are renamed, one
+`AddSearchEngine` overload is replaced, and most methods now throw `ArgumentNullException` or `ArgumentException`
+for invalid arguments. Every change to what shipped in 0.5.6 is listed under Changed.
 
 ### Added
 
@@ -121,6 +122,18 @@ Changed.
   nor the facet values of its entries, so the updater cannot start from one; the factory now returns the entries,
   and the index and the updater are both built from them. The index with initial entries is built when the
   provider is first resolved instead of when `AddSearchEngine` is called.
+- With `enableOperators: true`, parentheses group terms only when both `(` and `)` are query separators of the
+  preset. In a preset made by `SearchTokenization.Create` with only one of them, that one splits terms like a space
+  and the other is part of its term. Such presets used to throw `ArgumentOutOfRangeException` for `(a) b` or leave
+  `NOT` unapplied in `NOT (a b)`. `Default` and `FileMask` are unchanged.
+- A glob `?` matches one code point instead of one UTF-16 code unit, so `?.txt` matches a name made of one emoji and
+  `.txt`, which used to need `??.txt`. With `UnicodeMatching.GraphemeBoundaries`, `?` matches one grapheme cluster
+  (`caf?.txt` matches a decomposed `café.txt`). A `*` and a `Within` match no longer start or end between the two
+  halves of a surrogate pair.
+- Creating an `IndexUpdater` publishes an empty snapshot with its preset, and the providers registered by
+  `AddSearchEngine` and `AddKeyedSearchEngine` start with an empty snapshot of the registered preset. Until the
+  first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,
+  whatever preset the index was configured with.
 
 ### Fixed
 
@@ -144,8 +157,10 @@ Changed.
   longer skips the final flush, and a cancelled ingestion with `FlushOnCancellation` also publishes the entries
   still queued between scanner and publisher.
 - `IndexUpdater` mutations are atomic: when building the new snapshot throws (for example for an invalid facet
-  bag), the entries and the published snapshot stay unchanged. `Clear` and removing the last entry keep the
-  updater's tokenization preset and Unicode options.
+  bag), the entries and the published snapshot stay unchanged. The batch methods read their whole input before
+  they change anything, so an input that throws while it is read, even after it called the updater itself, leaves
+  the index as it was. `Clear` and removing the last entry keep the updater's tokenization preset and Unicode
+  options.
 - `FacetValues.FromDictionary` reads the dictionary once, so a dictionary that changes during the call can no
   longer produce a broken bag or `IndexOutOfRangeException`. It rejects null and duplicate names with
   `ArgumentException`, like `FacetValues.Create`.
@@ -157,6 +172,8 @@ Changed.
   snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
   or batch update published an index without them. The updater now starts from the same entries and the same
   tokenization as the first snapshot.
+- `WordMatchMethod.Within` did not find a term that starts with two U+FFFF characters in a token that also starts
+  with them.
 
 ### Performance
 
