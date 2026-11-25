@@ -28,6 +28,10 @@ Changed.
 
 ### Changed
 
+- `IngestionResult.TotalRebuildCpu` is renamed `TotalRebuildDuration` and `IngestionResult.WorstCaseStaleness` is
+  renamed `MaxObservedStaleness`. The first never measured CPU time: it is the wall-clock time of the rebuilds,
+  the sum of `IngestionPublishEvent.RebuildDuration`. The second is the longest staleness seen during the scan, not
+  a bound. Neither value changed; code written for 0.5.6 must use the new names, and the old names no longer exist.
 - The target framework is `net11.0` and the dependency `Microsoft.Extensions.DependencyInjection` is 11.0.0.
   Applications on .NET 10 stay on 0.5.6. Moving to .NET 11 needs no source changes.
 - Progressive ingestion with the `Adaptive` policy: a publish triggered by `MaxStaleness` also waits

@@ -62,8 +62,8 @@ foreach (string line in publishMarks)
 
 Console.WriteLine();
 Console.WriteLine($"Done in {watch.Elapsed.TotalSeconds:F1}s — publishes: {result.PublishCount}, " +
-                  $"rebuild CPU: {result.TotalRebuildCpu.TotalMilliseconds:F0} ms, " +
-                  $"worst staleness: {result.WorstCaseStaleness.TotalMilliseconds:F0} ms");
+                  $"rebuild time: {result.TotalRebuildDuration.TotalMilliseconds:F0} ms, " +
+                  $"longest staleness: {result.MaxObservedStaleness.TotalMilliseconds:F0} ms");
 Console.WriteLine($"Final matches for '{query}': {engine.CountMatches(query, WordMatchMethod.Within):N0}");
 
 static int GetInt(string[] args, string flag, int defaultValue)

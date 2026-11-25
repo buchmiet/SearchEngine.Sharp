@@ -27,7 +27,7 @@ larger indexes.
 `--ingestion-policy` feeds `--ingestion-count` synthetic paths (`SyntheticPathFeed`) through
 `ProgressiveIndexIngestion` once per policy (fixed batch, time debounce, adaptive, adaptive without the growing
 batch cap; per entry only up to 2,000 paths). The columns are the scan time, the total rebuild time, the number of
-publishes, the worst staleness, and `Overhead×`: the total rebuild time divided by the time of one full build of
+publishes, the longest observed staleness, and `Overhead×`: the total rebuild time divided by the time of one full build of
 the same paths. `--ingestion-scan-delay-ms N` simulates a slow scan.
 
 Other options: `--warmup N` (default 3), `--iterations N` (default 10), `--seed N` (default 1337).

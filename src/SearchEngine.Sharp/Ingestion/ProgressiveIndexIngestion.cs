@@ -482,7 +482,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         public int EntriesAccepted { get; private set; }
         public int EntriesPublished { get; private set; }
         public int PublishCount { get; private set; }
-        public TimeSpan TotalRebuildCpu { get; private set; }
+        public TimeSpan TotalRebuildDuration { get; private set; }
 
         public void IncrementAccepted() => EntriesAccepted++;
 
@@ -490,7 +490,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             EntriesPublished += count;
             PublishCount++;
-            TotalRebuildCpu += rebuildDuration;
+            TotalRebuildDuration += rebuildDuration;
         }
 
         public void ObserveStaleness(List<long> bufferedAt, long publishStarted)
@@ -517,8 +517,8 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 EntriesAccepted = EntriesAccepted,
                 EntriesPublished = EntriesPublished,
                 PublishCount = PublishCount,
-                TotalRebuildCpu = TotalRebuildCpu,
-                WorstCaseStaleness = new TimeSpan(Volatile.Read(ref _worstStalenessTicks)),
+                TotalRebuildDuration = TotalRebuildDuration,
+                MaxObservedStaleness = new TimeSpan(Volatile.Read(ref _worstStalenessTicks)),
                 CompletedSuccessfully = completed,
                 WasCancelled = cancelled,
             };

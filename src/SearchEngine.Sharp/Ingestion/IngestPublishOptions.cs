@@ -52,7 +52,7 @@ public sealed class IngestPublishOptions
     /// <see cref="IngestPublishPolicy.PerEntry"/> arm no timer: a stale buffer is published when the next entry
     /// arrives or the scan ends, so an idle scanner can leave entries unpublished longer than this.</para>
     /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish
-    /// that contains it starts (see <see cref="IngestionResult.WorstCaseStaleness"/>); that publish's own
+    /// that contains it starts (see <see cref="IngestionResult.MaxObservedStaleness"/>); that publish's own
     /// rebuild comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
     /// <para>Under <see cref="IngestPublishPolicy.Adaptive"/> (unless <see cref="StrictMaxStaleness"/> is set)
     /// a staleness-triggered publish also waits until <see cref="AdaptiveMultiplier"/> × the last rebuild

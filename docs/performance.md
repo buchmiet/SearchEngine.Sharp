@@ -180,7 +180,7 @@ cost, and the time between publishes decides how stale the index is.
 
 100,000 synthetic paths fed as fast as possible (`--ingestion-policy` benchmark, same machine):
 
-| Policy | Publishes | Total rebuild time | Rebuild time relative to one build | Worst staleness |
+| Policy | Publishes | Total rebuild time | Rebuild time relative to one build | Longest observed staleness |
 |---|---:|---:|---:|---:|
 | `Adaptive` (defaults) | 7 | 0.62 s | 2.3 times | 0.25 s |
 | `Adaptive` with `GrowthAwareBatchCap = false` | 50 | 7.1 s | 25 times | 1.5 s |

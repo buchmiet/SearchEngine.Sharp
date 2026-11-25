@@ -322,8 +322,8 @@ Reported after each publish.
 | `EntriesAccepted` | Entries taken from the scan |
 | `EntriesPublished` | Entries published (equals `EntriesAccepted` after a successful scan) |
 | `PublishCount` | Number of publishes |
-| `TotalRebuildCpu` | Total wall-clock time spent in rebuilds |
-| `WorstCaseStaleness` | Longest time between the scanner handing over an entry and the start of the publish that contains it |
+| `TotalRebuildDuration` | Wall-clock time spent in rebuilds, summed over all publishes |
+| `MaxObservedStaleness` | Longest observed time between the scanner handing over an entry and the start of the publish that contains it |
 | `CompletedSuccessfully` | `true` when the scan ran to its end |
 | `WasCancelled` | `true` when cancellation ended the scan |
 
