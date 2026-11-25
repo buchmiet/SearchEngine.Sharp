@@ -44,18 +44,11 @@ Configurable index-side and query-side separator sets. Stored in each `IndexSnap
 queries always use `snapshot.Tokenization.QuerySeparators`.
 
 ```csharp
-static SearchTokenization Default { get; }   // token-level (legacy behavior)
+static SearchTokenization Default { get; }   // token-level
 static SearchTokenization FileMask { get; }  // whole-name index; whitespace query split
 static SearchTokenization Create(string indexSeparators, string querySeparators);
 UnicodeMatching UnicodeMatching { get; }                              // None for built-in presets
 SearchTokenization WithUnicodeMatching(UnicodeMatching options);      // same separators + options
-```
-
-### `UnicodeMatching` (flags)
-
-```csharp
-None = 0, Compose = 1 /* NFC */, CaseFold = 2, RemoveDiacritics = 4 /* implies Compose */, GraphemeBoundaries = 8 /* Within only */
-
 string IndexSeparators { get; }
 string QuerySeparators { get; }
 ```
@@ -63,10 +56,17 @@ string QuerySeparators { get; }
 See [query-semantics.md](query-semantics.md#tokenization-presets) for preset tables and
 FileMask behavioral notes.
 
+### `UnicodeMatching` (flags)
+
+```csharp
+None = 0, Compose = 1 /* NFC */, CaseFold = 2, RemoveDiacritics = 4 /* implies Compose */, GraphemeBoundaries = 8 /* Within only */
+```
+
 ### `IIndexUpdater`
 
 Index mutations. All operations are serialized and publish a new immutable snapshot on
-completion. Each mutation rebuilds the full index; prefer batch methods or
+completion. A mutation that throws leaves the entries and the published snapshot unchanged.
+Each mutation rebuilds the full index; prefer batch methods or
 `ProgressiveIndexIngestion` over per-entry calls. Default implementation:
 `IndexUpdater(IndexSnapshotProvider, SearchTokenization? tokenization = null)`.
 
