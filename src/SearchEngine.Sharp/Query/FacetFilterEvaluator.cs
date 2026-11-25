@@ -170,7 +170,7 @@ internal static class FacetFilterEvaluator
         return results;
     }
 
-    private static ResolvedPredicate[] ResolvePredicates(
+    internal static ResolvedPredicate[] ResolvePredicates(
         ReadOnlySpan<FacetPredicate> predicates,
         IndexSnapshot snapshot)
     {
@@ -189,7 +189,7 @@ internal static class FacetFilterEvaluator
         return resolved;
     }
 
-    private static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
+    internal static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
     {
         for (int i = 0; i < resolved.Length; i++)
         {
@@ -213,5 +213,5 @@ internal static class FacetFilterEvaluator
         };
     }
 
-    private readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
+    internal readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
 }

@@ -164,11 +164,11 @@ internal static class SelectivityProbe
         }
 
         var matching = queryContext.RentEmptyBitSet();
-        var resolved = FacetFilterEvaluatorProbe.ResolvePredicates(filter.Predicates, snapshot);
+        var resolved = FacetFilterEvaluator.ResolvePredicates(filter.Predicates, snapshot);
         for (int i = 0; i < hitCount; i++)
         {
             int ordinal = ordinals[i];
-            if (FacetFilterEvaluatorProbe.MatchesAll(resolved, ordinal))
+            if (FacetFilterEvaluator.MatchesAll(resolved, ordinal))
                 matching.Add(ordinal);
         }
 
@@ -194,56 +194,13 @@ internal static class SelectivityProbe
             return;
         }
 
-        var resolved = FacetFilterEvaluatorProbe.ResolvePredicates(filter.Predicates, snapshot);
+        var resolved = FacetFilterEvaluator.ResolvePredicates(filter.Predicates, snapshot);
         results.Clear();
         for (int i = 0; i < hitCount; i++)
         {
             int ordinal = ordinals[i];
-            if (FacetFilterEvaluatorProbe.MatchesAll(resolved, ordinal))
+            if (FacetFilterEvaluator.MatchesAll(resolved, ordinal))
                 results.Add(ordinal);
         }
     }
-}
-
-/// <summary>Exposes FacetFilterEvaluator helpers to benchmarks without duplicating predicate logic.</summary>
-internal static class FacetFilterEvaluatorProbe
-{
-    internal static ResolvedPredicate[] ResolvePredicates(ReadOnlySpan<FacetPredicate> predicates, IndexSnapshot snapshot)
-    {
-        var resolved = new ResolvedPredicate[predicates.Length];
-        for (int i = 0; i < predicates.Length; i++)
-        {
-            ref readonly FacetPredicate predicate = ref predicates[i];
-            if (!snapshot.FacetColumns.TryGetValue(predicate.Facet, out long[]? column))
-                throw new ArgumentException($"Unknown facet '{predicate.Facet}'.");
-
-            resolved[i] = new ResolvedPredicate(predicate, column);
-        }
-
-        return resolved;
-    }
-
-    internal static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
-    {
-        for (int i = 0; i < resolved.Length; i++)
-        {
-            if (!Matches(resolved[i].Predicate, resolved[i].Column[ordinal]))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool Matches(in FacetPredicate predicate, long value)
-        => predicate.Kind switch
-        {
-            FacetPredicateKind.Range =>
-                value >= predicate.MinInclusive && value <= predicate.MaxInclusive,
-            FacetPredicateKind.Mask =>
-                (value & predicate.MustHave) == predicate.MustHave
-                && (value & predicate.MustNot) == 0,
-            _ => false,
-        };
-
-    internal readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
 }
