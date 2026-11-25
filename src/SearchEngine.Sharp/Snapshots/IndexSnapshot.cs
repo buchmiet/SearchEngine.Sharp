@@ -144,6 +144,9 @@ public sealed class IndexSnapshot
     // Number of times the sort permutation was built on this snapshot (tests: at most once).
     internal int SortedPermutationBuildCount => Volatile.Read(ref _sortedPermutationBuildCount);
 
+    // True once the sort permutation exists. Reading it never starts the build.
+    internal bool IsSortedPermutationBuilt => Volatile.Read(ref _sortedPermutation) is not null;
+
     // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
     internal readonly Dictionary<string, long[]> FacetColumns;
 
