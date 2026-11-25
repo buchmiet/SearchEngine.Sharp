@@ -42,12 +42,6 @@ Console app on synthetic data. Reports query throughput (queries/s) and P50/P95 
 dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks
 ```
 
-Optional parallel infix experiment (not part of the library API):
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --parallel
-```
-
 Flags: `--warmup N`, `--iterations N`, `--seed N`.
 
 ## Usage
