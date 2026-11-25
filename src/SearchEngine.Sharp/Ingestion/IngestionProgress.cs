@@ -21,7 +21,9 @@ public readonly struct IngestionProgress
     public int PublishCount { get; init; }
 
     /// <summary>
-    /// Entries still waiting in the publisher buffer.
+    /// Entries accepted but not yet published when this report was made. Progress is reported after each
+    /// publish, so these are the entries queued behind it (<see cref="EntriesAccepted"/> −
+    /// <see cref="EntriesPublished"/>).
     /// </summary>
     public int PendingCount { get; init; }
 }

@@ -359,12 +359,16 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         Published?.Invoke(publishEvent);
         onPublished?.Invoke(publishEvent);
 
+        // The scanner counts an entry after handing it to the channel, so the publisher can already have
+        // published an entry that is not counted yet: the difference is clamped at zero.
+        int accepted = state.EntriesAccepted;
+        int published = state.EntriesPublished;
         progress?.Report(new IngestionProgress
         {
-            EntriesAccepted = state.EntriesAccepted,
-            EntriesPublished = state.EntriesPublished,
+            EntriesAccepted = accepted,
+            EntriesPublished = published,
             PublishCount = state.PublishCount,
-            PendingCount = 0,
+            PendingCount = Math.Max(0, accepted - published),
         });
 
         buffer.Clear();

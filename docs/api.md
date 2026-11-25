@@ -254,7 +254,7 @@ must honour the cancellation token (`[EnumeratorCancellation]`).
 | `AdaptiveMultiplier` | 2.0 | `k` in the adaptive interval formula |
 | `ChannelCapacity` | 10 000 | Scanner→publisher channel bound (backpressure when full) |
 | `FlushOnCancellation` | `true` | Flush buffered entries on cancel |
-| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished; under `Adaptive` a staleness publish also waits `AdaptiveMultiplier` (`k`) × last rebuild after it finished, so the worst case is `max(MaxStaleness, (1 + k) × rebuild)` |
+| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished; under `Adaptive` a staleness publish also waits `AdaptiveMultiplier` (`k`) × last rebuild after it finished, so the worst case is `max(MaxStaleness, (1 + k) × rebuild)`. Enforced by a timer under `Adaptive` and `TimeDebounce` only; `FixedBatch` and `PerEntry` publish a stale buffer when the next entry arrives or the scan ends |
 | `StrictMaxStaleness` | `false` | `true`: publish on staleness even right after a rebuild (0.5.6 behaviour, quadratic on large scans) |
 | `MinTimerPublishBatch` | 200 | Min buffered entries for a timer-triggered adaptive publish |
 

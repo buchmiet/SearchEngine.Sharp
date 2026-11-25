@@ -45,6 +45,10 @@ public sealed class IngestPublishOptions
     /// publish is forced. Defaults to 1 second.
     /// </summary>
     /// <remarks>
+    /// <para>Under <see cref="IngestPublishPolicy.Adaptive"/> and <see cref="IngestPublishPolicy.TimeDebounce"/>
+    /// a timer enforces it while the scanner is idle. <see cref="IngestPublishPolicy.FixedBatch"/> and
+    /// <see cref="IngestPublishPolicy.PerEntry"/> arm no timer: a stale buffer is published when the next entry
+    /// arrives or the scan ends, so an idle scanner can leave entries unpublished longer than this.</para>
     /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish
     /// that contains it starts (see <see cref="IngestionResult.WorstCaseStaleness"/>); that publish's own
     /// rebuild comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
