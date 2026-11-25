@@ -70,4 +70,100 @@ public class NameMatcherTests
                 $"{query} / {method} / ops={operators} / {preset.IndexSeparators.Length}:{preset.UnicodeMatching}: index {expected.Count}, matcher {actual.Count}");
         }
     }
+
+    // NameMatcher.IsMatch(text) must equal "Find on an index holding exactly that text returns it", for every
+    // combination of text, query, method, operators and tokenization below. Mismatches are collected and reported
+    // together.
+    private static readonly string[] ParityTexts =
+    [
+        "", "   ", "alpha beta", "alpha", "gamma", "aXb", "axb", "a-b.c", "report-final.pdf", "(draft) notes.txt",
+        "IMG_0001.JPG", "AND or Not", "aaa aab abb",
+        "Stra\u00DFe STRA\u1E9EE.pdf", "k \u212A", "\u03C2 \u03C3",
+        "\u039F\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C2 \u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3.txt",
+        "\u00B5 \u03BC", "\u03B2 \u03D0", "cafe\u0301 caf\u00E9",
+    ];
+
+    private static readonly string[] ParityQueries =
+    [
+        "*", "?", "NOT foo", "foo", "a", "x", "b", "alpha", "alpha beta", "alpha OR gamma", "NOT alpha",
+        "alpha NOT AND beta", "(AND alpha)", "gamma OR (alpha NOT AND beta)", "()", "(alpha OR gamma) AND NOT beta",
+        "rep*", "*.pdf", "*x*", "a*b", "a?b", "notes", "and", "not", "stra\u00DFe", "k", "\u03C3", "\u03C2",
+        "\u03BF\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C3", "\u03BC", "\u03D0", "caf", "\u00E9",
+    ];
+
+    private static readonly string[] ParityPatterns =
+    [
+        "a", "^a$", "^$", "[invalid", "x", "b$", "^a.b$", "\u03C3", "e\u0301", @".pdf$",
+    ];
+
+    private static readonly SearchTokenization[] ParityTokenizations =
+    [
+        SearchTokenization.Default,
+        SearchTokenization.FileMask,
+        SearchTokenization.Create("X", " "),
+        SearchTokenization.Create("x", " "),
+        SearchTokenization.Create("-", " ()"),
+        SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
+        SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics | UnicodeMatching.GraphemeBoundaries),
+        SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold),
+    ];
+
+    [Fact]
+    public void IsMatch_AgreesWithFindOnAOneEntryIndex()
+    {
+        var mismatches = new List<string>();
+        int checkedCount = 0;
+        foreach (var tokenization in ParityTokenizations)
+        {
+            foreach (var text in ParityTexts)
+            {
+                var provider = new IndexSnapshotProvider();
+                new IndexUpdater(provider, tokenization).RebuildFrom(new Dictionary<int, string> { [1] = text });
+                var engine = new SearchEngineSharp(provider);
+
+                void Check(string query, WordMatchMethod method, bool operators)
+                {
+                    bool expected = engine.Find(query, method, operators).Contains(1);
+                    bool actual = NameMatcher.Create(query, method, operators, tokenization).IsMatch(text);
+                    checkedCount++;
+                    if (expected != actual)
+                    {
+                        mismatches.Add($"index '{tokenization.IndexSeparators}' query '{tokenization.QuerySeparators}' "
+                            + $"{tokenization.UnicodeMatching} | text \"{text}\" | {method} ops={operators} \"{query}\": "
+                            + $"index {expected}, matcher {actual}");
+                    }
+                }
+
+                foreach (var query in ParityQueries)
+                {
+                    foreach (var method in new[] { WordMatchMethod.Exact, WordMatchMethod.Within })
+                    {
+                        Check(query, method, operators: false);
+                        Check(query, method, operators: true);
+                    }
+                }
+
+                foreach (var pattern in ParityPatterns)
+                    Check(pattern, WordMatchMethod.Regex, operators: false);
+            }
+        }
+
+        Assert.True(mismatches.Count == 0,
+            $"{mismatches.Count} of {checkedCount} combinations differ:\n" + string.Join("\n", mismatches));
+    }
+
+    [Fact]
+    public void IsMatch_RegexTimeoutOnAnyToken_IsNoMatch_LikeTheIndex()
+    {
+        // The lookahead forces the backtracking engine (1 s timeout). "b" matches at once; the second token makes
+        // the nested quantifier backtrack exponentially and time out. The index then returns nothing for the
+        // whole query, so the matcher must not report the earlier hit.
+        const string pattern = "(?=b)|^(a+)+$";
+        string text = "b " + new string('a', 40) + "!";
+        var provider = new IndexSnapshotProvider();
+        new IndexUpdater(provider).RebuildFrom(new Dictionary<int, string> { [1] = text });
+
+        Assert.Empty(new SearchEngineSharp(provider).Find(pattern, WordMatchMethod.Regex));
+        Assert.False(NameMatcher.Create(pattern, WordMatchMethod.Regex).IsMatch(text));
+    }
 }

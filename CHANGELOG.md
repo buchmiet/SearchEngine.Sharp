@@ -71,7 +71,8 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   operator sequences at the start, middle and end of expressions and groups (52 cases); lazy bigram index vs brute
   force with concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
   columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
-  `NameMatcher` vs index (20 queries × 4 presets).
+  `NameMatcher` vs index (20 queries × 4 presets, and every combination of 20 texts × 43 queries × 3 methods ×
+  8 tokenizations, including empty text, custom separators and a regex timeout).
 
 ### Benchmarks
 
