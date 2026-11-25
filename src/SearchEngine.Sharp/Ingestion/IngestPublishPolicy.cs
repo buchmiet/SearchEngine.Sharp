@@ -78,18 +78,27 @@ public closed record class IngestPublishPolicy
         } = DefaultMinInterval;
 
         /// <summary>
-        /// Gets the multiplier <c>k</c> of the interval <c>max(MinInterval, k × last rebuild duration)</c> between
-        /// timer publishes. It also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be finite and
-        /// positive. Defaults to 2.
+        /// The largest <see cref="RebuildMultiplier"/>: 1,000. At that value the publisher spends about 0.1% of its
+        /// time rebuilding while the timer drives the publishes, so a larger value saves nothing measurable; it only
+        /// delays results. The limit also keeps <c>k × last rebuild duration</c> inside the range of
+        /// <see cref="TimeSpan"/> for any rebuild shorter than 29 years.
         /// </summary>
-        /// <exception cref="ArgumentOutOfRangeException">The value is zero, negative, NaN or infinite.</exception>
+        public const double MaxRebuildMultiplier = 1_000;
+
+        /// <summary>
+        /// Gets the multiplier <c>k</c> of the interval <c>max(MinInterval, k × last rebuild duration)</c> between
+        /// timer publishes. It also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be positive and
+        /// at most <see cref="MaxRebuildMultiplier"/>. Defaults to 2.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The value is zero, negative, NaN or larger than
+        /// <see cref="MaxRebuildMultiplier"/>.</exception>
         public double RebuildMultiplier
         {
             get;
             init
             {
-                if (!double.IsFinite(value) || value <= 0)
-                    throw new ArgumentOutOfRangeException(nameof(RebuildMultiplier), value, "Must be a finite positive number.");
+                if (!(value > 0 && value <= MaxRebuildMultiplier))
+                    throw new ArgumentOutOfRangeException(nameof(RebuildMultiplier), value, $"Must be positive and at most {MaxRebuildMultiplier}.");
 
                 field = value;
             }

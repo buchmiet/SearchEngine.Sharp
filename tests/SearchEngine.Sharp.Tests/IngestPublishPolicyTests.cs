@@ -10,9 +10,19 @@ public class IngestPublishPolicyTests
     [Arguments(double.NegativeInfinity)]
     [Arguments(0.0)]
     [Arguments(-1.0)]
-    public async Task Adaptive_RebuildMultiplier_RejectsValuesThatAreNotFiniteAndPositive(double multiplier)
+    [Arguments(1_000.001)]
+    [Arguments(double.MaxValue)]
+    public async Task Adaptive_RebuildMultiplier_RejectsValuesOutsideZeroToTheLimit(double multiplier)
     {
         await AssertOutOfRange("RebuildMultiplier", () => _ = new IngestPublishPolicy.Adaptive { RebuildMultiplier = multiplier });
+    }
+
+    [Test]
+    public async Task Adaptive_RebuildMultiplier_AcceptsTheLimit()
+    {
+        var policy = new IngestPublishPolicy.Adaptive { RebuildMultiplier = IngestPublishPolicy.Adaptive.MaxRebuildMultiplier };
+
+        await Assert.That(policy.RebuildMultiplier).IsEqualTo(1_000.0);
     }
 
     [Test]

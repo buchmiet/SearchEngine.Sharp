@@ -114,6 +114,50 @@ public class PublishScheduleTests
     }
 
     [Test]
+    public async Task LargestSettings_NeverOverflowTheTimerArithmetic()
+    {
+        // The largest values of every time setting, a rebuild of a day and an entry a year old.
+        var clock = new ManualTimeProvider();
+        IngestPublishPolicy[] policies =
+        [
+            new IngestPublishPolicy.Adaptive
+            {
+                MinInterval = TimeSpan.MaxValue,
+                MaxStaleness = TimeSpan.MaxValue,
+                RebuildMultiplier = IngestPublishPolicy.Adaptive.MaxRebuildMultiplier,
+                MinTimerPublishBatch = 1,
+            },
+            new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.MaxValue, MaxStaleness = TimeSpan.MaxValue },
+            new IngestPublishPolicy.FixedBatch { BatchSize = int.MaxValue, MaxStaleness = TimeSpan.MaxValue },
+        ];
+        int failures = 0;
+
+        foreach (var policy in policies)
+        {
+            var schedule = new PublishSchedule(policy, clock);
+            schedule.RecordPublish(TimeSpan.FromDays(1), indexedCount: int.MaxValue);
+            var batch = new PendingBatch();
+            AddEntries(batch, clock, 1);
+            clock.Advance(TimeSpan.FromDays(365));
+            try
+            {
+                if (schedule.TimeUntilTimerPublish(batch) is { } wait)
+                {
+                    using var timer = new WakeTimer(clock);
+                    _ = timer.Arm(wait);
+                    timer.Disarm();
+                }
+            }
+            catch (OverflowException)
+            {
+                failures++;
+            }
+        }
+
+        await Assert.That(failures).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task PendingBatch_KeepsTheTimestampOfItsOldestEntryUntilCleared()
     {
         var clock = new ManualTimeProvider();

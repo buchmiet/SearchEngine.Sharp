@@ -127,8 +127,9 @@ Changed.
 - `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
   updater, a `Published` or `onPublished` handler, or the progress callback) while the scanner was blocked on a
   full channel. It now cancels the scanner and faults with the original exception.
-- A NaN or infinite `AdaptiveMultiplier` was accepted and made the ingestion fault at its first timer publish. The
-  multiplier, now `IngestPublishPolicy.Adaptive.RebuildMultiplier`, rejects it with `ArgumentOutOfRangeException`.
+- A NaN, infinite or very large `AdaptiveMultiplier` was accepted and made the ingestion fault at its first timer
+  publish. The multiplier, now `IngestPublishPolicy.Adaptive.RebuildMultiplier`, must be positive and at most
+  `MaxRebuildMultiplier` (1,000) and throws `ArgumentOutOfRangeException` otherwise.
 - A progress report of `ProgressiveIndexIngestion` could count one entry more in `EntriesPublished` than in
   `EntriesAccepted`: the scanner counted an entry after the publisher could already take and publish it. An entry
   is now counted before it enters the channel.

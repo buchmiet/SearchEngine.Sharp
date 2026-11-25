@@ -326,7 +326,7 @@ var debounced = options with { Policy = new IngestPublishPolicy.TimeDebounce { M
 | `Adaptive` | `BatchCap` | 2,000 | Buffered entries that start a publish; lower bound of the growing cap; at least 1 |
 | | `GrowthAwareBatchCap` | `true` | After each publish the cap becomes `max(BatchCap, indexed documents)` |
 | | `MinInterval` | 100 ms | Shortest time between timer publishes; not negative |
-| | `RebuildMultiplier` | 2.0 | A timer publish waits at least this many times the last rebuild duration; finite and positive |
+| | `RebuildMultiplier` | 2.0 | A timer publish waits at least this many times the last rebuild duration; positive and at most `MaxRebuildMultiplier` (1,000), beyond which rebuilds take under 0.1% of the time and a larger value only delays results |
 | | `MinTimerPublishBatch` | 200 | Fewest buffered entries for a timer publish; staleness overrides it; at least 1 |
 | | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive; see [the worst case](performance.md#maxstaleness-and-the-worst-case) |
 | | `StrictMaxStaleness` | `false` | Publish on staleness even right after a rebuild |
