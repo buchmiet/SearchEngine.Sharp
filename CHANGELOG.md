@@ -4,13 +4,6 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [Unreleased]
 
-### Performance
-
-- A facet filter combined with a text query now checks only the text hits when they are up to 75% of the index
-  (was 50%). Between 50% and 75% such queries filter faster: 18% faster at 65% on 100,000 file names. Above 80%,
-  scanning every document is still faster, and those queries keep the scan.
-- Counting the hits of a result set is 22-33% faster on ARM64 (Apple M1) and up to 20% faster on x64.
-
 ## [0.6.0] - 2026-11-24
 
 Requires .NET 11. Code written for 0.5.6 may need changes: two members of `IngestionResult` are renamed, one
@@ -177,6 +170,10 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
 
 ### Performance
 
+- A facet filter combined with a text query checks only the text hits when they are up to 75% of the index (it
+  was 50% in 0.5.6). Between 50% and 75% such queries filter faster: 18% faster at 65% on 100,000 file names.
+  Above 80%, scanning every document is still faster, and those queries keep the scan.
+- Counting the hits of a result set is 22-33% faster on ARM64 (Apple M1) and up to 20% faster on x64.
 - Natural sort walks the snapshot's sort permutation for every result above 0.5% of the documents once a query has
   built it, instead of sorting the hits up to 80%. On 100,000 names: 1% of the documents 304 us to 146 us, 10%
   3.4 ms to 0.25 ms, 50% 19.1 ms to 0.65 ms.

@@ -138,7 +138,7 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
 - A glob term scans the vocabulary; tokens shorter than the pattern's minimum length are skipped. Patterns of the
   shapes `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) use vectorized string search.
 - A regex runs `Regex.IsMatch` on every token of the vocabulary.
-- A facet filter checks only the hits when they are at most half of the documents, otherwise it scans the facet
+- A facet filter checks only the hits when they are at most 75% of the documents, otherwise it scans the facet
   columns. A filter-only query always scans the columns.
 - `NaturalSortAscending` with one hit costs nothing extra. While the snapshot has no permutation yet, a result of
   up to 80% of the documents builds the sort keys of its hits and sorts them (65 ms for 105,000 hits at 10^6), and
