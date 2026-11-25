@@ -223,9 +223,14 @@ Task<IngestionResult> IngestAsync(
     CancellationToken cancellationToken = default);
 ```
 
-Cancellation: the scan stops accepting entries; buffered entries are flushed when
-`IngestPublishOptions.FlushOnCancellation` is `true` (default), otherwise discarded.
-Entries already published stay in the index.
+Cancellation: the scan stops accepting entries; accepted entries not yet published (buffered or still queued
+between scanner and publisher) are flushed when `IngestPublishOptions.FlushOnCancellation` is `true` (default),
+otherwise discarded. Entries already published stay in the index.
+
+Failure: an exception from the updater, `Published`, `onPublished` or `IProgress<T>` cancels the scan (through
+the token given to its `IAsyncEnumerable`), disposes its enumerator and faults the task with that exception; if the
+scanner failed as well, its exception surfaces. The task completes only after the scanner has stopped, so scanners
+must honour the cancellation token (`[EnumeratorCancellation]`).
 
 ### `IngestPublishPolicy`
 
@@ -246,7 +251,7 @@ Entries already published stay in the index.
 | `AdaptiveMultiplier` | 2.0 | `k` in the adaptive interval formula |
 | `ChannelCapacity` | 10 000 | Scanner→publisher channel bound (backpressure when full) |
 | `FlushOnCancellation` | `true` | Flush buffered entries on cancel |
-| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished; under `Adaptive` a staleness publish also waits `AdaptiveMultiplier` × last rebuild |
+| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished; under `Adaptive` a staleness publish also waits `AdaptiveMultiplier` (`k`) × last rebuild after it finished, so the worst case is `max(MaxStaleness, (1 + k) × rebuild)` |
 | `StrictMaxStaleness` | `false` | `true`: publish on staleness even right after a rebuild (0.5.6 behaviour, quadratic on large scans) |
 | `MinTimerPublishBatch` | 200 | Min buffered entries for a timer-triggered adaptive publish |
 

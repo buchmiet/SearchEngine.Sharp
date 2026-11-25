@@ -33,8 +33,19 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   (about 0.4–0.5 million file names on a laptop-class CPU), every batch was already stale when the previous
   rebuild finished and the publisher rebuilt back to back every `ChannelCapacity` (10k) entries. A 1M-file scan
   made 57–74 full rebuilds, allocated ~30 GB and took ~2 minutes on one core. A staleness-triggered publish now
-  also waits `AdaptiveMultiplier` × the last rebuild duration (13–16 rebuilds, ~20 s). Unchanged while rebuilds
-  are faster than `MaxStaleness / AdaptiveMultiplier`.
+  also waits `AdaptiveMultiplier` (`k`) × the last rebuild duration after that rebuild (13–16 rebuilds, ~20 s).
+  Worst staleness is `max(MaxStaleness, (1 + k) × rebuild)` (1.2 s at a 400 ms rebuild instead of 1.0 s);
+  unchanged while rebuilds are faster than `MaxStaleness / (1 + k)`.
+- Progressive ingestion no longer leaves buffered entries unpublished while the scanner is idle: a timer that woke
+  slightly before its publish was due, or a buffer below `MinTimerPublishBatch` that reached `MaxStaleness`, waited
+  for the next scanner entry instead of publishing. The publisher now always re-arms a timer while entries are
+  buffered.
+- `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
+  `IIndexUpdater`, a `Published` or `onPublished` handler, or `IProgress<T>`) while the scanner was blocked on a
+  full channel. The scanner is now cancelled and disposed and the task faults with the original exception. A scan
+  error that arrived while the publisher was waiting no longer skips the final flush of buffered entries, and a
+  cancelled ingestion with `FlushOnCancellation` also publishes entries still queued in the channel (they counted as
+  accepted but were dropped).
 - Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own copy of the sort
   permutation (8 at once at 1M names: 2.3 s each, 1.1 GB allocated); they now share one build (0.8 s, 161 MB).
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
