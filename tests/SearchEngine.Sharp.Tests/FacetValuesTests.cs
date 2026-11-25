@@ -68,7 +68,7 @@ public class FacetValuesTests
     }
 
     [Fact]
-    public void FromDictionary_IsSafeWhileTheSourceIsMutated()
+    public async Task FromDictionary_IsSafeWhileTheSourceIsMutated()
     {
         var source = new ConcurrentDictionary<string, long>();
         for (int i = 0; i < 4; i++)
@@ -99,8 +99,8 @@ public class FacetValuesTests
         }
         finally
         {
-            stop.Cancel();
-            mutator.Wait();
+            await stop.CancelAsync();
+            await mutator;
         }
     }
 
