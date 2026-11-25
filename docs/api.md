@@ -58,7 +58,7 @@ the preset it was built with, and queries always use the preset of the snapshot 
 
 ```csharp
 static SearchTokenization Default { get; }    // token-level search
-static SearchTokenization FileMask { get; }   // the whole SearchText is one token; queries split on whitespace
+static SearchTokenization FileMask { get; }   // the whole SearchText is one token; queries split on space, CR and LF
 static SearchTokenization Create(string indexSeparators, string querySeparators);
 SearchTokenization WithUnicodeMatching(UnicodeMatching options);
 string IndexSeparators { get; }

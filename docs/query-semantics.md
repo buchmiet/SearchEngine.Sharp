@@ -23,8 +23,8 @@ read it from `snapshot.Tokenization`.
 
 | Preset | Index separators | Query separators | Use case |
 |---|---|---|---|
-| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except TAB | token-level search |
-| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | whitespace only: space, CR, LF | classic file-manager masks on whole names |
+| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index | token-level search |
+| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | space, CR, LF (not TAB) | classic file-manager masks on whole names |
 | `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
 
 Factory:
@@ -44,8 +44,10 @@ With `SearchTokenization.FileMask`:
   a separator, so `*.pdf` means "name ends with `.pdf`".
 - `WordMatchMethod.Within` still matches substrings of the whole name (e.g. `port`
   matches `report-final.pdf`).
-- Boolean operators (`AND` / `OR` / `NOT`) still work; only space splits query terms
-  (implicit AND between adjacent terms still applies).
+- Boolean operators (`AND` / `OR` / `NOT`) still work; space, CR and LF split query
+  terms (implicit AND between adjacent terms still applies).
+- Tab does not split a mask. The whole name is one token, and names on Linux and macOS
+  may contain a tab, so a tab in a mask is matched as a character of the name.
 
 Worked examples, given an index of names `report-final.pdf`, `System`,
 `my-system-backup.zip`, `notes.txt` (queries with `WordMatchMethod.Exact`,
@@ -137,10 +139,11 @@ strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidan
 Separator characters (`SearchTokenization.Default.QuerySeparators`):
 
 ```
-space . , ; : / \ CR LF | - # [ ] { } ( ) ~ £ $ €
+space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 ```
 
-(Same set as indexing except TAB, which is a separator only on the index side.)
+(The same set as indexing, so a query pasted with tabs between its words finds the
+same documents as one typed with spaces.)
 
 Rules:
 

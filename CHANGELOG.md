@@ -45,6 +45,9 @@ Changed.
   (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
+- `SearchTokenization.Default` splits queries at a tab too, like indexed text. A query pasted with a tab
+  between its words used to be one term that could never match. `FileMask` is unchanged: a tab stays part of the
+  mask.
 - `IndexSnapshotBuilder.Build` throws `ArgumentException` naming the id when an id occurs more than once in the
   entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
   because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the
