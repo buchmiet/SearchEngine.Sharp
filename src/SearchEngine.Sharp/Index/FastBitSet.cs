@@ -71,6 +71,12 @@ internal sealed class FastBitSet
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Add(int index) => _bits[index >> 6] |= 1UL << (index & 63);
 
+    public void AddAll(ReadOnlySpan<int> indices)
+    {
+        foreach (int index in indices)
+            Add(index);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Get(int index) => (_bits[index >> 6] & (1UL << (index & 63))) != 0;
 

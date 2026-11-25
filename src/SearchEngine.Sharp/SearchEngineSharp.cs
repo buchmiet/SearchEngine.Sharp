@@ -132,9 +132,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             || GlobMatcher.ContainsMetacharacters(word!))
             return false;
 
-        if (snapshot.ExactPostings.TryGetValue(word!, out var wordPostings))
-            postings = snapshot.PostingDocIds.AsSpan(wordPostings.Offset, wordPostings.Count);
-
+        postings = snapshot.PostingsOf(word!);
         return true;
     }
 

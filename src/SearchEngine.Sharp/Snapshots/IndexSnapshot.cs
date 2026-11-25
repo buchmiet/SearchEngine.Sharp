@@ -99,6 +99,18 @@ public sealed class IndexSnapshot
     // PostingCounts[i] — number of documents that contain word i.
     internal readonly int[] PostingCounts;
 
+    // Word i, read from WordsArray.
+    internal ReadOnlySpan<char> WordAt(int wordIndex)
+        => WordsArray.AsSpan(WordEnds[wordIndex] - WordLengths[wordIndex], WordLengths[wordIndex]);
+
+    // Ordinals of the documents that contain word i.
+    internal ReadOnlySpan<int> PostingsAt(int wordIndex)
+        => PostingDocIds.AsSpan(PostingOffsets[wordIndex], PostingCounts[wordIndex]);
+
+    // Ordinals of the documents that contain exactly this word; empty when the word is not indexed.
+    internal ReadOnlySpan<int> PostingsOf(string word)
+        => ExactPostings.TryGetValue(word, out var postings) ? PostingDocIds.AsSpan(postings.Offset, postings.Count) : default;
+
     // Bigram index: first two characters of query packed as (char0 << 16 | char1)
     // → int[] of word indices that contain that bigram, in length-descending order.
     // Used by MatchWithin to skip words that cannot possibly match (pruning).
@@ -172,10 +184,9 @@ public sealed class IndexSnapshot
     private Dictionary<int, int[]> BuildBigramWordIndices()
     {
         var bigramLists = new Dictionary<int, List<int>>();
-        var words = WordsArray.AsSpan();
         for (int i = 0; i < WordLengths.Length; i++)
         {
-            var word = words.Slice(WordEnds[i] - WordLengths[i], WordLengths[i]);
+            var word = WordAt(i);
             int prev = -1;
             for (int j = 0; j + 1 < word.Length; j++)
             {

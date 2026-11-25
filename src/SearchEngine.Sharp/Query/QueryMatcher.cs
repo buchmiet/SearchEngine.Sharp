@@ -1,4 +1,3 @@
-using System.Text;
 using SearchEngine;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
@@ -28,23 +27,16 @@ internal static class QueryMatcher
     internal static FastBitSet MatchExact(string word, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
-
-        if (!snapshot.ExactPostings.TryGetValue(word, out var postings))
-            return result;
-
-        var docIds = snapshot.PostingDocIds.AsSpan(postings.Offset, postings.Count);
-        for (int i = 0; i < docIds.Length; i++)
-            result.Add(docIds[i]);
-
+        result.AddAll(snapshot.PostingsOf(word));
         return result;
     }
 
+    // On a match of the word inside an indexed word, all documents that contain the indexed word are added; one match
+    // per indexed word is enough.
     internal static FastBitSet MatchWithin(string word, QueryContext qc, IndexSnapshot snapshot)
     {
         int wordLength = word.Length;
         var result = qc.RentEmptyBitSet();
-        var wordSpan = word.AsSpan();
-        var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
 
         // Infix matching is single-threaded. Parallel candidate splitting is available in
@@ -66,19 +58,8 @@ internal static class QueryMatcher
                 if (wordLengths[wordIndex] < wordLength)
                     break;
 
-                int searchStart = snapshot.WordEnds[wordIndex] - wordLengths[wordIndex];
-                int searchEnd = snapshot.WordEnds[wordIndex];
-
-                MatchSubstring(
-                    result,
-                    wordSpan,
-                    wordsArray,
-                    snapshot.PostingDocIds,
-                    snapshot.PostingOffsets[wordIndex],
-                    snapshot.PostingCounts[wordIndex],
-                    searchStart,
-                    searchEnd,
-                    graphemeBoundaries);
+                if (ContainsWithin(snapshot.WordAt(wordIndex), word, graphemeBoundaries))
+                    result.AddAll(snapshot.PostingsAt(wordIndex));
             }
 
             return result;
@@ -87,89 +68,29 @@ internal static class QueryMatcher
         // Fallback: linear scan (handles length-1 queries and empty bigram index).
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= wordLength; wordIndex++)
         {
-            int searchStart = snapshot.WordEnds[wordIndex] - wordLengths[wordIndex];
-            int searchEnd = snapshot.WordEnds[wordIndex];
-
-            MatchSubstring(
-                result,
-                wordSpan,
-                wordsArray,
-                snapshot.PostingDocIds,
-                snapshot.PostingOffsets[wordIndex],
-                snapshot.PostingCounts[wordIndex],
-                searchStart,
-                searchEnd,
-                graphemeBoundaries);
+            if (ContainsWithin(snapshot.WordAt(wordIndex), word, graphemeBoundaries))
+                result.AddAll(snapshot.PostingsAt(wordIndex));
         }
 
         return result;
     }
 
+    // The pattern is classified once (GlobMatcher.Shape); its general form falls back to GlobMatcher.IsWholeWordMatch.
     internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
     {
-        var patternSpan = pattern.AsSpan();
-        int minLen = GlobMatcher.MinMatchLength(patternSpan);
-        bool hasStar = patternSpan.Contains('*');
-        bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
-        var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
-        if (!shape.IsSpecialized)
-            return MatchGlobGeneral(patternSpan, minLen, hasStar, graphemeBoundaries, qc, snapshot);
-
+        int minLength = GlobMatcher.MinMatchLength(pattern);
+        bool hasStar = pattern.Contains('*');
+        var shape = new GlobMatcher.Shape(pattern, snapshot.Tokenization.GraphemeBoundaries);
         var result = qc.RentEmptyBitSet();
-        var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
 
-        for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
+        for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
         {
-            int wordLength = wordLengths[wordIndex];
-            if (wordLength < minLen)
-                break;
-
-            if (!hasStar && wordLength != pattern.Length)
+            if (!hasStar && wordLengths[wordIndex] != pattern.Length)
                 continue;
 
-            int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
-            if (!shape.IsMatch(wordsArray.Slice(wordStart, wordLength)))
-                continue;
-
-            int postingOffset = snapshot.PostingOffsets[wordIndex];
-            int postingCount = snapshot.PostingCounts[wordIndex];
-            for (int k = 0; k < postingCount; k++)
-                result.Add(snapshot.PostingDocIds[postingOffset + k]);
-        }
-
-        return result;
-    }
-
-    private static FastBitSet MatchGlobGeneral(
-        ReadOnlySpan<char> patternSpan,
-        int minLen,
-        bool hasStar,
-        bool graphemeBoundaries,
-        QueryContext qc,
-        IndexSnapshot snapshot)
-    {
-        var result = qc.RentEmptyBitSet();
-        var wordsArray = snapshot.WordsArray.AsSpan();
-        var wordLengths = snapshot.WordLengths.AsSpan();
-
-        for (int wordIndex = 0; wordIndex < wordLengths.Length; wordIndex++)
-        {
-            int wordLength = wordLengths[wordIndex];
-            if (wordLength < minLen)
-                break;
-
-            if (!hasStar && wordLength != patternSpan.Length)
-                continue;
-
-            int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
-            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength), graphemeBoundaries))
-                continue;
-
-            int postingOffset = snapshot.PostingOffsets[wordIndex];
-            int postingCount = snapshot.PostingCounts[wordIndex];
-            for (int k = 0; k < postingCount; k++)
-                result.Add(snapshot.PostingDocIds[postingOffset + k]);
+            if (shape.IsMatch(snapshot.WordAt(wordIndex)))
+                result.AddAll(snapshot.PostingsAt(wordIndex));
         }
 
         return result;
@@ -181,24 +102,4 @@ internal static class QueryMatcher
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)
         => (graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, target) : word.IndexOf(target)) >= 0;
-
-    // On a match of target inside wordsArray[searchStart..searchEnd), all documents that contain the indexed word
-    // are added to result; one match per word is enough.
-    private static void MatchSubstring(
-        FastBitSet result,
-        ReadOnlySpan<char> target,
-        ReadOnlySpan<char> wordsArray,
-        int[] postingDocIds,
-        int postingOffset,
-        int postingCount,
-        int searchStart,
-        int searchEnd,
-        bool graphemeBoundaries)
-    {
-        if (!ContainsWithin(wordsArray[searchStart..searchEnd], target, graphemeBoundaries))
-            return;
-
-        for (int k = 0; k < postingCount; k++)
-            result.Add(postingDocIds[postingOffset + k]);
-    }
 }
