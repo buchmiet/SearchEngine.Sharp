@@ -107,8 +107,10 @@ Changed.
   longer skips the final flush, and a cancelled ingestion with `FlushOnCancellation` also publishes the entries
   still queued between scanner and publisher.
 - `IndexUpdater` mutations are atomic: when building the new snapshot throws (for example for an invalid facet
-  bag), the entries and the published snapshot stay unchanged. `Clear` and removing the last entry keep the
-  updater's tokenization preset and Unicode options.
+  bag), the entries and the published snapshot stay unchanged. The batch methods read their whole input before
+  they change anything, so an input that throws while it is read, even after it called the updater itself, leaves
+  the index as it was. `Clear` and removing the last entry keep the updater's tokenization preset and Unicode
+  options.
 - `FacetValues.FromDictionary` reads the dictionary once, so a dictionary that changes during the call can no
   longer produce a broken bag or `IndexOutOfRangeException`. It rejects null and duplicate names with
   `ArgumentException`, like `FacetValues.Create`.

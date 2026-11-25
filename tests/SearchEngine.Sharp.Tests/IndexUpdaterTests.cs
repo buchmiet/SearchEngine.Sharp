@@ -97,6 +97,40 @@ public class IndexUpdaterTests
         await Assert.That(provider.Current).IsSameReferenceAs(published);
     }
 
+    // The caller's sequence changes the index while it is read (on the same thread) and then fails. The nested
+    // change stands on its own; the failed batch leaves no trace, neither in the entries nor in the published index.
+    [Test]
+    public async Task BatchMutation_WhoseSourceMutatesTheUpdaterAndThenThrows_LeavesEntriesAndSnapshotInAgreement()
+    {
+        var (engine, updater, _) = TestIndex.Create();
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = "old", [2] = "two", [3] = "three" });
+
+        IEnumerable<KeyValuePair<int, string>> Renaming()
+        {
+            yield return new(1, "renamed");
+            updater.RemoveEntry(2);
+            throw new IOException("scan failed");
+        }
+
+        IEnumerable<int> Removing()
+        {
+            yield return 1;
+            updater.AddEntry(4, "four");
+            throw new IOException("scan failed");
+        }
+
+        await Assert.That(() => updater.AddOrUpdateEntries(Renaming())).ThrowsExactly<IOException>();
+        await Assert.That(() => updater.RemoveEntries(Removing())).ThrowsExactly<IOException>();
+
+        await Assert.That(updater.EntryCount).IsEqualTo(3);
+        await Assert.That(updater.ContainsEntry(2)).IsFalse();
+        await Assert.That(Ids(engine, "renamed")).IsEmpty();
+        await Assert.That(Ids(engine, "two")).IsEmpty();
+        await Assert.That(Ids(engine, "old")).IsEquivalentTo([1], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "three")).IsEquivalentTo([3], CollectionOrdering.Matching);
+        await Assert.That(Ids(engine, "four")).IsEquivalentTo([4], CollectionOrdering.Matching);
+    }
+
     [Test]
     public async Task RefreshEntry_WhenBuildThrows_RestoresThePreviousEntry()
     {
