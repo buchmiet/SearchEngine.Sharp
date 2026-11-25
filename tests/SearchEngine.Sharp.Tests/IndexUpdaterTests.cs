@@ -168,6 +168,10 @@ public class IndexUpdaterTests
     [MethodDataSource(nameof(Presets))]
     public async Task Clear_KeepsTheConfigurationOfTheUpdater(string preset)
     {
+        // The unicode preset composes, which needs Unicode normalization.
+        if (preset == "unicode")
+            Skip.Unless(TextFolder.IsNormalizationAvailable, SkipUnlessNormalizationAttribute.SkipReason);
+
         var tokenization = PresetByName(preset);
         var (engine, updater, provider) = Create(tokenization);
         var entries = new Dictionary<int, string>
