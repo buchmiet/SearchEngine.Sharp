@@ -3,6 +3,7 @@ using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using SearchEngine.Filters;
+using SearchEngine.Sharp.Tests;
 using SearchEngine.Snapshots;
 using SearchEngine.Tokenizer;
 
@@ -87,7 +88,7 @@ static class Decompose
             buildAlloc += GC.GetTotalAllocatedBytes(true) - b0;
             buildTotal += bms;
             buildEach.Add(bms.ToString("F1"));
-            var provider = new Bench.Fixed(snap);
+            var provider = new FixedSnapshotProvider(snap);
             var engine = new SearchEngineSharp(provider);
             sw.Restart();
             var ids = engine.Find(expr, method, ops, SearchSortMode.SnapshotOrder, filter);
@@ -151,7 +152,7 @@ static class BuildCost
         t["allocMB"] = Math.Round((GC.GetTotalAllocatedBytes(true) - a0) / 1048576.0, 1);
         t["uniqueWords"] = snapshot.UniqueWordCount;
 
-        var engine = new SearchEngineSharp(new Bench.Fixed(snapshot));
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
         sw.Restart();
         engine.Find("ab", WordMatchMethod.Within);
         t["firstWithinMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);

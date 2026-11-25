@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
 using SearchEngine.Filters;
+using SearchEngine.Sharp.Tests;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Profiling;
 
-/// <summary>Shared helpers: corpus to indexed entries, fixed snapshot provider, latency loop.</summary>
+/// <summary>Shared helpers: corpus to indexed entries, latency loop.</summary>
 static class Bench
 {
     public static Dictionary<int, IndexedEntry> Entries(int n, int seed, bool facets)
@@ -27,8 +28,6 @@ static class Bench
         }
         return d;
     }
-
-    public sealed class Fixed(IndexSnapshot s) : IIndexSnapshotProvider { public IndexSnapshot Current => s; }
 
     /// <summary>Median and p95 latency (µs) and allocated bytes per call of <paramref name="f"/>.</summary>
     public static (double MedUs, double P95Us, double AllocB, int Result, int Iters) Measure(Func<int> f, double budgetMs = 300, int minIters = 5, int maxIters = 2000)
@@ -127,7 +126,7 @@ static class QueryPaths
                 var sw = Stopwatch.StartNew();
                 var snap = IndexSnapshotBuilder.Build(entries, preset);
                 double buildMs = sw.Elapsed.TotalMilliseconds;
-                var engine = new SearchEngineSharp(new Bench.Fixed(snap));
+                var engine = new SearchEngineSharp(new FixedSnapshotProvider(snap));
                 foreach (var q in queries)
                 {
                     if (a.Opt("only") is { } only && !q.Name.Contains(only, StringComparison.Ordinal))
@@ -135,7 +134,7 @@ static class QueryPaths
                     if (q.Sort == SearchSortMode.NaturalSortAscending)
                     {
                         // Cold: first natural-sort query on a fresh snapshot (one sample).
-                        var fresh = new SearchEngineSharp(new Bench.Fixed(IndexSnapshotBuilder.Build(entries, preset)));
+                        var fresh = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(entries, preset)));
                         var t0 = Stopwatch.GetTimestamp();
                         int c = fresh.Find(q.Expr, q.Method, q.Ops, q.Sort, q.Filter).Count;
                         Emit(a, n, presetName, q.Name + "-cold", Stopwatch.GetElapsedTime(t0).TotalMicroseconds, 0, 0, c, 1, buildMs, snap);
