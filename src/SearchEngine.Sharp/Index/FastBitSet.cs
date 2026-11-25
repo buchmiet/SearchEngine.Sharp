@@ -187,30 +187,6 @@ internal sealed class FastBitSet
         return written;
     }
 
-    internal int ForEachSetBit(Action<int> action)
-    {
-        int count = 0;
-        int limit = _length;
-
-        for (int wordIndex = 0; wordIndex < _wordCount; wordIndex++)
-        {
-            ulong bits = _bits[wordIndex];
-            while (bits != 0)
-            {
-                int bit = BitOperations.TrailingZeroCount(bits);
-                int ordinal = (wordIndex << 6) + bit;
-                if (ordinal >= limit)
-                    break;
-
-                action(ordinal);
-                count++;
-                bits &= bits - 1;
-            }
-        }
-
-        return count;
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private unsafe void ExceptVector256(FastBitSet other)
     {
