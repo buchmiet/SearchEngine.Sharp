@@ -94,6 +94,12 @@ public class UnicodeMatchingTests
     [InlineData("\u039F\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C2.txt", "\u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3*")]
     [InlineData("\u0130stanbul.txt", "istanbul*")]
     [InlineData("\uFB01le.txt", "file*")]
+    [InlineData("\u017Fun.txt", "sun*")]
+    [InlineData("5\u00B5m.txt", "5\u03BCm*")]
+    [InlineData("x\u1FBE.txt", "x\u03B9*")]
+    [InlineData("\u1C80\u043E\u0434\u0430.txt", "\u0432\u043E\u0434\u0430*")]
+    [InlineData("\uD801\uDC00\uD801\uDC01.txt", "\uD801\uDC28\uD801\uDC29*")]
+    [InlineData("\uD83A\uDD00.txt", "\uD83A\uDD22*")]
     public void CaseFold_FoldsCharactersThatLowercaseDoesNot(string name, string query)
     {
         var plain = Index(SearchTokenization.FileMask, name);

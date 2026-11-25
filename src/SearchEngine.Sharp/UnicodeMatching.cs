@@ -22,9 +22,11 @@ public enum UnicodeMatching
     Compose = 1,
 
     /// <summary>
-    /// Case folding for the characters where Unicode full or simple case folding differs from
-    /// per-character lowercase: <c>ß</c>/<c>ẞ</c>→<c>ss</c>, final <c>ς</c>→<c>σ</c>, <c>İ</c>→<c>i</c>,
-    /// <c>ſ</c>→<c>s</c>, <c>µ</c>→<c>μ</c>, Greek symbol variants, and the Latin ligatures U+FB00–U+FB06.
+    /// Unicode simple case folding (case variants that per-character lowercase keeps apart match: final <c>ς</c> and
+    /// <c>σ</c>, <c>µ</c> and <c>μ</c>, Greek symbol variants such as <c>ϐ</c>, and supplementary-plane letters
+    /// such as Deseret <c>𐐀</c> and <c>𐐨</c>), plus the full foldings <c>ß</c>/<c>ẞ</c>→<c>ss</c> and the Latin
+    /// ligatures U+FB00–U+FB06, and <c>İ</c>→<c>i</c>, <c>ſ</c>→<c>s</c>. Other full foldings (<c>ŉ</c>, Greek
+    /// letters with ypogegrammeni, Armenian ligatures) are not applied.
     /// Not applied to regular expressions (it would change character classes).
     /// </summary>
     CaseFold = 2,
@@ -49,9 +51,6 @@ public enum UnicodeMatching
 
 internal static class TextFolder
 {
-    private static readonly SearchValues<char> CaseFoldSpecials =
-        SearchValues.Create("ßẞςİſµϐϑϕϖϰϱϵẛͅﬀﬁﬂﬃﬄﬅﬆ");
-
     // Globalization-invariant mode (InvariantGlobalization, DOTNET_SYSTEM_GLOBALIZATION_INVARIANT; the default for
     // some trimmed and container deployments) has no normalization data: string.Normalize returns its input and
     // IsNormalized reports true, so Compose and RemoveDiacritics would silently match nothing. A decomposed é is not
@@ -68,8 +67,8 @@ internal static class TextFolder
         if (removeDiacritics || (normalization & UnicodeMatching.Compose) != 0)
             text = NormalizeWellFormedRuns(text, removeDiacritics);
 
-        if ((normalization & UnicodeMatching.CaseFold) != 0 && !isRegex && text.AsSpan().ContainsAny(CaseFoldSpecials))
-            text = ApplyCaseFoldSpecials(text);
+        if ((normalization & UnicodeMatching.CaseFold) != 0 && !isRegex)
+            text = ApplyCaseFolding(text);
 
         return text;
     }
@@ -153,38 +152,65 @@ internal static class TextFolder
         => ch is (>= '\u0300' and <= '\u036F') or (>= '\u1AB0' and <= '\u1AFF') or (>= '\u1DC0' and <= '\u1DFF') or (>= '\uFE20' and <= '\uFE2F')
             && CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark;
 
-    private static string ApplyCaseFoldSpecials(string text)
+    // Simple case folding through the BCL: case variants of one letter (σ/ς/Σ, μ/µ, β/ϐ, ι/U+0345/U+1FBE, в/ᲀ,
+    // Deseret 𐐨/𐐀) share their uppercase, and the lowercase of that is their folded form. Per-character lowercase
+    // alone misses the lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. On top
+    // of that: the full foldings ß/ẞ→ss and the Latin ligatures U+FB00–U+FB06; İ→i (the Turkic mapping, because the
+    // default full folding i + U+0307 would not match i); ſ→s, which the casing tables of globalization-invariant mode
+    // do not uppercase. A text where folding differs from per-character lowercase nowhere is returned unchanged.
+    private static string ApplyCaseFolding(string text)
     {
-        var sb = new StringBuilder(text.Length + 4);
-        foreach (char ch in text)
+        StringBuilder? sb = null;
+        Span<char> buffer = stackalloc char[2];
+        int position = 0;
+        while (position < text.Length)
         {
-            switch (ch)
+            int start = position;
+            if (Rune.DecodeFromUtf16(text.AsSpan(position), out Rune rune, out int length) != OperationStatus.Done)
             {
-                case 'ß' or 'ẞ': sb.Append("ss"); break;
-                case 'ς': sb.Append('σ'); break;
-                case 'İ': sb.Append('i'); break;
-                case 'ſ': sb.Append('s'); break;
-                case 'µ': sb.Append('μ'); break;
-                case 'ϐ': sb.Append('β'); break;
-                case 'ϑ': sb.Append('θ'); break;
-                case 'ϕ': sb.Append('φ'); break;
-                case 'ϖ': sb.Append('π'); break;
-                case 'ϰ': sb.Append('κ'); break;
-                case 'ϱ': sb.Append('ρ'); break;
-                case 'ϵ': sb.Append('ε'); break;
-                case 'ẛ': sb.Append('ṡ'); break;
-                case 'ͅ': sb.Append('ι'); break;
-                case 'ﬀ': sb.Append("ff"); break;
-                case 'ﬁ': sb.Append("fi"); break;
-                case 'ﬂ': sb.Append("fl"); break;
-                case 'ﬃ': sb.Append("ffi"); break;
-                case 'ﬄ': sb.Append("ffl"); break;
-                case 'ﬅ' or 'ﬆ': sb.Append("st"); break;
-                default: sb.Append(ch); break;
+                sb?.Append(text[position]); // ill-formed UTF-16 is kept as it is
+                position++;
+                continue;
             }
+
+            position += length;
+            string? expansion = rune.Value switch
+            {
+                'ß' or 'ẞ' => "ss",
+                'İ' => "i",
+                'ſ' => "s",
+                'ﬀ' => "ff",
+                'ﬁ' => "fi",
+                'ﬂ' => "fl",
+                'ﬃ' => "ffi",
+                'ﬄ' => "ffl",
+                'ﬅ' or 'ﬆ' => "st",
+                _ => null,
+            };
+
+            scoped ReadOnlySpan<char> folded;
+            if (expansion is not null)
+            {
+                folded = expansion;
+            }
+            else
+            {
+                Rune simple = Rune.ToLowerInvariant(Rune.ToUpperInvariant(rune));
+                Rune lowered = rune.IsBmp ? new Rune(char.ToLowerInvariant((char)rune.Value)) : rune;
+                if (simple == lowered)
+                {
+                    sb?.Append(text, start, length);
+                    continue;
+                }
+
+                folded = buffer[..simple.EncodeToUtf16(buffer)];
+            }
+
+            sb ??= new StringBuilder(text.Length + 4).Append(text, 0, start);
+            sb.Append(folded);
         }
 
-        return sb.ToString();
+        return sb?.ToString() ?? text;
     }
 
     /// <summary>
