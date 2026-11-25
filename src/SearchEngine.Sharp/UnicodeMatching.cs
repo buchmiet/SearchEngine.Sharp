@@ -5,40 +5,47 @@ using System.Text;
 namespace SearchEngine;
 
 /// <summary>
-/// Optional Unicode-aware matching. The folding options are applied to indexed text and to query terms;
-/// pure ASCII text is never changed, so the cost is paid only for names that contain non-ASCII characters.
-/// A <see cref="WordMatchMethod.Regex"/> pattern is not folded (that would change its character classes): it runs
-/// as written against the folded text. Set through <see cref="SearchTokenization.WithUnicodeMatching"/>.
+/// Optional Unicode-aware matching, set through <see cref="SearchTokenization.WithUnicodeMatching"/>. The folding
+/// options (<see cref="Compose"/>, <see cref="CaseFold"/>, <see cref="RemoveDiacritics"/>) are applied to indexed
+/// text and to query terms. Pure ASCII text is never changed, so only names with non-ASCII characters pay for them.
 /// </summary>
+/// <remarks>
+/// A <see cref="WordMatchMethod.Regex"/> pattern is not folded, because folding would change its character classes;
+/// it runs as written against the folded tokens. <see cref="IndexedEntry.SortText"/> is never folded.
+/// </remarks>
 [Flags]
 public enum UnicodeMatching
 {
-    /// <summary>Text is used as given (per-character invariant lowercase only). The default.</summary>
+    /// <summary>No Unicode processing: text is only lowercased character by character (invariant culture). The
+    /// default.</summary>
     None = 0,
 
     /// <summary>
     /// Canonical composition (NFC): a decomposed <c>e</c> + U+0301 and a precomposed <c>é</c>, or Hangul
-    /// jamo and syllables, become the same token. macOS file names are often stored decomposed (NFD).
+    /// jamo and syllables, become the same token. macOS file names are often stored decomposed (NFD). Needs
+    /// Unicode normalization, which globalization-invariant mode does not have.
     /// </summary>
     Compose = 1,
 
     /// <summary>
-    /// Unicode simple case folding (case variants that per-character lowercase keeps apart match: final <c>ς</c> and
-    /// <c>σ</c>, <c>µ</c> and <c>μ</c>, Greek symbol variants such as <c>ϐ</c>, and supplementary-plane letters
-    /// such as Deseret <c>𐐀</c> and <c>𐐨</c>), plus the full foldings <c>ß</c>/<c>ẞ</c>→<c>ss</c> and the Latin
-    /// ligatures U+FB00–U+FB06, and <c>İ</c>→<c>i</c>, <c>ſ</c>→<c>s</c>. Other full foldings (<c>ŉ</c>, Greek
-    /// letters with ypogegrammeni, Armenian ligatures) are not applied.
+    /// Unicode simple case folding, so case variants that per-character lowercase keeps apart match: final
+    /// <c>ς</c> and <c>σ</c>, <c>µ</c> and <c>μ</c>, Greek symbol variants such as <c>ϐ</c>, and
+    /// supplementary-plane letters such as Deseret <c>𐐀</c> and <c>𐐨</c>. On top of that come the full foldings
+    /// <c>ß</c>/<c>ẞ</c>→<c>ss</c> and the Latin ligatures U+FB00 to U+FB06, and <c>İ</c>→<c>i</c>,
+    /// <c>ſ</c>→<c>s</c>. Other full foldings (<c>ŉ</c>, Greek letters with ypogegrammeni, Armenian ligatures) are
+    /// not applied.
     /// </summary>
     CaseFold = 2,
 
     /// <summary>
     /// Accent folding: canonical decomposition, removal of the accents of Latin, Greek and Cyrillic letters (the
-    /// non-spacing marks of the Combining Diacritical Marks blocks U+0300–U+036F, U+1AB0–U+1AFF, U+1DC0–U+1DFF and
-    /// U+FE20–U+FE2F), then composition (<c>é</c>→<c>e</c>, <c>ą</c>→<c>a</c>, <c>ü</c>→<c>u</c>, <c>ά</c>→<c>α</c>,
-    /// <c>й</c>→<c>и</c>), plus <c>ł</c>→<c>l</c>, <c>ø</c>→<c>o</c>, <c>đ</c>→<c>d</c>, <c>ħ</c>→<c>h</c>,
-    /// <c>ı</c>→<c>i</c>, which have no decomposition. Marks of other scripts are part of the letter and stay
-    /// (Japanese dakuten: <c>バ</c> ≠ <c>ハ</c>; Thai tone marks; Indic vowel signs). Implies <see cref="Compose"/>.
-    /// Caution: the folding does not know the language. <c>й</c> and <c>ў</c> become <c>и</c> and <c>у</c>, which are
+    /// non-spacing marks of the Combining Diacritical Marks blocks U+0300 to U+036F, U+1AB0 to U+1AFF, U+1DC0 to
+    /// U+1DFF and U+FE20 to U+FE2F), then composition (<c>é</c>→<c>e</c>, <c>ą</c>→<c>a</c>, <c>ü</c>→<c>u</c>,
+    /// <c>ά</c>→<c>α</c>, <c>й</c>→<c>и</c>), plus <c>ł</c>→<c>l</c>, <c>ø</c>→<c>o</c>, <c>đ</c>→<c>d</c>,
+    /// <c>ħ</c>→<c>h</c>, <c>ı</c>→<c>i</c>, which have no decomposition. Marks of other scripts are part of the
+    /// letter and stay (Japanese dakuten: <c>バ</c> ≠ <c>ハ</c>; Thai tone marks; Indic vowel signs). Implies
+    /// <see cref="Compose"/> and, like it, needs Unicode normalization.
+    /// The folding does not know the language. <c>й</c> and <c>ў</c> become <c>и</c> and <c>у</c>, which are
     /// different letters in Russian and Belarusian, so words that differ only by them match each other; leave this
     /// option off for such texts.
     /// </summary>

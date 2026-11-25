@@ -7,9 +7,11 @@ using SearchEngine.Snapshots;
 namespace SearchEngine;
 
 /// <summary>
-/// Stateless search engine that executes queries against the current snapshot.
-/// Thread-safe for concurrent queries.
+/// Runs queries against the current snapshot of an <see cref="IIndexSnapshotProvider"/>. The engine keeps no
+/// state of its own and is safe to call from many threads at once.
 /// </summary>
+/// <param name="snapshotProvider">The provider whose <see cref="IIndexSnapshotProvider.Current"/> snapshot each
+/// query reads.</param>
 public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) : ISearchEngine
 {
     /// <inheritdoc />
