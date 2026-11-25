@@ -41,8 +41,12 @@ public sealed class FacetFilter
     /// <param name="maxInclusive">The largest matching value. When it is less than
     /// <paramref name="minInclusive"/>, no document matches.</param>
     /// <returns>A new filter. For equality pass the same value twice.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="facet"/> is <see langword="null"/>.</exception>
     public static FacetFilter Range(string facet, long minInclusive, long maxInclusive)
-        => new([new FacetRange(facet, minInclusive, maxInclusive)]);
+    {
+        ArgumentNullException.ThrowIfNull(facet);
+        return new([new FacetRange(facet, minInclusive, maxInclusive)]);
+    }
 
     /// <summary>
     /// Creates a filter with one bitmask predicate: a document matches when all bits of
@@ -52,8 +56,12 @@ public sealed class FacetFilter
     /// <param name="mustHave">The bits that must be set.</param>
     /// <param name="mustNot">The bits that must be clear.</param>
     /// <returns>A new filter.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="facet"/> is <see langword="null"/>.</exception>
     public static FacetFilter Mask(string facet, long mustHave, long mustNot = 0)
-        => new([new FacetMask(facet, mustHave, mustNot)]);
+    {
+        ArgumentNullException.ThrowIfNull(facet);
+        return new([new FacetMask(facet, mustHave, mustNot)]);
+    }
 
     /// <summary>
     /// Joins the predicates of all <paramref name="filters"/> with AND.
@@ -61,14 +69,22 @@ public sealed class FacetFilter
     /// <param name="filters">The filters to join.</param>
     /// <returns>A new filter with every predicate of <paramref name="filters"/>, or <see cref="None"/> when they
     /// have no predicates.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="filters"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="filters"/> contains <see langword="null"/>.</exception>
     public static FacetFilter Combine(params FacetFilter[] filters)
     {
+        ArgumentNullException.ThrowIfNull(filters);
         if (filters.Length == 0)
             return None;
 
         int count = 0;
         foreach (FacetFilter filter in filters)
+        {
+            if (filter is null)
+                throw new ArgumentException("The filters must not contain null.", nameof(filters));
+
             count += filter._predicates.Length;
+        }
 
         if (count == 0)
             return None;

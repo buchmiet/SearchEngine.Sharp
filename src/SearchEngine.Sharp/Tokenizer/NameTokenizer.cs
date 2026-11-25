@@ -13,9 +13,10 @@ public static class NameTokenizer
     /// <paramref name="joinCharacter"/>.
     /// </summary>
     /// <param name="name">The name to tokenize.</param>
-    /// <param name="joinCharacter">The text placed between tokens.</param>
+    /// <param name="joinCharacter">The text placed between tokens. Pass an empty string for none.</param>
     /// <returns>The joined tokens, or an empty string for a <see langword="null"/>, empty or whitespace
     /// name.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="joinCharacter"/> is <see langword="null"/>.</exception>
     /// <remarks>
     /// Do not apply it to a query: it removes <c>*</c> and <c>?</c>. The test works on UTF-16 code units, so a
     /// character outside the Basic Multilingual Plane (an emoji, or a letter encoded as a surrogate pair) also
@@ -23,6 +24,7 @@ public static class NameTokenizer
     /// </remarks>
     public static string TokenizeName(string? name, string joinCharacter = "-")
     {
+        ArgumentNullException.ThrowIfNull(joinCharacter);
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 

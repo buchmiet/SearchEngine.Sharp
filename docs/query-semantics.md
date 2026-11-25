@@ -23,8 +23,8 @@ read it from `snapshot.Tokenization`.
 
 | Preset | Index separators | Query separators | Use case |
 |---|---|---|---|
-| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except TAB | token-level search |
-| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | whitespace only: space, CR, LF | classic file-manager masks on whole names |
+| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index | token-level search |
+| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | space, CR, LF (not TAB) | classic file-manager masks on whole names |
 | `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
 
 Factory:
@@ -44,8 +44,10 @@ With `SearchTokenization.FileMask`:
   a separator, so `*.pdf` means "name ends with `.pdf`".
 - `WordMatchMethod.Within` still matches substrings of the whole name (e.g. `port`
   matches `report-final.pdf`).
-- Boolean operators (`AND` / `OR` / `NOT`) still work; only space splits query terms
-  (implicit AND between adjacent terms still applies).
+- Boolean operators (`AND` / `OR` / `NOT`) still work; space, CR and LF split query
+  terms (implicit AND between adjacent terms still applies).
+- Tab does not split a mask. The whole name is one token, and names on Linux and macOS
+  may contain a tab, so a tab in a mask is matched as a character of the name.
 
 Worked examples, given an index of names `report-final.pdf`, `System`,
 `my-system-backup.zip`, `notes.txt` (queries with `WordMatchMethod.Exact`,
@@ -137,10 +139,11 @@ strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidan
 Separator characters (`SearchTokenization.Default.QuerySeparators`):
 
 ```
-space . , ; : / \ CR LF | - # [ ] { } ( ) ~ £ $ €
+space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 ```
 
-(Same set as indexing except TAB, which is a separator only on the index side.)
+(The same set as indexing, so a query pasted with tabs between its words finds the
+same documents as one typed with spaces.)
 
 Rules:
 
@@ -324,16 +327,42 @@ The cost of filters depends on how many documents the text expression matches; s
 | `SnapshotOrder` | Document order within the current snapshot |
 | `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
 
-The natural order compares `SortText` part by part:
+The natural order compares `SortText` part by part, the way file managers order names:
 
-- `SortText` splits into parts at `-`, space, `_` and `/`; inside a part, every run of
-  letters and every run of digits is a part of its own, and any other character is a
+- `-`, space, `_` and `/` separate parts and are otherwise ignored. Every run of letters
+  and every run of digits is a part of its own, and any other character is a
   one-character text part. `IMG_0012.jpg` has the parts `img`, `0012`, `.`, `jpg`.
-- A number sorts before text at the same position. Numbers compare by value up to 12
-  digits; longer digit runs are not padded and compare as text.
-- Text compares case-insensitively (invariant lowercase, then ordinal).
-- When all parts of the shorter text equal the start of the longer one, the shorter
-  text comes first.
+- The first parts are compared first; the next pair decides only when they are equal.
+- A number part comes before a text part.
+- Two numbers compare by value, at any length. Leading
+  zeros do not count, so `007` equals `7`. Digits of other scripts count with their
+  value: `٣` (Arabic-Indic three) equals `3`.
+- Two text parts compare one UTF-16 code unit at a time after `char.ToLowerInvariant`.
+  Case does not matter, and the culture of the machine plays no part: `é` comes after
+  `z`. When one text part is the start of the other, the shorter one comes first: `a`
+  before `ab`, so `a 2` sorts before `ab`.
+- When every part of one text equals the matching part of the other and one text has
+  more parts, the one with fewer parts comes first: `a` before `a 2`.
+- Texts that differ only in case, in leading zeros or in which separator they use are
+  equal: `File2` and `file2`, `007` and `7`, `a_b` and `a b`. Equal texts come in
+  ascending id order, whatever the number of hits and whether a filter is applied, so
+  the same query on the same entries always returns the same order.
+
+Examples, in ascending order:
+
+| Before | After | Rule |
+|---|---|---|
+| `file2` | `file10` | numbers by value |
+| `a 2` | `ab` | `a` is the start of `ab` |
+| `x 1` | `x a` | number before text |
+| `a b` | `ab` | `a` is the start of `ab` |
+| `a` | `a 2` | fewer parts |
+| `img_0012.jpg` | `img_12a.jpg` | `0012` equals `12`; then `.` before `a` |
+| `a999999999999` | `a1000000000000` | numbers by value at any length |
+| `z` | `é` | code units, not the alphabet of a culture |
+
+`NaturalSortKeyBuilder.Build` returns the key that holds this order: comparing two keys
+with `string.CompareOrdinal` gives the order of their texts.
 
 `SortText` is never changed by the Unicode options. [performance.md](performance.md#work-deferred-to-the-first-query)
 describes what a natural sort costs.

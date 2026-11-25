@@ -36,15 +36,21 @@ public static class TextNormalizer
     /// <param name="ch">The character to test.</param>
     /// <param name="separators">The separator set.</param>
     /// <returns><see langword="true"/> when <paramref name="ch"/> splits tokens.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="separators"/> is <see langword="null"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsSeparator(char ch, SearchValues<char> separators) => separators.Contains(ch);
+    public static bool IsSeparator(char ch, SearchValues<char> separators)
+    {
+        ArgumentNullException.ThrowIfNull(separators);
+        return separators.Contains(ch);
+    }
 
     /// <summary>
     /// Returns the distinct lowercase tokens of <paramref name="text"/>, split at the index separators of
     /// <see cref="SearchTokenization.Default"/>, longest first.
     /// </summary>
-    /// <param name="text">The text to split. <see langword="null"/> or empty gives an empty list.</param>
+    /// <param name="text">The text to split. An empty text gives an empty list.</param>
     /// <returns>A new list of tokens.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is <see langword="null"/>.</exception>
     public static List<string> GetWordsFromString(string text)
         => GetWordsFromString(text, DefaultSeparatorValues);
 
@@ -52,11 +58,15 @@ public static class TextNormalizer
     /// Returns the distinct lowercase tokens of <paramref name="text"/>, split at <paramref name="separators"/>,
     /// longest first.
     /// </summary>
-    /// <param name="text">The text to split. <see langword="null"/> or empty gives an empty list.</param>
+    /// <param name="text">The text to split. An empty text gives an empty list.</param>
     /// <param name="separators">The characters that split tokens.</param>
     /// <returns>A new list of tokens.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> or <paramref name="separators"/> is
+    /// <see langword="null"/>.</exception>
     public static List<string> GetWordsFromString(string text, SearchValues<char> separators)
     {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(separators);
         var words = new List<string>();
         var uniqueWords = new HashSet<string>(StringComparer.Ordinal);
         ForEachUniqueWord(text, uniqueWords, separators, ref words, static (ref List<string> list, string word) => list.Add(word));
@@ -71,11 +81,13 @@ public static class TextNormalizer
     /// the index separators of <see cref="SearchTokenization.Default"/>, in order of first occurrence.
     /// </summary>
     /// <typeparam name="TState">The type of <paramref name="state"/>.</typeparam>
-    /// <param name="text">The text to split. <see langword="null"/> or empty calls nothing.</param>
+    /// <param name="text">The text to split. An empty text calls nothing.</param>
     /// <param name="uniqueWords">A set that compares ordinally. It is cleared first and holds the tokens
     /// afterwards.</param>
     /// <param name="state">State passed to every call of <paramref name="action"/>, by reference.</param>
     /// <param name="action">The callback.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/>, <paramref name="uniqueWords"/> or
+    /// <paramref name="action"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="uniqueWords"/> does not compare ordinally.</exception>
     public static void ForEachUniqueWord<TState>(
         string text,
@@ -89,12 +101,14 @@ public static class TextNormalizer
     /// <paramref name="separators"/>, in order of first occurrence.
     /// </summary>
     /// <typeparam name="TState">The type of <paramref name="state"/>.</typeparam>
-    /// <param name="text">The text to split. <see langword="null"/> or empty calls nothing.</param>
+    /// <param name="text">The text to split. An empty text calls nothing.</param>
     /// <param name="uniqueWords">A set that compares ordinally (<see cref="StringComparer.Ordinal"/> or the default
     /// comparer). It is cleared first and holds the tokens afterwards.</param>
     /// <param name="separators">The characters that split tokens.</param>
     /// <param name="state">State passed to every call of <paramref name="action"/>, by reference.</param>
     /// <param name="action">The callback.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/>, <paramref name="uniqueWords"/> or
+    /// <paramref name="action"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="uniqueWords"/> does not compare ordinally.</exception>
     /// <remarks>A token that is already lowercase and makes up the whole text is passed as <paramref name="text"/>
     /// itself; every other new token allocates one string.</remarks>
@@ -105,11 +119,15 @@ public static class TextNormalizer
         ref TState state,
         UniqueWordAction<TState> action)
     {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(uniqueWords);
+        ArgumentNullException.ThrowIfNull(separators);
+        ArgumentNullException.ThrowIfNull(action);
         if (uniqueWords.Comparer != StringComparer.Ordinal && uniqueWords.Comparer != EqualityComparer<string>.Default)
             throw new ArgumentException("The set must compare words ordinally (StringComparer.Ordinal).", nameof(uniqueWords));
 
         uniqueWords.Clear();
-        if (string.IsNullOrEmpty(text))
+        if (text.Length == 0)
             return;
 
         var span = text.AsSpan();

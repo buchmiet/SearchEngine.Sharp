@@ -39,9 +39,10 @@ namespace SearchEngine;
 /// change publishes a snapshot built only from the entries given to the updater. All members are safe to call from
 /// several threads.
 /// </remarks>
+/// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
 public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null) : IIndexUpdater
 {
-    private readonly IndexSnapshotProvider _provider = provider;
+    private readonly IndexSnapshotProvider _provider = provider ?? throw new ArgumentNullException(nameof(provider));
     private readonly SearchTokenization _tokenization = tokenization ?? SearchTokenization.Default;
     private readonly Lock _rebuildGate = new();
     private Dictionary<int, IndexedEntry> _entries = [];
@@ -71,27 +72,20 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public void RebuildFrom(IDictionary<int, string> entries)
     {
-        lock (_rebuildGate)
-        {
-            var next = new Dictionary<int, IndexedEntry>(entries.Count);
-            foreach (var (key, value) in entries)
-                next[key] = new IndexedEntry(value, value);
+        ArgumentNullException.ThrowIfNull(entries);
+        var next = new Dictionary<int, IndexedEntry>(entries.Count);
+        foreach (var (key, value) in entries)
+            next[key] = IndexedEntry.FromText(key, value, nameof(entries));
 
+        lock (_rebuildGate)
             ReplaceAll(next);
-        }
     }
 
     /// <inheritdoc />
-    public async Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default)
+    public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default)
     {
-        // Consume the async stream outside the lock: awaiting while holding a lock
-        // would block the thread pool thread for the duration of the I/O.
-        var buffer = new Dictionary<int, IndexedEntry>();
-        await foreach (var (key, value) in entries.WithCancellation(ct))
-            buffer[key] = new IndexedEntry(value, value);
-
-        lock (_rebuildGate)
-            ReplaceAll(buffer, progress);
+        ArgumentNullException.ThrowIfNull(entries);
+        return RebuildFromStreamAsync(entries, static (key, value) => IndexedEntry.FromText(key, value, nameof(entries)), progress, ct);
     }
 
     // ── Full rebuild (IndexedEntry) ──
@@ -99,16 +93,33 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public void RebuildFrom(IDictionary<int, IndexedEntry> entries)
     {
+        ArgumentNullException.ThrowIfNull(entries);
+        var next = new Dictionary<int, IndexedEntry>(entries.Count);
+        foreach (var (key, value) in entries)
+            next[key] = IndexedEntry.Require(key, value, nameof(entries));
+
         lock (_rebuildGate)
-            ReplaceAll(new Dictionary<int, IndexedEntry>(entries));
+            ReplaceAll(next);
     }
 
     /// <inheritdoc />
-    public async Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default)
+    public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        return RebuildFromStreamAsync(entries, static (key, value) => IndexedEntry.Require(key, value, nameof(entries)), progress, ct);
+    }
+
+    // Reads the stream outside the lock (awaiting while holding it would block other changes for the duration of
+    // the I/O), then replaces all entries. The callers check the arguments before the task starts.
+    private async Task RebuildFromStreamAsync<TValue>(
+        IAsyncEnumerable<KeyValuePair<int, TValue>> entries,
+        Func<int, TValue, IndexedEntry> toEntry,
+        IProgress<float>? progress,
+        CancellationToken ct)
     {
         var buffer = new Dictionary<int, IndexedEntry>();
-        await foreach (var (key, value) in entries.WithCancellation(ct))
-            buffer[key] = value;
+        await foreach (var (key, value) in entries.WithCancellation(ct).ConfigureAwait(false))
+            buffer[key] = toEntry(key, value);
 
         lock (_rebuildGate)
             ReplaceAll(buffer, progress);
@@ -119,12 +130,14 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public void AddEntry(int id, string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
         AddEntry(id, new IndexedEntry(text, text));
     }
 
     /// <inheritdoc />
     public void AddEntry(int id, IndexedEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
         lock (_rebuildGate)
         {
             var undo = new List<Undo>(1);
@@ -166,12 +179,14 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public bool RefreshEntry(int id, string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
         return RefreshEntry(id, new IndexedEntry(text, text));
     }
 
     /// <inheritdoc />
     public bool RefreshEntry(int id, IndexedEntry entry)
     {
+        ArgumentNullException.ThrowIfNull(entry);
         lock (_rebuildGate)
         {
             var undo = new List<Undo>(1);
@@ -194,13 +209,14 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries)
     {
+        ArgumentNullException.ThrowIfNull(entries);
         lock (_rebuildGate)
         {
             var undo = new List<Undo>();
             try
             {
                 foreach (var (key, value) in entries)
-                    Set(key, new IndexedEntry(value, value), undo);
+                    Set(key, IndexedEntry.FromText(key, value, nameof(entries)), undo);
 
                 RebuildAndPublish();
             }
@@ -215,13 +231,14 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
     {
+        ArgumentNullException.ThrowIfNull(entries);
         lock (_rebuildGate)
         {
             var undo = new List<Undo>();
             try
             {
                 foreach (var (key, value) in entries)
-                    Set(key, value, undo);
+                    Set(key, IndexedEntry.Require(key, value, nameof(entries)), undo);
 
                 RebuildAndPublish();
             }
@@ -236,6 +253,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     /// <inheritdoc />
     public int RemoveEntries(IEnumerable<int> ids)
     {
+        ArgumentNullException.ThrowIfNull(ids);
         lock (_rebuildGate)
         {
             var undo = new List<Undo>();
