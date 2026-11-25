@@ -634,6 +634,37 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
+    public async Task Ingest_ProgressNeverReportsMorePublishedThanAcceptedEntries()
+    {
+        // A channel of one entry and a publish per entry: the publisher takes each entry the moment the scanner
+        // hands it over. An entry must be counted as accepted before the publisher can publish it.
+        const int count = 20_000;
+        var ingestion = new ProgressiveIndexIngestion(new IdOnlyUpdater());
+        int reports = 0;
+        int publishedAheadOfAccepted = 0;
+        int wrongPendingCounts = 0;
+        var progress = new InlineProgress(p =>
+        {
+            reports++;
+            if (p.EntriesPublished > p.EntriesAccepted)
+                publishedAheadOfAccepted++;
+            if (p.PendingCount != p.EntriesAccepted - p.EntriesPublished)
+                wrongPendingCounts++;
+        });
+
+        var result = await ingestion.IngestAsync(
+            new CountingFeed(count).EnumerateAsync(),
+            new IngestPublishOptions { Policy = IngestPublishPolicy.PerEntry, ChannelCapacity = 1 },
+            progress).WaitAsync(TestTimeout);
+
+        await Assert.That(reports).IsEqualTo(count);
+        await Assert.That(publishedAheadOfAccepted).IsEqualTo(0).Because($"{publishedAheadOfAccepted} of {count} reports counted more published than accepted entries.");
+        await Assert.That(wrongPendingCounts).IsEqualTo(0);
+        await Assert.That(result.EntriesAccepted).IsEqualTo(count);
+        await Assert.That(result.EntriesPublished).IsEqualTo(count);
+    }
+
+    [Test]
     public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then
@@ -947,5 +978,38 @@ public class ProgressiveIndexIngestionTests
         public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries) { beforeAddOrUpdate(); inner.AddOrUpdateEntries(entries); }
         public int RemoveEntries(IEnumerable<int> ids) => inner.RemoveEntries(ids);
         public void Clear() => inner.Clear();
+    }
+
+    /// <summary>An updater that only records the ids it receives, for tests that publish very often.</summary>
+    private sealed class IdOnlyUpdater : IIndexUpdater
+    {
+        private readonly HashSet<int> _ids = [];
+
+        public int EntryCount => _ids.Count;
+        public bool ContainsEntry(int id) => _ids.Contains(id);
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
+        {
+            foreach (var pair in entries)
+                _ids.Add(pair.Key);
+        }
+
+        public void RebuildFrom(IDictionary<int, string> entries) => throw new NotSupportedException();
+        public void RebuildFrom(IDictionary<int, IndexedEntry> entries) => throw new NotSupportedException();
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void AddEntry(int id, string text) => throw new NotSupportedException();
+        public void AddEntry(int id, IndexedEntry entry) => throw new NotSupportedException();
+        public bool RemoveEntry(int id) => throw new NotSupportedException();
+        public bool RefreshEntry(int id, string text) => throw new NotSupportedException();
+        public bool RefreshEntry(int id, IndexedEntry entry) => throw new NotSupportedException();
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries) => throw new NotSupportedException();
+        public int RemoveEntries(IEnumerable<int> ids) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+    }
+
+    /// <summary>Receives progress reports on the publisher task, without posting them anywhere.</summary>
+    private sealed class InlineProgress(Action<IngestionProgress> report) : IProgress<IngestionProgress>
+    {
+        public void Report(IngestionProgress value) => report(value);
     }
 }

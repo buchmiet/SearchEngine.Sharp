@@ -80,7 +80,8 @@ Changed.
   last value wins.
 - `SyntheticPathFeed.EnumerateAsync` throws `ArgumentOutOfRangeException` naming `count` when the count is
   negative, at the call, like `CreateDictionary`. It used to yield nothing.
-- `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
+- `IngestionProgress.PendingCount` reports the entries accepted but not yet published, `EntriesAccepted` minus
+  `EntriesPublished` (it was always 0).
 - `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
   IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text
   nor the facet values of its entries, so the updater cannot start from one; the factory now returns the entries,
@@ -99,6 +100,9 @@ Changed.
 - `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
   updater, a `Published` or `onPublished` handler, or the progress callback) while the scanner was blocked on a
   full channel. It now cancels the scanner and faults with the original exception.
+- A progress report of `ProgressiveIndexIngestion` could count one entry more in `EntriesPublished` than in
+  `EntriesAccepted`: the scanner counted an entry after the publisher could already take and publish it. An entry
+  is now counted before it enters the channel.
 - Progressive ingestion could leave buffered entries unpublished while the scanner was idle. A scan error no
   longer skips the final flush, and a cancelled ingestion with `FlushOnCancellation` also publishes the entries
   still queued between scanner and publisher.

@@ -329,7 +329,7 @@ Reported after each publish.
 | `EntriesAccepted` | Entries taken from the scan so far |
 | `EntriesPublished` | Entries published so far |
 | `PublishCount` | Publishes so far |
-| `PendingCount` | Entries accepted but not yet published (`EntriesAccepted − EntriesPublished`, never below 0) |
+| `PendingCount` | Entries accepted but not yet published, in the channel or the buffer: `EntriesAccepted − EntriesPublished` |
 
 ### `IngestionPublishEvent` (struct)
 

@@ -225,8 +225,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             {
                 var indexed = toIndexedEntry(pair);
                 var buffered = new BufferedEntry(pair.Key, indexed, _timeProvider.GetTimestamp());
-                await writer.WriteAsync(buffered, cancellationToken).ConfigureAwait(false);
-                state.IncrementAccepted();
+                await WriteAcceptedAsync(writer, buffered, state, cancellationToken).ConfigureAwait(false);
             }
 
             writer.Complete();
@@ -240,6 +239,28 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         {
             writer.TryComplete(ex);
             throw;
+        }
+    }
+
+    // An entry is counted as accepted before it enters the channel, so the publisher can never publish an entry
+    // that is not counted yet. The count is taken back when the channel is full; the scanner then waits for room.
+    private static async ValueTask WriteAcceptedAsync(
+        ChannelWriter<BufferedEntry> writer,
+        BufferedEntry entry,
+        IngestionState state,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            // Like ChannelWriter.WriteAsync: nothing is accepted once the ingestion is cancelled.
+            cancellationToken.ThrowIfCancellationRequested();
+            state.IncrementAccepted();
+            if (writer.TryWrite(entry))
+                return;
+
+            state.DecrementAccepted();
+            if (!await writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false))
+                throw new ChannelClosedException();
         }
     }
 
@@ -408,8 +429,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         Published?.Invoke(publishEvent);
         onPublished?.Invoke(publishEvent);
 
-        // The scanner counts an entry after handing it to the channel, so the publisher can already have
-        // published an entry that is not counted yet: the difference is clamped at zero.
         int accepted = state.EntriesAccepted;
         int published = state.EntriesPublished;
         progress?.Report(new IngestionProgress
@@ -417,7 +436,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             EntriesAccepted = accepted,
             EntriesPublished = published,
             PublishCount = state.PublishCount,
-            PendingCount = Math.Max(0, accepted - published),
+            PendingCount = accepted - published,
         });
     }
 
@@ -524,13 +543,17 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     private sealed class IngestionState(TimeProvider timeProvider)
     {
         private long _worstStalenessTicks;
+        private int _entriesAccepted;
 
-        public int EntriesAccepted { get; private set; }
+        // The scanner writes this counter and the publisher reads it.
+        public int EntriesAccepted => Volatile.Read(ref _entriesAccepted);
         public int EntriesPublished { get; private set; }
         public int PublishCount { get; private set; }
         public TimeSpan TotalRebuildDuration { get; private set; }
 
-        public void IncrementAccepted() => EntriesAccepted++;
+        public void IncrementAccepted() => Interlocked.Increment(ref _entriesAccepted);
+
+        public void DecrementAccepted() => Interlocked.Decrement(ref _entriesAccepted);
 
         public void AddPublished(int count, TimeSpan rebuildDuration)
         {
