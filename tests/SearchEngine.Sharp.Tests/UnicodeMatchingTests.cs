@@ -259,6 +259,31 @@ public class UnicodeMatchingTests
         await Assert.That(TextFolder.Fold("\uD800e\u0301\uDC00\uFFFE", UnicodeMatching.Compose)).IsEqualTo("\uD800\u00E9\uDC00\uFFFE");
     }
 
+    // Windows NLS normalization (DOTNET_SYSTEM_GLOBALIZATION_USENLS=1) also rejects the noncharacters U+FDD0 to
+    // U+FDEF and U+nFFFE / U+nFFFF of every plane, which ICU accepts. Folding gives the same result on both: a
+    // noncharacter never composes, so it is kept as it is and the text around it is folded.
+    [Test]
+    [SkipUnlessNormalization]
+    [Arguments(UnicodeMatching.Compose | UnicodeMatching.CaseFold)]
+    [Arguments(UnicodeMatching.RemoveDiacritics)]
+    public async Task Noncharacters_AreKeptAndTheTextAroundThemIsFolded(UnicodeMatching options)
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(options);
+        string[] names = ["Cafe\u0301\uFFFF.txt", "x\uFDD0e\u0301", "\uFDEF\uD83F\uDFFFe\u0301\uDBFF\uDFFE", "other"];
+        var engine = Index(tokenization, names);
+
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf\u00E9\uFFFF.txt", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "x\uFDD0\u00E9", [2]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "\uFDEF\uD83F\uDFFF\u00E9\uDBFF\uDFFE", [3]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Within, "\uFFFF", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*\uFDD0*", [2], enableOperators: true);
+        foreach (string name in names)
+            await AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, name, [Array.IndexOf(names, name) + 1]);
+
+        string expected = (options & UnicodeMatching.RemoveDiacritics) != 0 ? "e\uFFFFe\uFDD0e" : "\u00E9\uFFFF\u00E9\uFDD0\u00E9";
+        await Assert.That(TextFolder.Fold("e\u0301\uFFFFe\u0301\uFDD0e\u0301", options)).IsEqualTo(expected);
+    }
+
     // A regex pattern runs as written against the folded text: folding the pattern would change its character
     // classes ([e<U+0301>] composed to [é], [b-å] stripped to the invalid range [b-a]).
     [Test]

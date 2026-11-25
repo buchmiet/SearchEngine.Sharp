@@ -110,8 +110,11 @@ under `Compose`. `SortText` is never folded.
 trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
 for them there; `CaseFold` and `GraphemeBoundaries` work in every mode.
 
-Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and U+FFFE cannot be normalized: those code
-units are kept as they are and the text around them is folded, so such a name still matches itself.
+Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and the noncharacters (U+FDD0 to U+FDEF and the
+last two code points of every plane, such as U+FFFE and U+FFFF) are kept as they are, and the text around them is
+folded, so such a name still matches itself. ICU refuses to normalize U+FFFE and Windows NLS
+(`DOTNET_SYSTEM_GLOBALIZATION_USENLS=1`) refuses every noncharacter; leaving them all out gives the same result
+with either library.
 
 ## Index-side tokenization (Default preset)
 

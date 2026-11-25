@@ -87,11 +87,14 @@ internal static class TextFolder
     }
 
     // string.Normalize and string.IsNormalized throw ArgumentException on ill-formed UTF-16 (a lone surrogate, which
-    // file systems such as NTFS allow in names) and on U+FFFE. Such a code unit takes no part in composition, so it is
-    // kept as it is and the well-formed runs around it are normalized on their own: the text still matches itself.
+    // file systems such as NTFS allow in names) and on noncharacters: ICU rejects U+FFFE, Windows NLS
+    // (DOTNET_SYSTEM_GLOBALIZATION_USENLS) all 66 of them. Such a code point takes no part in composition (it has no
+    // decomposition, combining class 0 and no composition partner), so it is kept as it is and the runs around it are
+    // normalized on their own. The result is the one ICU gives for the whole text, on every backend, and the text
+    // still matches itself.
     private static string NormalizeWellFormedRuns(string text, bool removeDiacritics)
     {
-        int invalid = IndexOfUnnormalizable(text);
+        int invalid = IndexOfUnnormalizable(text, out int length);
         if (invalid < 0)
             return Normalize(text, removeDiacritics);
 
@@ -99,31 +102,41 @@ internal static class TextFolder
         int start = 0;
         while (invalid >= 0)
         {
-            sb.Append(Normalize(text[start..invalid], removeDiacritics)).Append(text[invalid]);
-            start = invalid + 1;
-            int next = IndexOfUnnormalizable(text.AsSpan(start));
+            sb.Append(Normalize(text[start..invalid], removeDiacritics)).Append(text, invalid, length);
+            start = invalid + length;
+            int next = IndexOfUnnormalizable(text.AsSpan(start), out length);
             invalid = next < 0 ? -1 : start + next;
         }
 
         return sb.Append(Normalize(text[start..], removeDiacritics)).ToString();
     }
 
-    private static int IndexOfUnnormalizable(ReadOnlySpan<char> text)
+    // Index and length (1 or 2 UTF-16 units) of the first lone surrogate or noncharacter, or -1.
+    private static int IndexOfUnnormalizable(ReadOnlySpan<char> text, out int length)
     {
-        if (!text.ContainsAnyInRange('\uD800', '\uDFFF') && !text.Contains('\uFFFE'))
+        length = 1;
+        if (!text.ContainsAnyInRange('\uD800', '\uDFFF') && !text.ContainsAnyInRange('\uFDD0', '\uFDEF') && !text.ContainsAny('\uFFFE', '\uFFFF'))
             return -1;
 
         for (int i = 0; i < text.Length; i++)
         {
-            char ch = text[i];
-            if (char.IsHighSurrogate(ch) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-                i++;
-            else if (char.IsSurrogate(ch) || ch == '\uFFFE')
+            if (Rune.DecodeFromUtf16(text[i..], out Rune rune, out int consumed) != OperationStatus.Done)
+                return i; // a lone surrogate
+
+            if (IsNoncharacter(rune.Value))
+            {
+                length = consumed;
                 return i;
+            }
+
+            i += consumed - 1;
         }
 
         return -1;
     }
+
+    // U+FDD0 to U+FDEF and the last two code points of every plane (Unicode 15.1, section 23.7).
+    private static bool IsNoncharacter(int codePoint) => codePoint is >= 0xFDD0 and <= 0xFDEF || (codePoint & 0xFFFE) == 0xFFFE;
 
     private static string Normalize(string text, bool removeDiacritics)
     {
