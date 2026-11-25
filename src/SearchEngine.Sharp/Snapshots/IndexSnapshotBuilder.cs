@@ -195,7 +195,7 @@ public static class IndexSnapshotBuilder
         }
 
         if (recordIds.Count == 0)
-            return IndexSnapshot.Empty;
+            return IndexSnapshot.EmptyFor(tokenization);
 
         var wordDescriptions = new List<WordDescription>(invertedIndex.Count);
         foreach (var (word, docIds) in invertedIndex)

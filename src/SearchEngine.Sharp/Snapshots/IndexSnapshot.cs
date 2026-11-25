@@ -40,7 +40,16 @@ public sealed class IndexSnapshot
     /// <summary>
     /// Empty snapshot singleton.
     /// </summary>
-    public static readonly IndexSnapshot Empty = new(
+    public static readonly IndexSnapshot Empty = CreateEmpty(SearchTokenization.Default);
+
+    /// <summary>
+    /// Empty snapshot that keeps the given tokenization, so an index emptied by its updater still
+    /// carries the preset it was configured with. The default preset shares <see cref="Empty"/>.
+    /// </summary>
+    internal static IndexSnapshot EmptyFor(SearchTokenization tokenization)
+        => ReferenceEquals(tokenization, SearchTokenization.Default) ? Empty : CreateEmpty(tokenization);
+
+    private static IndexSnapshot CreateEmpty(SearchTokenization tokenization) => new(
         recordIds: [],
         exactPostings: [],
         wordsArray: [],
@@ -53,7 +62,7 @@ public sealed class IndexSnapshot
         sortTexts: [],
         sortedPermutation: [],
         facetColumns: [],
-        tokenization: SearchTokenization.Default,
+        tokenization: tokenization,
         documentCount: 0,
         uniqueWordCount: 0
     );

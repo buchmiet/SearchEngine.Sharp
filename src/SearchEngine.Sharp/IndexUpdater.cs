@@ -18,6 +18,12 @@ namespace SearchEngine;
 //   _rebuildGate serialises all writes to _entries and all calls to Publish.
 //   Reads (queries) are lock-free: SearchEngineSharp reads the snapshot reference via
 //   Volatile.Read and never touches _entries.
+//
+// Atomicity:
+//   A mutation either completes (new snapshot published, _entries updated) or leaves both
+//   untouched. Single-entry and batch mutations record the previous value of every id they
+//   change and restore it if building the snapshot (or enumerating the caller's entries)
+//   throws; full rebuilds fill a new dictionary and only swap it in after the build succeeded.
 
 /// <summary>
 /// Handles index rebuilding with serialized concurrent access.
@@ -28,7 +34,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     private readonly IndexSnapshotProvider _provider = provider;
     private readonly SearchTokenization _tokenization = tokenization ?? SearchTokenization.Default;
     private readonly Lock _rebuildGate = new();
-    private readonly Dictionary<int, IndexedEntry> _entries = [];
+    private Dictionary<int, IndexedEntry> _entries = [];
 
     /// <inheritdoc />
     public int EntryCount
@@ -49,11 +55,11 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            _entries.Clear();
+            var next = new Dictionary<int, IndexedEntry>(entries.Count);
             foreach (var (key, value) in entries)
-                _entries[key] = new IndexedEntry(value, value);
+                next[key] = new IndexedEntry(value, value);
 
-            RebuildAndPublish();
+            ReplaceAll(next);
         }
     }
 
@@ -67,13 +73,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
             buffer[key] = new IndexedEntry(value, value);
 
         lock (_rebuildGate)
-        {
-            _entries.Clear();
-            foreach (var (key, value) in buffer)
-                _entries[key] = value;
-
-            RebuildAndPublish(progress);
-        }
+            ReplaceAll(buffer, progress);
     }
 
     // ── Full rebuild (IndexedEntry) ──
@@ -82,13 +82,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     public void RebuildFrom(IDictionary<int, IndexedEntry> entries)
     {
         lock (_rebuildGate)
-        {
-            _entries.Clear();
-            foreach (var (key, value) in entries)
-                _entries[key] = value;
-
-            RebuildAndPublish();
-        }
+            ReplaceAll(new Dictionary<int, IndexedEntry>(entries));
     }
 
     /// <inheritdoc />
@@ -99,13 +93,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
             buffer[key] = value;
 
         lock (_rebuildGate)
-        {
-            _entries.Clear();
-            foreach (var (key, value) in buffer)
-                _entries[key] = value;
-
-            RebuildAndPublish(progress);
-        }
+            ReplaceAll(buffer, progress);
     }
 
     // ── Single entry operations ──
@@ -121,8 +109,17 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            _entries[id] = entry;
-            RebuildAndPublish();
+            var undo = new List<Undo>(1);
+            try
+            {
+                Set(id, entry, undo);
+                RebuildAndPublish();
+            }
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -131,11 +128,20 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            if (!_entries.Remove(id))
-                return false;
+            var undo = new List<Undo>(1);
+            try
+            {
+                if (!Unset(id, undo))
+                    return false;
 
-            RebuildAndPublish();
-            return true;
+                RebuildAndPublish();
+                return true;
+            }
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -150,10 +156,18 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            bool existed = _entries.ContainsKey(id);
-            _entries[id] = entry;
-            RebuildAndPublish();
-            return existed;
+            var undo = new List<Undo>(1);
+            try
+            {
+                bool existed = Set(id, entry, undo);
+                RebuildAndPublish();
+                return existed;
+            }
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -164,10 +178,19 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            foreach (var (key, value) in entries)
-                _entries[key] = new IndexedEntry(value, value);
+            var undo = new List<Undo>();
+            try
+            {
+                foreach (var (key, value) in entries)
+                    Set(key, new IndexedEntry(value, value), undo);
 
-            RebuildAndPublish();
+                RebuildAndPublish();
+            }
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -176,10 +199,19 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            foreach (var (key, value) in entries)
-                _entries[key] = value;
+            var undo = new List<Undo>();
+            try
+            {
+                foreach (var (key, value) in entries)
+                    Set(key, value, undo);
 
-            RebuildAndPublish();
+                RebuildAndPublish();
+            }
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -188,17 +220,22 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     {
         lock (_rebuildGate)
         {
-            int removed = 0;
-            foreach (var id in ids)
+            var undo = new List<Undo>();
+            try
             {
-                if (_entries.Remove(id))
-                    removed++;
+                foreach (var id in ids)
+                    Unset(id, undo);
+
+                if (undo.Count > 0)
+                    RebuildAndPublish();
+
+                return undo.Count;
             }
-
-            if (removed > 0)
-                RebuildAndPublish();
-
-            return removed;
+            catch
+            {
+                Rollback(undo);
+                throw;
+            }
         }
     }
 
@@ -208,7 +245,7 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
         lock (_rebuildGate)
         {
             _entries.Clear();
-            _provider.Publish(IndexSnapshot.Empty);
+            _provider.Publish(IndexSnapshot.EmptyFor(_tokenization));
         }
     }
 
@@ -217,4 +254,44 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
         var snapshot = IndexSnapshotBuilder.Build(_entries, _tokenization, progress);
         _provider.Publish(snapshot);
     }
+
+    // Full rebuild: the new entries become the source of truth only after their snapshot was built.
+    private void ReplaceAll(Dictionary<int, IndexedEntry> next, IProgress<float>? progress = null)
+    {
+        _provider.Publish(IndexSnapshotBuilder.Build(next, _tokenization, progress));
+        _entries = next;
+    }
+
+    // Stores the entry and records the value it replaced. Returns true when the id already existed.
+    private bool Set(int id, IndexedEntry entry, List<Undo> undo)
+    {
+        bool existed = _entries.TryGetValue(id, out var previous);
+        undo.Add(new Undo(id, previous));
+        _entries[id] = entry;
+        return existed;
+    }
+
+    private bool Unset(int id, List<Undo> undo)
+    {
+        if (!_entries.Remove(id, out var previous))
+            return false;
+
+        undo.Add(new Undo(id, previous));
+        return true;
+    }
+
+    // Puts back what a failed mutation changed; the previously published snapshot was never replaced.
+    private void Rollback(List<Undo> undo)
+    {
+        for (int i = undo.Count - 1; i >= 0; i--)
+        {
+            var (id, previous) = undo[i];
+            if (previous is null)
+                _entries.Remove(id);
+            else
+                _entries[id] = previous;
+        }
+    }
+
+    private readonly record struct Undo(int Id, IndexedEntry? Previous);
 }

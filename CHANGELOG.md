@@ -40,6 +40,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - `FacetValues.FromDictionary` enumerates the source once into a buffer, so a concurrently mutated dictionary can no
   longer produce a bag with trailing null names or an `IndexOutOfRangeException`, and it rejects null and duplicate
   names with `ArgumentException` exactly like `FacetValues.Create(span)`.
+- `IndexUpdater` mutations are atomic: when building the new snapshot throws (for example for an invalid facet bag), the
+  stored entries and the published snapshot stay as they were and later calls work. `Clear` and removing the last
+  entry keep the tokenization and Unicode options of the updater instead of publishing a default-preset empty snapshot.
 
 ### Changed
 
