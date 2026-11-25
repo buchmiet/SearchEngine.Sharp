@@ -43,9 +43,11 @@ internal static class GlobMatcher
 
     /// <summary>
     /// Returns true when <paramref name="word"/> fully matches <paramref name="pattern"/>.
-    /// Consecutive <c>*</c> in the pattern are treated as a single wildcard.
+    /// Consecutive <c>*</c> in the pattern are treated as a single wildcard. With
+    /// <paramref name="graphemeBoundaries"/>, every position where a wildcard meets literal text must be a grapheme
+    /// cluster boundary of <paramref name="word"/> (<see cref="UnicodeMatching.GraphemeBoundaries"/>).
     /// </summary>
-    internal static bool IsWholeWordMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word)
+    internal static bool IsWholeWordMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, bool graphemeBoundaries = false)
     {
         int patternIndex = 0;
         int wordIndex = 0;
@@ -54,7 +56,8 @@ internal static class GlobMatcher
 
         while (wordIndex < word.Length)
         {
-            if (patternIndex < pattern.Length)
+            if (patternIndex < pattern.Length
+                && (!graphemeBoundaries || MayCrossAt(pattern, patternIndex, word, wordIndex)))
             {
                 char patternChar = pattern[patternIndex];
                 if (patternChar == '*')
@@ -94,10 +97,21 @@ internal static class GlobMatcher
         return patternIndex == pattern.Length;
     }
 
+    // The pattern moves from a literal to a wildcard (or back) at patternIndex: word must have a grapheme cluster
+    // boundary there. Leftmost placement of each literal run stays correct, because the check depends only on where
+    // that run is placed.
+    private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, ReadOnlySpan<char> word, int wordIndex)
+        => patternIndex == 0
+            || IsWildcard(pattern[patternIndex]) == IsWildcard(pattern[patternIndex - 1])
+            || TextFolder.IsGraphemeBoundary(word, wordIndex);
+
+    private static bool IsWildcard(char ch) => ch is '*' or '?';
+
     /// <summary>
     /// Pre-classified glob: the common shapes (<c>abc*</c>, <c>*abc</c>, <c>*abc*</c>, <c>ab*cd</c>,
     /// no <c>?</c>) are matched with span primitives (vectorized StartsWith/EndsWith/IndexOf);
-    /// everything else falls back to <see cref="IsWholeWordMatch"/>. Results are identical.
+    /// everything else falls back to <see cref="IsWholeWordMatch"/>. Results are identical, with and without the
+    /// grapheme boundary check.
     /// </summary>
     internal readonly ref struct Shape
     {
@@ -105,12 +119,14 @@ internal static class GlobMatcher
         private readonly ReadOnlySpan<char> _head;
         private readonly ReadOnlySpan<char> _tail;
         private readonly Kind _kind;
+        private readonly bool _graphemeBoundaries;
 
         private enum Kind { General, Prefix, Suffix, Contains, PrefixSuffix }
 
-        internal Shape(ReadOnlySpan<char> pattern)
+        internal Shape(ReadOnlySpan<char> pattern, bool graphemeBoundaries = false)
         {
             _pattern = pattern;
+            _graphemeBoundaries = graphemeBoundaries;
             _kind = Kind.General;
             if (pattern.IndexOf('?') >= 0)
                 return;
@@ -160,11 +176,16 @@ internal static class GlobMatcher
         internal bool IsMatch(ReadOnlySpan<char> word) => _kind switch
         {
             // First-character check before the vectorized compare: most words differ there.
-            Kind.Prefix => word.Length >= _head.Length && word[0] == _head[0] && word.StartsWith(_head),
-            Kind.Suffix => word.EndsWith(_tail),
-            Kind.Contains => word.IndexOf(_head) >= 0,
-            Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail),
-            _ => IsWholeWordMatch(_pattern, word),
+            Kind.Prefix => word.Length >= _head.Length && word[0] == _head[0] && word.StartsWith(_head)
+                && IsBoundary(word, _head.Length),
+            Kind.Suffix => word.EndsWith(_tail) && IsBoundary(word, word.Length - _tail.Length),
+            Kind.Contains => _graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, _head) >= 0 : word.IndexOf(_head) >= 0,
+            Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail)
+                && IsBoundary(word, _head.Length) && IsBoundary(word, word.Length - _tail.Length),
+            _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
+
+        private bool IsBoundary(ReadOnlySpan<char> word, int position)
+            => !_graphemeBoundaries || TextFolder.IsGraphemeBoundary(word, position);
     }
 }

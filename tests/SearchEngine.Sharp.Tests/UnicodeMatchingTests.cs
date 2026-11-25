@@ -163,6 +163,46 @@ public class UnicodeMatchingTests
             TextFolder.Fold("a\u0301b\u1AB0c\u1DC4d\uFE20\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67", UnicodeMatching.RemoveDiacritics));
     }
 
+    // Where a glob wildcard meets literal text, the name must have a grapheme cluster boundary, as at both ends of a
+    // Within match: cafe* does not match a decomposed café, one emoji followed by * does not match a ZWJ family.
+    [Fact]
+    public void GraphemeBoundaries_GlobWildcardsDoNotSplitAGraphemeCluster()
+    {
+        var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
+        string[] names = ["cafe\u0301", "cafe", Family, Man + " solo", "cafe\u0301s"];
+        var plain = Index(SearchTokenization.Default, names);
+        var engine = Index(tokenization, names);
+
+        Assert.Equal([1, 2, 5], plain.Find("cafe*", WordMatchMethod.Exact));
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "cafe*", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Within, "cafe*", [2], enableOperators: true);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*afe*", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*\u0301s", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*e\u0301s", [5]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf*\u0301s", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "c*e\u0301s", [5]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "cafe?", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "caf??", [1]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*a*e*", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "?a*e\u0301*", [1, 5]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, Man + "*", [4]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*" + Woman + "*", []);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*", [1, 2, 3, 4, 5]);
+    }
+
+    [Fact]
+    public void GraphemeBoundaries_FileMaskPrefixQueryDoesNotSplitAGraphemeCluster()
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
+        string[] names = ["cafe\u0301.txt", "cafe.txt", "Cafe\u0301 Noir.txt"];
+        var engine = Index(tokenization, names);
+
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "cafe*", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "cafe\u0301*", [1, 3]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*e.txt", [2]);
+        AssertFinds(engine, tokenization, names, WordMatchMethod.Exact, "*\u0301.txt", []);
+    }
+
     [Fact]
     public void GraphemeBoundaries_WithinDoesNotMatchInsideAGraphemeCluster()
     {

@@ -142,7 +142,7 @@ public sealed class NameMatcher
             return true;
 
         bool glob = GlobMatcher.ContainsMetacharacters(word);
-        var shape = glob ? new GlobMatcher.Shape(word) : default;
+        var shape = glob ? new GlobMatcher.Shape(word, _tokenization.GraphemeBoundaries) : default;
         foreach (var range in Tokens(lower))
         {
             var token = lower[range];
@@ -164,25 +164,7 @@ public sealed class NameMatcher
     }
 
     private bool ContainsWithin(ReadOnlySpan<char> token, ReadOnlySpan<char> word)
-    {
-        int start = 0;
-        while (start + word.Length <= token.Length)
-        {
-            int index = token[start..].IndexOf(word);
-            if (index < 0)
-                return false;
-
-            index += start;
-            if (!_tokenization.GraphemeBoundaries
-                || System.Text.Ascii.IsValid(token)
-                || TextFolder.IsOnGraphemeBoundaries(token, index, word.Length))
-                return true;
-
-            start = index + 1;
-        }
-
-        return false;
-    }
+        => (_tokenization.GraphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(token, word) : token.IndexOf(word)) >= 0;
 
     private TokenEnumerator Tokens(ReadOnlySpan<char> lower) => new(lower, _tokenization.IndexSeparatorValues);
 

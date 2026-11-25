@@ -42,9 +42,11 @@ public enum UnicodeMatching
     RemoveDiacritics = 4,
 
     /// <summary>
-    /// <see cref="WordMatchMethod.Within"/> matches must start and end on extended grapheme cluster
-    /// boundaries (UAX #29): <c>cafe</c> no longer matches inside a decomposed <c>café</c>, and one emoji
-    /// no longer matches inside a ZWJ sequence. Exact and glob matches are whole tokens and need no check.
+    /// Matches must not split an extended grapheme cluster (UAX #29): a <see cref="WordMatchMethod.Within"/> match
+    /// starts and ends on cluster boundaries, and so does every place where a glob <c>*</c> or <c>?</c> meets
+    /// literal text. <c>cafe</c> and <c>cafe*</c> no longer match a decomposed <c>café</c>, and one emoji (or
+    /// emoji followed by <c>*</c>) no longer matches inside a ZWJ sequence. Exact matches without wildcards are whole
+    /// tokens and need no check.
     /// </summary>
     GraphemeBoundaries = 8,
 }
@@ -214,22 +216,39 @@ internal static class TextFolder
         return sb?.ToString() ?? text;
     }
 
-    /// <summary>
-    /// True when <paramref name="start"/> and <paramref name="start"/> + <paramref name="length"/> are
-    /// both extended grapheme cluster boundaries of <paramref name="word"/> (UAX #29).
-    /// </summary>
-    internal static bool IsOnGraphemeBoundaries(ReadOnlySpan<char> word, int start, int length)
+    /// <summary>True when <paramref name="position"/> is an extended grapheme cluster boundary of <paramref name="word"/> (UAX #29).</summary>
+    internal static bool IsGraphemeBoundary(ReadOnlySpan<char> word, int position)
     {
-        int end = start + length;
-        int position = 0;
-        bool startOk = start == 0;
-        while (position < end)
+        if (position == 0 || position >= word.Length)
+            return true;
+
+        // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
+        char before = word[position - 1];
+        char after = word[position];
+        if (char.IsAscii(before) && char.IsAscii(after))
+            return before != '\r' || after != '\n';
+
+        int boundary = 0;
+        while (boundary < position)
+            boundary += StringInfo.GetNextTextElementLength(word[boundary..]);
+
+        return boundary == position;
+    }
+
+    /// <summary>
+    /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
+    /// extended grapheme cluster boundaries, or -1: the substring match of <see cref="UnicodeMatching.GraphemeBoundaries"/>
+    /// for <see cref="WordMatchMethod.Within"/> and <c>*value*</c> globs.
+    /// </summary>
+    internal static int IndexOfOnGraphemeBoundaries(ReadOnlySpan<char> word, ReadOnlySpan<char> value)
+    {
+        int index = word.IndexOf(value);
+        while (index >= 0 && !(IsGraphemeBoundary(word, index) && IsGraphemeBoundary(word, index + value.Length)))
         {
-            position += StringInfo.GetNextTextElementLength(word[position..]);
-            if (position == start)
-                startOk = true;
+            int next = word[(index + 1)..].IndexOf(value);
+            index = next < 0 ? -1 : index + 1 + next;
         }
 
-        return startOk && position == end;
+        return index;
     }
 }
