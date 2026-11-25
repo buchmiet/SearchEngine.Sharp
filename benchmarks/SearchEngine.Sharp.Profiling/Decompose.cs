@@ -87,7 +87,7 @@ static class Decompose
             buildAlloc += GC.GetTotalAllocatedBytes(true) - b0;
             buildTotal += bms;
             buildEach.Add(bms.ToString("F1"));
-            var provider = new Fixed(snap);
+            var provider = new Bench.Fixed(snap);
             var engine = new SearchEngineSharp(provider);
             sw.Restart();
             var ids = engine.Find(expr, method, ops, SearchSortMode.SnapshotOrder, filter);
@@ -107,8 +107,8 @@ static class Decompose
         res["dedupMs"] = Math.Round(dedupTotal, 2);
         res["hits"] = yielded.Count;
 
-        // Internal phases of one full FileMask build of all N entries.
-        foreach (var (k, v) in BuildPhases.Measure(indexed, SearchTokenization.FileMask)) res["full_" + k] = v;
+        // One full FileMask build of all N entries through the real builder.
+        foreach (var (k, v) in BuildCost.Measure(indexed)) res["full_" + k] = v;
         Console.WriteLine(JsonSerializer.Serialize(res));
     }
 
@@ -123,95 +123,40 @@ static class Decompose
         }
         return Math.Round(best, 1);
     }
-
-    sealed class Fixed(IndexSnapshot s) : IIndexSnapshotProvider { public IndexSnapshot Current => s; }
 }
 
 /// <summary>
-/// Copy of IndexSnapshotBuilder.BuildCore (0.5.6) with a timer per phase. Produces the same arrays
-/// but does not construct IndexSnapshot (internal constructor). Used only to split build cost.
+/// Cost of one full FileMask build, measured by calling the real <see cref="IndexSnapshotBuilder"/>: build time and
+/// allocations, the tokenization pass alone, and the first Within query, which pays for the lazy bigram index.
 /// </summary>
-static class BuildPhases
+static class BuildCost
 {
-    public static Dictionary<string, double> Measure(IReadOnlyList<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tok)
+    public static Dictionary<string, double> Measure(IReadOnlyList<KeyValuePair<int, IndexedEntry>> entries)
     {
+        var tok = SearchTokenization.FileMask;
         var t = new Dictionary<string, double>();
-        var sw = Stopwatch.StartNew();
-        long a0 = GC.GetTotalAllocatedBytes(true);
-        var pool = new Dictionary<string, string>(StringComparer.Ordinal);
-        var inverted = new Dictionary<string, List<int>>(entries.Count, StringComparer.Ordinal);
+
         var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var sortTexts = new List<string>(entries.Count);
-        var facetKeys = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new List<(int, string, long)>();
-        int totalLen = 0, totalPostings = 0;
-        double tokenizeMs = 0;
-        var separators = TokIndex(tok);
-        for (int doc = 0; doc < entries.Count; doc++)
-        {
-            var e = entries[doc].Value;
-            sortTexts.Add(e.SortText);
-            var words = new List<string>(2);
-            long ts = Stopwatch.GetTimestamp();
-            TextNormalizer.ForEachUniqueWord(e.SearchText, unique, separators, ref words, static (ref List<string> l, string w) => l.Add(w));
-            tokenizeMs += Stopwatch.GetElapsedTime(ts).TotalMilliseconds;
-            foreach (var w0 in words)
-            {
-                string w = pool.TryGetValue(w0, out var ex) ? ex : (pool[w0] = w0);
-                ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(inverted, w, out bool exists);
-                if (!exists) { list = [doc]; totalLen += w.Length; } else list!.Add(doc);
-                totalPostings++;
-            }
-            if (e.Facets is { } f)
-                foreach (var name in new[] { "size", "modified", "attrs" }) { facetKeys.Add(name); pending.Add((doc, name, 0)); }
-        }
-        t["phase1_invertedMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
-        t["phase1_tokenizeOnlyMs"] = Math.Round(tokenizeMs, 1);
+        var sw = Stopwatch.StartNew();
+        int words = 0;
+        foreach (var (_, e) in entries)
+            TextNormalizer.ForEachUniqueWord(e.SearchText, unique, System.Buffers.SearchValues.Create(tok.IndexSeparators), ref words, static (ref int n, string _) => n++);
+        t["tokenizeOnlyMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
+
+        long a0 = GC.GetTotalAllocatedBytes(true);
         sw.Restart();
-        var desc = inverted.Select(kv => (Word: kv.Key, Ids: kv.Value)).ToList();
-        CollectionsMarshal.AsSpan(desc).Sort(static (x, y) => y.Word.Length.CompareTo(x.Word.Length));
-        t["phase2_sortMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
-        sw.Restart();
-        var words2 = new char[totalLen];
-        var postings = new int[totalPostings];
-        var exact = new Dictionary<string, (int, int)>(desc.Count, StringComparer.Ordinal);
-        int wo = 0, po = 0;
-        foreach (var (w, ids) in desc)
-        {
-            w.AsSpan().CopyTo(words2.AsSpan(wo));
-            exact[w] = (po, ids.Count);
-            foreach (var id in ids) postings[po++] = id;
-            wo += w.Length;
-        }
-        t["phase3_packMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
-        sw.Restart();
-        var bigrams = new Dictionary<int, List<int>>();
-        for (int i = 0; i < desc.Count; i++)
-        {
-            var w = desc[i].Word;
-            int prev = -1;
-            for (int j = 0; j + 1 < w.Length; j++)
-            {
-                int bg = (w[j] << 16) | w[j + 1];
-                if (bg == prev) continue;
-                prev = bg;
-                if (!bigrams.TryGetValue(bg, out var l)) bigrams[bg] = l = [];
-                if (l.Count == 0 || l[^1] != i) l.Add(i);
-            }
-        }
-        var bigramArrays = bigrams.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
-        t["phase4_bigramMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
-        sw.Restart();
-        var cols = facetKeys.ToDictionary(k => k, _ => new long[entries.Count]);
-        foreach (var (doc, name, v) in pending) cols[name][doc] = v;
-        t["phase5_facetsMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
+        var snapshot = IndexSnapshotBuilder.Build(entries, tok);
+        t["buildMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
         t["allocMB"] = Math.Round((GC.GetTotalAllocatedBytes(true) - a0) / 1048576.0, 1);
-        t["uniqueWords"] = desc.Count;
-        t["bigramKeys"] = bigramArrays.Count;
-        t["bigramPostings"] = bigramArrays.Sum(kv => (double)kv.Value.Length);
-        GC.KeepAlive(words2); GC.KeepAlive(postings); GC.KeepAlive(exact);
+        t["uniqueWords"] = snapshot.UniqueWordCount;
+
+        var engine = new SearchEngineSharp(new Bench.Fixed(snapshot));
+        sw.Restart();
+        engine.Find("ab", WordMatchMethod.Within);
+        t["firstWithinMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
+        sw.Restart();
+        engine.Find("ab", WordMatchMethod.Within);
+        t["secondWithinMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
         return t;
     }
-
-    static System.Buffers.SearchValues<char> TokIndex(SearchTokenization tok) => System.Buffers.SearchValues.Create(tok.IndexSeparators);
 }
