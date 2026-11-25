@@ -83,6 +83,14 @@ public sealed class SearchTokenization
     // Indexed text, split at the index separators as written and folded token by token (TextFolder.FoldRuns).
     internal string FoldIndexText(string text) => TextFolder.FoldRuns(text, UnicodeMatching, IndexSeparatorValues);
 
+    // The entry as IndexUpdater stores it: SearchText folded once, when the entry comes in, so that rebuilds after
+    // later changes do not fold it again (IndexSnapshotBuilder.BuildFolded). SortText and Facets stay as given.
+    internal IndexedEntry FoldEntry(IndexedEntry entry)
+    {
+        string folded = FoldIndexText(entry.SearchText);
+        return ReferenceEquals(folded, entry.SearchText) ? entry : entry with { SearchText = folded };
+    }
+
     // One query term, split at the query separators as written, after operators have been recognized on the query
     // as typed. Regex patterns are never folded.
     internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)

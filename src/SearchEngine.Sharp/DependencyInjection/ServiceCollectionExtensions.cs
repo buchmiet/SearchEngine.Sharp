@@ -81,7 +81,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(initialEntries);
         ArgumentNullException.ThrowIfNull(tokenization);
-        return AddIndexServices(services, key: null, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
+        return AddIndexServices(services, key: null, CopiedNow(initialEntries, tokenization), tokenization, ServiceLifetime.Scoped);
     }
 
     /// <summary>
@@ -129,6 +129,7 @@ public static class ServiceCollectionExtensions
             key: null,
             sp => new InitialIndex(CopyEntries(
                 entriesFactory(sp) ?? throw new InvalidOperationException("The entries factory returned null."),
+                tokenization,
                 nameof(entriesFactory))),
             tokenization,
             ServiceLifetime.Scoped);
@@ -192,7 +193,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(initialEntries);
         ArgumentNullException.ThrowIfNull(tokenization);
-        return AddIndexServices(services, key, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
+        return AddIndexServices(services, key, CopiedNow(initialEntries, tokenization), tokenization, ServiceLifetime.Scoped);
     }
 
     // The one registration of an index, keyed or not: a null key registers ordinary (non-keyed) services, and a
@@ -216,7 +217,7 @@ public static class ServiceCollectionExtensions
         {
             services.AddKeyedSingleton(key, (sp, _) => initialIndex(sp));
             services.AddKeyedSingleton(key, (sp, k) => new IndexSnapshotProvider(
-                IndexSnapshotBuilder.Build(sp.GetRequiredKeyedService<InitialIndex>(k).Entries, tokenization)));
+                IndexSnapshotBuilder.BuildFolded(sp.GetRequiredKeyedService<InitialIndex>(k).Entries, tokenization)));
             services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) => new IndexUpdater(
                 sp.GetRequiredKeyedService<IndexSnapshotProvider>(k),
                 tokenization,
@@ -233,21 +234,22 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // The entries an index starts with: the first snapshot is built from them and the updater starts from them.
+    // The entries an index starts with, folded once: the first snapshot is built from them and the updater starts
+    // from them.
     private sealed record InitialIndex(IReadOnlyDictionary<int, IndexedEntry> Entries);
 
     // Copies the entries at registration, so later changes to the caller's dictionary do not reach the index.
-    private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> initialEntries)
+    private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> initialEntries, SearchTokenization tokenization)
     {
-        var initial = new InitialIndex(CopyEntries(initialEntries, nameof(initialEntries)));
+        var initial = new InitialIndex(CopyEntries(initialEntries, tokenization, nameof(initialEntries)));
         return _ => initial;
     }
 
-    private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries, string paramName)
+    private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries, SearchTokenization tokenization, string paramName)
     {
         var copy = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (id, text) in entries)
-            copy[id] = IndexedEntry.FromText(id, text, paramName);
+            copy[id] = tokenization.FoldEntry(IndexedEntry.FromText(id, text, paramName));
         return copy;
     }
 }

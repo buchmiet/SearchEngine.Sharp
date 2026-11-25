@@ -77,14 +77,15 @@ public sealed class NameMatcher
     /// <returns><see langword="true"/> when the text matches. A regular expression that times out on any token
     /// gives <see langword="false"/>.</returns>
     /// <remarks>Texts of up to 256 characters are lowercased on the stack; longer ones use a pooled buffer. A text
-    /// with non-ASCII characters allocates a folded copy when the preset has Unicode options.</remarks>
+    /// with non-ASCII characters allocates a folded copy when the preset folds text (any Unicode option but
+    /// <see cref="UnicodeMatching.GraphemeBoundaries"/>).</remarks>
     public bool IsMatch(ReadOnlySpan<char> text)
     {
         if (_postfix is null && _regex is null)
             return false;
 
         string? folded = null;
-        if (_tokenization.UnicodeMatching != UnicodeMatching.None && !System.Text.Ascii.IsValid(text))
+        if ((_tokenization.UnicodeMatching & TextFolder.FoldingOptions) != 0 && !System.Text.Ascii.IsValid(text))
         {
             folded = _tokenization.FoldIndexText(text.ToString());
             text = folded;

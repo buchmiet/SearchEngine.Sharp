@@ -9,7 +9,8 @@ namespace SearchEngine.Snapshots;
 // ── Build algorithm (four phases) ────────────────────────────────────────────
 //
 // Phase 1: Build the inverted index (word → list of document ordinals).
-//   The text of each document is folded (SearchTokenization.FoldIndexText) and tokenized.
+//   The text of each document is folded (SearchTokenization.FoldIndexText; IndexUpdater stores it folded
+//   already) and tokenized.
 //   One HashSet<string>, cleared for every document, tracks the unique words of the
 //   current document, so duplicate words within one document do not generate
 //   duplicate postings (one entry per document, not per occurrence).
@@ -117,7 +118,8 @@ public static class IndexSnapshotBuilder
         SearchTokenization tokenization,
         IProgress<float>? progress)
     {
-        return BuildCore(entries, static text => text, static text => text, static _ => null, tokenization, progress);
+        ArgumentNullException.ThrowIfNull(tokenization);
+        return BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, progress);
     }
 
     /// <summary>
@@ -178,9 +180,21 @@ public static class IndexSnapshotBuilder
         SearchTokenization tokenization,
         IProgress<float>? progress)
     {
+        ArgumentNullException.ThrowIfNull(tokenization);
+        return BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, progress);
+    }
+
+    // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry): IndexUpdater folds
+    // each entry once when it comes in, so a rebuild after a change does not fold every stored text again.
+    internal static IndexSnapshot BuildFolded(
+        IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
+        SearchTokenization tokenization,
+        IProgress<float>? progress = null)
+    {
         return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, static entry => entry.Facets, tokenization, progress);
     }
 
+    // getSearchText returns the folded search text of an entry.
     private static IndexSnapshot BuildCore<TEntry>(
         IEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<TEntry, string> getSearchText,
@@ -235,7 +249,7 @@ public static class IndexSnapshotBuilder
                 totalPostings);
 
             TextNormalizer.ForEachUniqueWord(
-                tokenization.FoldIndexText(getSearchText(entry)),
+                getSearchText(entry),
                 uniqueWords,
                 indexSeparators,
                 ref buildState,

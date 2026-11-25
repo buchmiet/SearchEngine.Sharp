@@ -38,6 +38,7 @@ public sealed class IndexUpdater : IIndexUpdater
     private readonly IndexSnapshotProvider _provider;
     private readonly SearchTokenization _tokenization;
     private readonly Lock _rebuildGate = new();
+    // Every entry is stored with its SearchText folded (SearchTokenization.FoldEntry), so a rebuild folds nothing.
     private Dictionary<int, IndexedEntry> _entries;
 
     /// <summary>Creates an empty updater and publishes an empty snapshot with its preset to
@@ -58,6 +59,7 @@ public sealed class IndexUpdater : IIndexUpdater
 
     // Dependency injection: the provider already holds the snapshot of seed (or, without seed, the empty snapshot of
     // the preset), so nothing is published here and the first mutation rebuilds from seed instead of dropping it.
+    // The entries of seed are folded with tokenization already (SearchTokenization.FoldEntry).
     internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization, IReadOnlyDictionary<int, IndexedEntry>? seed)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
@@ -85,7 +87,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = IndexedEntry.FromText(key, value, nameof(entries));
+            next[key] = _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)));
 
         lock (_rebuildGate)
             ReplaceAll(next);
@@ -106,7 +108,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = IndexedEntry.Require(key, value, nameof(entries));
+            next[key] = _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)));
 
         lock (_rebuildGate)
             ReplaceAll(next);
@@ -129,7 +131,7 @@ public sealed class IndexUpdater : IIndexUpdater
     {
         var buffer = new Dictionary<int, IndexedEntry>();
         await foreach (var (key, value) in entries.WithCancellation(ct).ConfigureAwait(false))
-            buffer[key] = toEntry(key, value);
+            buffer[key] = _tokenization.FoldEntry(toEntry(key, value));
 
         lock (_rebuildGate)
             ReplaceAll(buffer, progress);
@@ -148,7 +150,7 @@ public sealed class IndexUpdater : IIndexUpdater
     public void AddEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        Apply([new Change(id, entry)]);
+        Apply([new Change(id, _tokenization.FoldEntry(entry))]);
     }
 
     /// <inheritdoc />
@@ -165,7 +167,7 @@ public sealed class IndexUpdater : IIndexUpdater
     public bool RefreshEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return Apply([new Change(id, entry)])[0].Previous is not null;
+        return Apply([new Change(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
     }
 
     // ── Batch operations (single rebuild) ──
@@ -176,7 +178,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         List<Change> changes = [];
         foreach (var (key, value) in entries)
-            changes.Add(new Change(key, IndexedEntry.FromText(key, value, nameof(entries))));
+            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)))));
 
         Apply(CollectionsMarshal.AsSpan(changes));
     }
@@ -187,7 +189,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         List<Change> changes = [];
         foreach (var (key, value) in entries)
-            changes.Add(new Change(key, IndexedEntry.Require(key, value, nameof(entries))));
+            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)))));
 
         Apply(CollectionsMarshal.AsSpan(changes));
     }
@@ -215,14 +217,14 @@ public sealed class IndexUpdater : IIndexUpdater
 
     private void RebuildAndPublish(IProgress<float>? progress = null)
     {
-        var snapshot = IndexSnapshotBuilder.Build(_entries, _tokenization, progress);
+        var snapshot = IndexSnapshotBuilder.BuildFolded(_entries, _tokenization, progress);
         _provider.Publish(snapshot);
     }
 
     // Full rebuild: the new entries become the source of truth only after their snapshot was built.
     private void ReplaceAll(Dictionary<int, IndexedEntry> next, IProgress<float>? progress = null)
     {
-        _provider.Publish(IndexSnapshotBuilder.Build(next, _tokenization, progress));
+        _provider.Publish(IndexSnapshotBuilder.BuildFolded(next, _tokenization, progress));
         _entries = next;
     }
 
