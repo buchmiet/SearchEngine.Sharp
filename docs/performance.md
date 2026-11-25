@@ -206,9 +206,10 @@ These are the settings of `Adaptive`, except where noted.
   results.
 - `MinTimerPublishBatch` (default 200) keeps a slow scan from rebuilding for a handful of new entries. Staleness
   overrides it.
-- `IngestPublishOptions.ChannelCapacity` (default 10,000, any policy) bounds the queue between scanner and publisher. When it is full the scanner
-  waits.
-- `IngestPublishOptions.FlushOnCancellation` (default `true`, any policy) publishes everything accepted when the scan is cancelled.
+- `IngestPublishOptions.ChannelCapacity` (default 10,000, any policy) bounds the queue between scanner and
+  publisher. When it is full the scanner waits.
+- `IngestPublishOptions.FlushOnCancellation` (default `true`, any policy) publishes everything accepted when the
+  scan is cancelled.
 
 ### `MaxStaleness` and the worst case
 

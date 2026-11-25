@@ -28,13 +28,8 @@ namespace SearchEngine.Ingestion;
 /// </remarks>
 /// <example>
 /// <code>
-/// var options = new IngestPublishOptions
-/// {
-///     Policy = new IngestPublishPolicy.Adaptive { BatchCap = 500, MaxStaleness = TimeSpan.FromMilliseconds(250) },
-/// };
-/// var fresher = options.Policy is IngestPublishPolicy.Adaptive adaptive
-///     ? options with { Policy = adaptive with { RebuildMultiplier = 1.0 } }
-///     : options;
+/// var adaptive = new IngestPublishPolicy.Adaptive { BatchCap = 500 };
+/// var options = new IngestPublishOptions { Policy = adaptive with { MaxStaleness = TimeSpan.FromMilliseconds(250) } };
 /// </code>
 /// </example>
 public closed record class IngestPublishPolicy
