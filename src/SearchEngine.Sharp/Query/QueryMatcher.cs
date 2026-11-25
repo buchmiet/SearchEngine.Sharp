@@ -109,7 +109,7 @@ internal static class QueryMatcher
     {
         var patternSpan = pattern.AsSpan();
         int minLen = GlobMatcher.MinMatchLength(patternSpan);
-        bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
+        bool hasStar = patternSpan.Contains('*');
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
         var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
         if (!shape.IsSpecialized)
