@@ -1,7 +1,15 @@
 namespace SearchEngine.Tokenizer;
 
+/// <summary>
+/// Reduces a name to its distinct lowercase tokens.
+/// </summary>
 public static class NameTokenizer
 {
+    /// <summary>
+    /// Splits <paramref name="name"/> at every character that is not a letter or digit, lowercases each token
+    /// (invariant culture), drops repeated tokens (the first occurrence stays) and joins the rest with
+    /// <paramref name="joinCharacter"/>. Returns an empty string for a null, empty or whitespace name.
+    /// </summary>
     public static string TokenizeName(string? name, string joinCharacter = "-")
     {
         if (string.IsNullOrWhiteSpace(name))

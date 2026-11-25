@@ -3,6 +3,11 @@ namespace SearchEngine.Filters;
 /// <summary>
 /// AND-combined facet predicates applied after the text expression is evaluated.
 /// </summary>
+/// <remarks>
+/// A document that was indexed without a value for a facet that other documents carry has the value 0 for it.
+/// A query throws <see cref="ArgumentException"/> when a predicate names a facet that no document in the snapshot
+/// carries, unless the index is empty or the text expression matches no documents.
+/// </remarks>
 public sealed class FacetFilter
 {
     /// <summary>
@@ -31,7 +36,8 @@ public sealed class FacetFilter
         => new([FacetPredicate.Range(facet, minInclusive, maxInclusive)]);
 
     /// <summary>
-    /// Creates a filter with one bitmask predicate.
+    /// Creates a filter with one bitmask predicate: a document matches when all bits of
+    /// <paramref name="mustHave"/> are set in its value and no bit of <paramref name="mustNot"/> is.
     /// </summary>
     public static FacetFilter Mask(string facet, long mustHave, long mustNot = 0)
         => new([FacetPredicate.Mask(facet, mustHave, mustNot)]);

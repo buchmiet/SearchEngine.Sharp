@@ -4,8 +4,13 @@ using System.Runtime.InteropServices;
 
 namespace SearchEngine.Tokenizer;
 
+/// <summary>
+/// Splits text into words at separator characters and lowercases them (invariant culture) the way the index does.
+/// The overloads without a separator set use the index separators of <see cref="SearchTokenization.Default"/>.
+/// </summary>
 public static class TextNormalizer
 {
+    /// <summary>Callback for <c>ForEachUniqueWord</c>, invoked once for each distinct lowercase word.</summary>
     public delegate void UniqueWordAction<TState>(ref TState state, string word);
 
     private static readonly SearchValues<char> DefaultSeparatorValues = SearchSeparators.IndexText;
@@ -21,6 +26,9 @@ public static class TextNormalizer
     public static List<string> GetWordsFromString(string text)
         => GetWordsFromString(text, DefaultSeparatorValues);
 
+    /// <summary>
+    /// Returns the distinct lowercase words of <paramref name="text"/>, longest first.
+    /// </summary>
     public static List<string> GetWordsFromString(string text, SearchValues<char> separators)
     {
         var words = new List<string>();
@@ -39,6 +47,11 @@ public static class TextNormalizer
         UniqueWordAction<TState> action)
         => ForEachUniqueWord(text, uniqueWords, DefaultSeparatorValues, ref state, action);
 
+    /// <summary>
+    /// Calls <paramref name="action"/> once for each distinct lowercase word of <paramref name="text"/>, in order of
+    /// first occurrence. <paramref name="uniqueWords"/> is cleared first and holds the words afterwards.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="uniqueWords"/> does not compare ordinally.</exception>
     public static void ForEachUniqueWord<TState>(
         string text,
         HashSet<string> uniqueWords,

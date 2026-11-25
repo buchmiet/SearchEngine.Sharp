@@ -48,16 +48,27 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers services and publishes a pre-built initial snapshot.
+    /// Registers services and publishes an initial snapshot built from <paramref name="initialEntries"/>.
     /// </summary>
+    /// <remarks>
+    /// The snapshot is built when this method is called. The registered <see cref="IIndexUpdater"/> does not hold
+    /// <paramref name="initialEntries"/>: its first mutation rebuilds the snapshot from the entries given to the
+    /// updater only.
+    /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         IDictionary<int, string> initialEntries)
         => AddSearchEngine(services, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers services and publishes a pre-built initial snapshot.
+    /// Registers services with a tokenization preset and publishes an initial snapshot built from
+    /// <paramref name="initialEntries"/>.
     /// </summary>
+    /// <remarks>
+    /// The snapshot is built when this method is called. The registered <see cref="IIndexUpdater"/> does not hold
+    /// <paramref name="initialEntries"/>: its first mutation rebuilds the snapshot from the entries given to the
+    /// updater only.
+    /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         IDictionary<int, string> initialEntries,
@@ -105,7 +116,9 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers keyed services with a pre-built initial snapshot.
+    /// Registers keyed services and publishes an initial snapshot built from <paramref name="initialEntries"/>.
+    /// The keyed <see cref="IIndexUpdater"/> does not hold these entries (see
+    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>).
     /// </summary>
     public static IServiceCollection AddKeyedSearchEngine(
         this IServiceCollection services,
@@ -114,7 +127,9 @@ public static class ServiceCollectionExtensions
         => AddKeyedSearchEngine(services, key, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers keyed services with a pre-built initial snapshot and tokenization preset.
+    /// Registers keyed services with a tokenization preset and publishes an initial snapshot built from
+    /// <paramref name="initialEntries"/>. The keyed <see cref="IIndexUpdater"/> does not hold these entries (see
+    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>).
     /// </summary>
     public static IServiceCollection AddKeyedSearchEngine(
         this IServiceCollection services,
@@ -140,8 +155,13 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers services and builds the initial snapshot from a factory delegate.
+    /// Registers services and publishes the snapshot returned by <paramref name="snapshotFactory"/>, which runs
+    /// when the <see cref="IndexSnapshotProvider"/> is first resolved.
     /// </summary>
+    /// <remarks>
+    /// The registered <see cref="IIndexUpdater"/> uses <see cref="SearchTokenization.Default"/> and does not hold
+    /// the entries of the factory's snapshot.
+    /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         Func<IServiceProvider, IndexSnapshot> snapshotFactory)

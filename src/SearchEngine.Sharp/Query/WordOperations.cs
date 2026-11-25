@@ -7,7 +7,7 @@ namespace SearchEngine.Query;
 // no precedence value and are handled specially in the shunting-yard algorithm.
 internal enum WordOperations
 {
-    None,           // not an operator — marks a word token
+    None,           // not an operator: marks a word token
     Or,
     Not,
     And,

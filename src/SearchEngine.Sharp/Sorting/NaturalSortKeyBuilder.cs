@@ -8,6 +8,7 @@ namespace SearchEngine.Sorting;
 /// <list type="number">
 /// <item>The input is split into tokens at separators (-, space, _, /).</item>
 /// <item>Consecutive letters and digits within a segment are split into separate tokens.</item>
+/// <item>Any other character (punctuation, symbols) forms a one-character text token.</item>
 /// <item>Numeric tokens sort before text tokens at the same position.</item>
 /// <item>Numbers are compared numerically (via zero-padded representation).</item>
 /// <item>Text tokens are compared case-insensitively.</item>
@@ -15,7 +16,8 @@ namespace SearchEngine.Sorting;
 /// </list>
 ///
 /// Key format: tokens joined by '|', each prefixed with '0:' (number) or '1:' (text).
-/// Numbers are zero-padded to 12 digits.
+/// Numbers are zero-padded to 12 digits. A digit run longer than 12 digits is kept in full, so numbers
+/// above 12 digits are not ordered numerically against numbers of a different length.
 /// </remarks>
 public static class NaturalSortKeyBuilder
 {
@@ -35,7 +37,7 @@ public static class NaturalSortKeyBuilder
             return string.Empty;
 
         int maxLen = sortText.Length * MaxCharsPerInputChar;
-        // stackalloc for typical model names (≤64 chars → buffer ≤960 chars)
+        // stackalloc for typical names (≤64 chars → buffer ≤960 chars)
         Span<char> buffer = maxLen <= 960
             ? stackalloc char[maxLen]
             : new char[maxLen];

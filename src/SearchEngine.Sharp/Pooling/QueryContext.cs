@@ -8,12 +8,13 @@ namespace SearchEngine.Pooling;
 // Why pooling?
 //   Evaluating a boolean expression (e.g. "cat AND (dog OR bird) NOT fish")
 //   creates several intermediate bitsets. Without pooling each bitset allocates
-//   a new ulong[] — for 1M documents that is 125 KB per bitset, enough to
-//   trigger Gen2 GC under sustained query load.
+//   a new ulong[]. For 1M documents that is 125 KB per bitset, above the 85,000-byte
+//   large object heap threshold, so sustained query load would put pressure on
+//   Gen2 collections.
 //
 // How it works:
 //   All ulong[] buffers are rented from ArrayPool<ulong>.Shared on first use
-//   and returned in Dispose(). FastBitSet wraps the rented buffer — it does
+//   and returned in Dispose(). FastBitSet wraps the rented buffer and does
 //   not own it. QueryContext is created per-query (using var qc = new QueryContext(...))
 //   so all leases are released when the query completes.
 //

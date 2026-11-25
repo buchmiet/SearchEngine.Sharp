@@ -8,8 +8,8 @@ namespace SearchEngine.Snapshots;
 // All unique words are packed consecutively into a single char[] (WordsArray).
 // Parallel arrays indexed by word ordinal i describe each word's slice:
 //
-//   WordLengths[i]  — length of word i in characters
-//   WordEnds[i]     — exclusive end offset in WordsArray, so word i occupies
+//   WordLengths[i]  : length of word i in characters
+//   WordEnds[i]     : exclusive end offset in WordsArray, so word i occupies
 //                     WordsArray[ WordEnds[i]-WordLengths[i] .. WordEnds[i] )
 //
 // Words are stored in descending order of length. This allows the infix search
@@ -18,8 +18,8 @@ namespace SearchEngine.Snapshots;
 // Posting lists (which documents contain each word) are packed into PostingDocIds[].
 // Parallel arrays describe each word's slice of that flat list:
 //
-//   PostingOffsets[i]  — start offset in PostingDocIds
-//   PostingCounts[i]   — number of entries
+//   PostingOffsets[i]  : start offset in PostingDocIds
+//   PostingCounts[i]   : number of entries
 //
 // PostingDocIds contains document *ordinals* (positions in RecordIds[]), not
 // the caller-supplied IDs. The final translation ordinal → caller ID happens
@@ -85,18 +85,18 @@ public sealed class IndexSnapshot
     // Navigate using PostingOffsets + PostingCounts.
     internal readonly int[] PostingDocIds;
 
-    // PostingOffsets[i] — start of word i's posting list in PostingDocIds.
+    // PostingOffsets[i]: start of word i's posting list in PostingDocIds.
     internal readonly int[] PostingOffsets;
 
-    // WordEnds[i] — exclusive end of word i in WordsArray. Word i occupies
+    // WordEnds[i]: exclusive end of word i in WordsArray. Word i occupies
     // WordsArray[ WordEnds[i]-WordLengths[i] .. WordEnds[i] ).
     internal readonly int[] WordEnds;
 
-    // WordLengths[i] — character length of word i. Stored in descending order,
+    // WordLengths[i]: character length of word i. Stored in descending order,
     // enabling early exit in MatchWithin: stop when WordLengths[i] < queryLength.
     internal readonly int[] WordLengths;
 
-    // PostingCounts[i] — number of documents that contain word i.
+    // PostingCounts[i]: number of documents that contain word i.
     internal readonly int[] PostingCounts;
 
     // Bigram index: first two characters of query packed as (char0 << 16 | char1)

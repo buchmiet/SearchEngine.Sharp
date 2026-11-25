@@ -1,7 +1,7 @@
 namespace SearchEngine.Ingestion;
 
 /// <summary>
-/// Outcome of a completed or cancelled <see cref="ProgressiveIndexIngestion.IngestAsync"/> call.
+/// Outcome of a completed or cancelled <c>ProgressiveIndexIngestion.IngestAsync</c> call.
 /// </summary>
 public sealed class IngestionResult
 {

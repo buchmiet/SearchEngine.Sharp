@@ -47,8 +47,7 @@ internal static class QueryMatcher
         var wordsArray = snapshot.WordsArray.AsSpan();
         var wordLengths = snapshot.WordLengths.AsSpan();
 
-        // Infix matching is single-threaded. Parallel candidate splitting is available in
-        // benchmarks/SearchEngine.Sharp.Benchmarks for measurement; it is not part of the library API.
+        // Infix matching runs on the calling thread.
 
         // For queries of length >= 2 use the bigram index to prune candidates.
         // The bigram maps to word indices already in length-descending order,
@@ -175,8 +174,7 @@ internal static class QueryMatcher
         return result;
     }
 
-    // Finds target inside word with one vectorized IndexOf (instead of comparing a sliding window at every
-    // position). With UnicodeMatching.GraphemeBoundaries a match must start and end on grapheme cluster boundaries
+    // Finds target inside word with one vectorized IndexOf. With UnicodeMatching.GraphemeBoundaries a match must start and end on grapheme cluster boundaries
     // (TextFolder.IndexOfOnGraphemeBoundaries). Also used by NameMatcher and by *x* globs (GlobMatcher.Shape).
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)

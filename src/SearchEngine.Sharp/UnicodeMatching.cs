@@ -47,8 +47,8 @@ public enum UnicodeMatching
     /// <summary>
     /// Matches must not split an extended grapheme cluster (UAX #29): a <see cref="WordMatchMethod.Within"/> match
     /// starts and ends on cluster boundaries, and so does every place where a glob <c>*</c> or <c>?</c> meets
-    /// literal text. <c>cafe</c> and <c>cafe*</c> no longer match a decomposed <c>café</c>, and one emoji (or
-    /// emoji followed by <c>*</c>) no longer matches inside a ZWJ sequence. Exact matches without wildcards are whole
+    /// literal text. <c>cafe</c> and <c>cafe*</c> do not match a decomposed <c>café</c>, and one emoji (or
+    /// emoji followed by <c>*</c>) does not match inside a ZWJ sequence. Exact matches without wildcards are whole
     /// tokens and need no check.
     /// </summary>
     GraphemeBoundaries = 8,
@@ -58,7 +58,7 @@ internal static class TextFolder
 {
     // Globalization-invariant mode (InvariantGlobalization, DOTNET_SYSTEM_GLOBALIZATION_INVARIANT; the default for
     // some trimmed and container deployments) has no normalization data: string.Normalize returns its input and
-    // IsNormalized reports true, so Compose and RemoveDiacritics would silently match nothing. A decomposed é is not
+    // IsNormalized reports true, so Compose and RemoveDiacritics would silently have no effect. A decomposed é is not
     // NFC wherever normalization works.
     internal static bool IsNormalizationAvailable { get; } = !"e\u0301".IsNormalized(NormalizationForm.FormC);
 

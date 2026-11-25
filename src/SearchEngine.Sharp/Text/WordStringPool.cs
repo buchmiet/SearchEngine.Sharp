@@ -8,8 +8,8 @@ namespace SearchEngine.Text;
 /// During index build, thousands of documents may contain the same word. Without
 /// canonicalization each occurrence produces a separate string object on the heap.
 /// The pool returns the first-seen instance for any given word, so all references
-/// to, say, "apple" point to the same object — halving dictionary memory for
-/// vocabularies with high document coverage.
+/// to, say, "apple" point to the same object, so the memory for a word is paid once
+/// however many documents contain it.
 /// </remarks>
 internal sealed class WordStringPool
 {

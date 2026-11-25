@@ -18,9 +18,9 @@ namespace SearchEngine.Index;
 //   ExceptWith    → AND NOT (documents matching A but not B; used to implement NOT)
 //
 // Each SIMD operation processes multiple ulongs per loop iteration:
-//   AVX2  (x64)   — 256-bit registers = 4 ulongs per iteration
-//   AdvSimd (ARM) — 128-bit registers = 2 ulongs per iteration
-//   Scalar        — 1 ulong per iteration (fallback)
+//   AVX2  (x64)   : 256-bit registers = 4 ulongs per iteration
+//   AdvSimd (ARM) : 128-bit registers = 2 ulongs per iteration
+//   Scalar        : 1 ulong per iteration (fallback)
 //
 // The width threshold guards (>= 4 or >= 2) prevent entering a SIMD loop that
 // can never execute a single full-width iteration.
@@ -153,7 +153,7 @@ internal sealed class FastBitSet
 
     /// <summary>
     /// Writes set-bit ordinals into <paramref name="destination"/> and returns the count written.
-    /// Uses trailing-zero-count per ulong word — O(N/64 + K) instead of O(N) Get() scans.
+    /// Uses trailing-zero-count per ulong word, so the cost is O(N/64 + K) for a set of length N with K set bits.
     /// </summary>
     internal int CopySetBitOrdinals(Span<int> destination)
     {
@@ -239,7 +239,7 @@ internal sealed class FastBitSet
             {
                 var left = AdvSimd.LoadVector128(leftBase + i);
                 var right = AdvSimd.LoadVector128(rightBase + i);
-                // ARM BIC: left & ~right — single instruction
+                // ARM BIC: left & ~right in a single instruction
                 AdvSimd.Store(leftBase + i, AdvSimd.BitwiseClear(left, right));
             }
 
