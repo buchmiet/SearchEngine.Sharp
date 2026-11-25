@@ -19,14 +19,7 @@ public static class ServiceCollectionExtensions
     /// Registers SearchEngine.Sharp with a tokenization preset for all index rebuilds.
     /// </summary>
     public static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization)
-    {
-        services.AddSingleton<IndexSnapshotProvider>();
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
-    }
+        => AddServices(services, providerFactory: null, tokenization, ServiceLifetime.Scoped);
 
     /// <summary>
     /// Same as AddSearchEngine, but registers ISearchEngine as transient.
@@ -38,14 +31,7 @@ public static class ServiceCollectionExtensions
     /// Same as AddSearchEngine with a tokenization preset, but registers ISearchEngine as transient.
     /// </summary>
     public static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization)
-    {
-        services.AddSingleton<IndexSnapshotProvider>();
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
-        services.AddTransient<ISearchEngine, SearchEngineSharp>();
-        return services;
-    }
+        => AddServices(services, providerFactory: null, tokenization, ServiceLifetime.Transient);
 
     /// <summary>
     /// Registers services and publishes a pre-built initial snapshot.
@@ -64,18 +50,7 @@ public static class ServiceCollectionExtensions
         SearchTokenization tokenization)
     {
         var snapshot = IndexSnapshotBuilder.Build(initialEntries, tokenization);
-
-        services.AddSingleton<IndexSnapshotProvider>(_ =>
-        {
-            var provider = new IndexSnapshotProvider();
-            provider.Publish(snapshot);
-            return provider;
-        });
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
+        return AddServices(services, _ => ProviderPublishing(snapshot), tokenization, ServiceLifetime.Scoped);
     }
 
     /// <summary>
@@ -93,16 +68,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         string key,
         SearchTokenization tokenization)
-    {
-        services.AddKeyedSingleton<IndexSnapshotProvider>(key);
-        services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
-            sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
-        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization));
-        services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
-            new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
-        return services;
-    }
+        => AddKeyedServices(services, key, initialSnapshot: null, tokenization);
 
     /// <summary>
     /// Registers keyed services with a pre-built initial snapshot.
@@ -121,15 +87,49 @@ public static class ServiceCollectionExtensions
         string key,
         IDictionary<int, string> initialEntries,
         SearchTokenization tokenization)
-    {
-        var snapshot = IndexSnapshotBuilder.Build(initialEntries, tokenization);
+        => AddKeyedServices(services, key, IndexSnapshotBuilder.Build(initialEntries, tokenization), tokenization);
 
-        services.AddKeyedSingleton<IndexSnapshotProvider>(key, (_, _) =>
-        {
-            var provider = new IndexSnapshotProvider();
-            provider.Publish(snapshot);
-            return provider;
-        });
+    /// <summary>
+    /// Registers services and builds the initial snapshot from a factory delegate.
+    /// </summary>
+    public static IServiceCollection AddSearchEngine(
+        this IServiceCollection services,
+        Func<IServiceProvider, IndexSnapshot> snapshotFactory)
+        => AddServices(services, sp => ProviderPublishing(snapshotFactory(sp)), tokenization: null, ServiceLifetime.Scoped);
+
+    // providerFactory null: an empty provider. tokenization null: the container constructs IndexUpdater.
+    private static IServiceCollection AddServices(
+        IServiceCollection services,
+        Func<IServiceProvider, IndexSnapshotProvider>? providerFactory,
+        SearchTokenization? tokenization,
+        ServiceLifetime engineLifetime)
+    {
+        if (providerFactory is null)
+            services.AddSingleton<IndexSnapshotProvider>();
+        else
+            services.AddSingleton(providerFactory);
+
+        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
+        if (tokenization is null)
+            services.AddSingleton<IIndexUpdater, IndexUpdater>();
+        else
+            services.AddSingleton<IIndexUpdater>(sp => new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
+
+        services.Add(ServiceDescriptor.Describe(typeof(ISearchEngine), typeof(SearchEngineSharp), engineLifetime));
+        return services;
+    }
+
+    private static IServiceCollection AddKeyedServices(
+        IServiceCollection services,
+        string key,
+        IndexSnapshot? initialSnapshot,
+        SearchTokenization tokenization)
+    {
+        if (initialSnapshot is null)
+            services.AddKeyedSingleton<IndexSnapshotProvider>(key);
+        else
+            services.AddKeyedSingleton(key, (_, _) => ProviderPublishing(initialSnapshot));
+
         services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
             sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
         services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
@@ -139,23 +139,10 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Registers services and builds the initial snapshot from a factory delegate.
-    /// </summary>
-    public static IServiceCollection AddSearchEngine(
-        this IServiceCollection services,
-        Func<IServiceProvider, IndexSnapshot> snapshotFactory)
+    private static IndexSnapshotProvider ProviderPublishing(IndexSnapshot snapshot)
     {
-        services.AddSingleton<IndexSnapshotProvider>(sp =>
-        {
-            var provider = new IndexSnapshotProvider();
-            var snapshot = snapshotFactory(sp);
-            provider.Publish(snapshot);
-            return provider;
-        });
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater, IndexUpdater>();
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
+        var provider = new IndexSnapshotProvider();
+        provider.Publish(snapshot);
+        return provider;
     }
 }
