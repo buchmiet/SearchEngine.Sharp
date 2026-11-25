@@ -317,8 +317,8 @@ All properties are `init`-only.
 | `ChannelCapacity` | 10,000 | Size of the queue between scanner and publisher |
 | `FlushOnCancellation` | `true` | Publish accepted entries when the scan is cancelled |
 
-`FixedBatchSize`, `MinTimerPublishBatch` and `ChannelCapacity` must be at least 1, `MaxStaleness` and
-`AdaptiveMultiplier` positive, and `MinInterval` not negative.
+`FixedBatchSize`, `MinTimerPublishBatch` and `ChannelCapacity` must be at least 1, `MaxStaleness` positive,
+`AdaptiveMultiplier` finite and positive, and `MinInterval` not negative.
 
 ### `IngestionProgress` (struct)
 

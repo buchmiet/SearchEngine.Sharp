@@ -29,7 +29,8 @@ public sealed class IngestPublishOptions
 
     /// <summary>
     /// Gets the multiplier <c>k</c> of the adaptive interval <c>max(MinInterval, k × lastRebuildDuration)</c>,
-    /// which also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be positive. Defaults to 2.
+    /// which also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be finite and positive. Defaults
+    /// to 2.
     /// </summary>
     public double AdaptiveMultiplier { get; init; } = 2.0;
 
@@ -107,8 +108,8 @@ public sealed class IngestPublishOptions
         if (MinTimerPublishBatch < 1)
             throw new ArgumentOutOfRangeException(nameof(MinTimerPublishBatch), "Must be at least 1.");
 
-        if (AdaptiveMultiplier <= 0)
-            throw new ArgumentOutOfRangeException(nameof(AdaptiveMultiplier), "Must be positive.");
+        if (!double.IsFinite(AdaptiveMultiplier) || AdaptiveMultiplier <= 0)
+            throw new ArgumentOutOfRangeException(nameof(AdaptiveMultiplier), "Must be a finite positive number.");
 
         if (ChannelCapacity < 1)
             throw new ArgumentOutOfRangeException(nameof(ChannelCapacity), "Must be at least 1.");
