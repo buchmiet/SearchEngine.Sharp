@@ -56,10 +56,13 @@ string QuerySeparators { get; }
 See [query-semantics.md](query-semantics.md#tokenization-presets) for preset tables and
 FileMask behavioral notes.
 
+`WithUnicodeMatching` throws `PlatformNotSupportedException` for `Compose` or `RemoveDiacritics` in
+globalization-invariant mode, which has no Unicode normalization.
+
 ### `UnicodeMatching` (flags)
 
 ```csharp
-None = 0, Compose = 1 /* NFC */, CaseFold = 2, RemoveDiacritics = 4 /* implies Compose */, GraphemeBoundaries = 8 /* Within only */
+None = 0, Compose = 1 /* NFC */, CaseFold = 2, RemoveDiacritics = 4 /* implies Compose */, GraphemeBoundaries = 8 /* Within and glob wildcards */
 ```
 
 ### `IIndexUpdater`

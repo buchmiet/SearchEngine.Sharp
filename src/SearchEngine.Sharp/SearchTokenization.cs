@@ -50,13 +50,30 @@ public sealed class SearchTokenization
     /// <c>SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold)</c>.
     /// The options are stored in each snapshot, so indexed text and queries are always folded alike.
     /// </summary>
+    /// <exception cref="PlatformNotSupportedException">
+    /// <paramref name="options"/> contains <see cref="UnicodeMatching.Compose"/> or
+    /// <see cref="UnicodeMatching.RemoveDiacritics"/> and the process runs in globalization-invariant mode, which has
+    /// no Unicode normalization.
+    /// </exception>
     public SearchTokenization WithUnicodeMatching(UnicodeMatching options)
-        => new(IndexSeparators, QuerySeparators, options);
+    {
+        if ((options & (UnicodeMatching.Compose | UnicodeMatching.RemoveDiacritics)) != 0 && !TextFolder.IsNormalizationAvailable)
+        {
+            throw new PlatformNotSupportedException(
+                "UnicodeMatching.Compose and UnicodeMatching.RemoveDiacritics need Unicode normalization, which is not "
+                + "available in globalization-invariant mode (InvariantGlobalization or DOTNET_SYSTEM_GLOBALIZATION_INVARIANT).");
+        }
 
-    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching, isRegex: false);
+        return new(IndexSeparators, QuerySeparators, options);
+    }
 
-    internal string FoldQuery(string expression, WordMatchMethod method)
-        => TextFolder.Fold(expression, UnicodeMatching, isRegex: method == WordMatchMethod.Regex);
+    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
+
+    // One query term, after operators were recognized on the query as typed. Regex patterns are never folded.
+    internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
+        => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
+            ? term
+            : TextFolder.Fold(term.ToString(), UnicodeMatching);
 
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 

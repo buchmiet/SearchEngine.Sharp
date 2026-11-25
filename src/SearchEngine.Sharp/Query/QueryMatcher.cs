@@ -110,9 +110,10 @@ internal static class QueryMatcher
         var patternSpan = pattern.AsSpan();
         int minLen = GlobMatcher.MinMatchLength(patternSpan);
         bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
-        var shape = new GlobMatcher.Shape(patternSpan);
+        bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
+        var shape = new GlobMatcher.Shape(patternSpan, graphemeBoundaries);
         if (!shape.IsSpecialized)
-            return MatchGlobGeneral(patternSpan, minLen, hasStar, qc, snapshot);
+            return MatchGlobGeneral(patternSpan, minLen, hasStar, graphemeBoundaries, qc, snapshot);
 
         var result = qc.RentEmptyBitSet();
         var wordsArray = snapshot.WordsArray.AsSpan();
@@ -140,7 +141,13 @@ internal static class QueryMatcher
         return result;
     }
 
-    private static FastBitSet MatchGlobGeneral(ReadOnlySpan<char> patternSpan, int minLen, bool hasStar, QueryContext qc, IndexSnapshot snapshot)
+    private static FastBitSet MatchGlobGeneral(
+        ReadOnlySpan<char> patternSpan,
+        int minLen,
+        bool hasStar,
+        bool graphemeBoundaries,
+        QueryContext qc,
+        IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
         var wordsArray = snapshot.WordsArray.AsSpan();
@@ -156,7 +163,7 @@ internal static class QueryMatcher
                 continue;
 
             int wordStart = snapshot.WordEnds[wordIndex] - wordLength;
-            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength)))
+            if (!GlobMatcher.IsWholeWordMatch(patternSpan, wordsArray.Slice(wordStart, wordLength), graphemeBoundaries))
                 continue;
 
             int postingOffset = snapshot.PostingOffsets[wordIndex];
@@ -168,15 +175,10 @@ internal static class QueryMatcher
         return result;
     }
 
-    // Only called on a candidate match when UnicodeMatching.GraphemeBoundaries is set.
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static bool IsOnGraphemeBoundaries(ReadOnlySpan<char> word, int start, int length)
-        => Ascii.IsValid(word) || TextFolder.IsOnGraphemeBoundaries(word, start, length);
-
     // Finds target inside wordsArray[searchStart..searchEnd) with one vectorized IndexOf (instead of comparing
     // a sliding window at every position). On a match, all documents that contain the indexed word are added to
     // result; one match per word is enough. With UnicodeMatching.GraphemeBoundaries a match must start and end on
-    // grapheme cluster boundaries, so later occurrences are tried when the first one splits a cluster.
+    // grapheme cluster boundaries (TextFolder.IndexOfOnGraphemeBoundaries).
     private static void MatchSubstring(
         FastBitSet result,
         ReadOnlySpan<char> target,
@@ -189,19 +191,9 @@ internal static class QueryMatcher
         bool graphemeBoundaries)
     {
         var word = wordsArray[searchStart..searchEnd];
-        int from = 0;
-        while (true)
-        {
-            int index = word[from..].IndexOf(target);
-            if (index < 0)
-                return;
-
-            index += from;
-            if (!graphemeBoundaries || IsOnGraphemeBoundaries(word, index, target.Length))
-                break;
-
-            from = index + 1;
-        }
+        int index = graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, target) : word.IndexOf(target);
+        if (index < 0)
+            return;
 
         for (int k = 0; k < postingCount; k++)
             result.Add(postingDocIds[postingOffset + k]);

@@ -28,8 +28,6 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false)
     {
         var snapshot = snapshotProvider.Current;
-        expression = snapshot.Tokenization.FoldQuery(expression, method);
-
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return 0;
 
@@ -38,7 +36,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
                     expression.AsSpan(),
                     enableOperators,
-                    snapshot.Tokenization.QuerySeparatorValues,
+                    snapshot.Tokenization,
                     out var singleWord)
                 && !GlobMatcher.ContainsMetacharacters(singleWord!))
             {
@@ -57,8 +55,6 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators, FacetFilter? filter)
     {
         var snapshot = snapshotProvider.Current;
-        expression = snapshot.Tokenization.FoldQuery(expression, method);
-
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return 0;
 
@@ -86,8 +82,6 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     public List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode)
     {
         var snapshot = snapshotProvider.Current;
-        expression = snapshot.Tokenization.FoldQuery(expression, method);
-
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return [];
 
@@ -96,7 +90,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             && QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
                 enableOperators,
-                snapshot.Tokenization.QuerySeparatorValues,
+                snapshot.Tokenization,
                 out var singleWord)
             && !GlobMatcher.ContainsMetacharacters(singleWord!))
         {
@@ -122,8 +116,6 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         FacetFilter? filter)
     {
         var snapshot = snapshotProvider.Current;
-        expression = snapshot.Tokenization.FoldQuery(expression, method);
-
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return [];
 
@@ -167,7 +159,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
                 enableOperators,
-                snapshot.Tokenization.QuerySeparatorValues,
+                snapshot.Tokenization,
                 out var singleWord)
             || GlobMatcher.ContainsMetacharacters(singleWord!))
             return false;
@@ -194,7 +186,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
             || !QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
                 enableOperators,
-                snapshot.Tokenization.QuerySeparatorValues,
+                snapshot.Tokenization,
                 out var singleWord)
             || GlobMatcher.ContainsMetacharacters(singleWord!))
             return false;
@@ -268,7 +260,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),
                 enableOperators,
-                snapshot.Tokenization.QuerySeparatorValues,
+                snapshot.Tokenization,
                 out var singleWord))
             return QueryMatcher.Match(singleWord!, method, queryContext, snapshot);
 

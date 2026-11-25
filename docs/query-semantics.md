@@ -89,17 +89,28 @@ query and vice versa; `ß` ≠ `ss`, final `ς` ≠ `σ`, and `İ` stays `İ`; `
 cluster (`cafe` inside a decomposed `café`, one emoji inside a ZWJ family sequence).
 
 `SearchTokenization.WithUnicodeMatching(UnicodeMatching)` opts in per preset (stored in each snapshot,
-applied to indexed `SearchText` and to queries; ASCII text is never touched):
+applied to indexed `SearchText` and to each query term; ASCII text is never touched). Operators are recognized
+in the query as typed, before folding, so under `RemoveDiacritics` the words `nöt`, `ånd` and `ør` stay terms:
 
 | Flag | Effect |
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
-| `CaseFold` | `ß`/`ẞ`→`ss`, `ς`→`σ`, `İ`→`i`, `ſ`→`s`, `µ`→`μ`, Greek symbol variants, ligatures U+FB00–FB06. Not applied to regex patterns |
-| `RemoveDiacritics` | drops combining marks after decomposition (`é`→`e`), plus `ł ø đ ħ ı` → `l o d h i`; implies `Compose` |
-| `GraphemeBoundaries` | `Within` matches must start and end on extended grapheme cluster boundaries (UAX #29) |
+| `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
+| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose` |
+| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`) |
 
-Regex patterns are composed (and stripped of diacritics with `RemoveDiacritics`) but not case-folded,
-because folding would change character classes; write `ss` for a folded `ß`. `SortText` is never folded.
+Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
+would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so
+write it in folded form: `ss` for `ß` under `CaseFold`, `e` for `é` under `RemoveDiacritics`, precomposed letters
+under `Compose`. `SortText` is never folded.
+
+`Compose` and `RemoveDiacritics` need the Unicode normalization data of ICU (or NLS). Globalization-invariant mode
+(`<InvariantGlobalization>true</InvariantGlobalization>` or `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`, common in
+trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
+for them there; `CaseFold` and `GraphemeBoundaries` work in every mode.
+
+Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and U+FFFE cannot be normalized: those code
+units are kept as they are and the text around them is folded, so such a name still matches itself.
 
 ## Index-side tokenization (Default preset)
 

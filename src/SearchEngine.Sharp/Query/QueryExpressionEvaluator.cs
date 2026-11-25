@@ -14,44 +14,26 @@ internal static class QueryExpressionEvaluator
     // QueryMatcher.Match. This is the common case for simple type-ahead search.
     internal static bool TryGetSingleWord(
         ReadOnlySpan<char> expression,
-        SearchValues<char> separators,
+        SearchTokenization tokenization,
         out string? word)
     {
         word = null;
+        var separators = tokenization.QuerySeparatorValues;
 
-        int wordStart = -1;
-        bool hasWord = false;
+        int start = expression.IndexOfAnyExcept(separators);
+        if (start < 0)
+            return false;
 
-        for (int i = 0; i < expression.Length; i++)
-        {
-            if (separators.Contains(expression[i]))
-            {
-                if (wordStart < 0)
-                    continue;
+        int length = expression[start..].IndexOfAny(separators);
+        if (length >= 0 && expression[(start + length)..].IndexOfAnyExcept(separators) >= 0)
+            return false;
 
-                if (hasWord)
-                    return false;
+        var term = tokenization.FoldQueryTerm(length < 0 ? expression[start..] : expression.Slice(start, length));
+        if (term.IsEmpty || term.ContainsAny(separators))
+            return false; // folded to nothing, or to several terms
 
-                word = TextNormalizer.CreateNormalizedWord(expression[wordStart..i]);
-                hasWord = true;
-                wordStart = -1;
-                continue;
-            }
-
-            if (wordStart < 0)
-                wordStart = i;
-        }
-
-        if (wordStart >= 0)
-        {
-            if (hasWord)
-                return false;
-
-            word = TextNormalizer.CreateNormalizedWord(expression[wordStart..]);
-            hasWord = true;
-        }
-
-        return hasWord;
+        word = TextNormalizer.CreateNormalizedWord(term);
+        return true;
     }
 
     /// <summary>
@@ -61,14 +43,14 @@ internal static class QueryExpressionEvaluator
     internal static bool TryGetSingleSemanticWord(
         ReadOnlySpan<char> expression,
         bool enableOperators,
-        SearchValues<char> separators,
+        SearchTokenization tokenization,
         out string? word)
     {
         if (!enableOperators)
-            return TryGetSingleWord(expression, separators, out word);
+            return TryGetSingleWord(expression, tokenization, out word);
 
         word = null;
-        var tokens = Tokenize(expression, enableOperators: true, separators);
+        var tokens = Tokenize(expression, enableOperators: true, tokenization);
         if (tokens.Count == 0)
             return false;
 
@@ -87,8 +69,7 @@ internal static class QueryExpressionEvaluator
         QueryContext qc,
         IndexSnapshot snapshot)
     {
-        var separators = snapshot.Tokenization.QuerySeparatorValues;
-        var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
+        var tokens = Tokenize(expression.AsSpan(), enableOperators, snapshot.Tokenization);
         if (tokens.Count == 0)
             return null;
 
@@ -102,8 +83,9 @@ internal static class QueryExpressionEvaluator
     private static List<QueryToken> Tokenize(
         ReadOnlySpan<char> expression,
         bool enableOperators,
-        SearchValues<char> separators)
+        SearchTokenization tokenization)
     {
+        var separators = tokenization.QuerySeparatorValues;
         var tokens = new List<QueryToken>();
         int wordStart = -1;
         bool allowParentheses = !enableOperators || HasValidParentheses(expression);
@@ -119,7 +101,7 @@ internal static class QueryExpressionEvaluator
                 continue;
             }
 
-            EmitWord(expression, wordStart, i, enableOperators, tokens);
+            EmitWord(expression, wordStart, i, enableOperators, tokenization, tokens);
             wordStart = -1;
 
             if (enableOperators && allowParentheses && ch is '(' or ')')
@@ -129,7 +111,7 @@ internal static class QueryExpressionEvaluator
             }
         }
 
-        EmitWord(expression, wordStart, expression.Length, enableOperators, tokens);
+        EmitWord(expression, wordStart, expression.Length, enableOperators, tokenization, tokens);
         return tokens;
     }
 
@@ -138,6 +120,7 @@ internal static class QueryExpressionEvaluator
         int wordStart,
         int wordEnd,
         bool enableOperators,
+        SearchTokenization tokenization,
         List<QueryToken> tokens)
     {
         if (wordStart < 0)
@@ -150,7 +133,23 @@ internal static class QueryExpressionEvaluator
             return;
         }
 
-        tokens.Add(QueryToken.CreateWord(TextNormalizer.CreateNormalizedWord(wordSpan)));
+        AddTerms(tokenization.FoldQueryTerm(wordSpan), tokenization.QuerySeparatorValues, tokens);
+    }
+
+    // Operators were recognized on the word as typed; folding comes after, so a word that only folds to and/or/not
+    // (nöt, ånd) stays a term. A folded term can contain a query separator (U+037E GREEK QUESTION MARK composes to
+    // ';'): it is split as the folded index text is.
+    private static void AddTerms(ReadOnlySpan<char> folded, SearchValues<char> separators, List<QueryToken> tokens)
+    {
+        while (!folded.IsEmpty)
+        {
+            int end = folded.IndexOfAny(separators);
+            var term = end < 0 ? folded : folded[..end];
+            if (!term.IsEmpty)
+                tokens.Add(QueryToken.CreateWord(TextNormalizer.CreateNormalizedWord(term)));
+
+            folded = end < 0 ? default : folded[(end + 1)..];
+        }
     }
 
     // Sanitises a raw token list so that EvaluateTokens receives a well-formed expression:
@@ -238,9 +237,9 @@ internal static class QueryExpressionEvaluator
     /// Returns <see langword="null"/> when the expression has no operand or is malformed in a way
     /// that makes <see cref="Evaluate"/> return no result. Used by <see cref="NameMatcher"/>.
     /// </summary>
-    internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchValues<char> separators)
+    internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchTokenization tokenization)
     {
-        var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
+        var tokens = Tokenize(expression.AsSpan(), enableOperators, tokenization);
         if (tokens.Count == 0)
             return null;
 

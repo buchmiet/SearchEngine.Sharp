@@ -22,7 +22,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   searches that filter names during a directory scan instead of building an index.
 - `UnicodeMatching` flags and `SearchTokenization.WithUnicodeMatching(...)` (opt-in; default unchanged): NFC
   composition, case folding beyond per-character lowercase (`ß`→`ss`, `ς`→`σ`, `İ`→`i`, …), accent folding, and
-  grapheme-cluster boundaries for `Within`. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
+  grapheme-cluster boundaries for `Within` and glob matches. See [docs/query-semantics.md](docs/query-semantics.md#unicode-matching).
+  Composition and accent folding need Unicode normalization: in globalization-invariant mode `WithUnicodeMatching`
+  throws `PlatformNotSupportedException` for `Compose` and `RemoveDiacritics`.
 - `FacetValues.Create(params ReadOnlySpan<KeyValuePair<string, long>>)` — a facet bag without an intermediate
   dictionary. Duplicate names throw `ArgumentException`.
 - `IngestPublishOptions.StrictMaxStaleness` (default `false`) — restores the 0.5.6 staleness behaviour (see Fixed).

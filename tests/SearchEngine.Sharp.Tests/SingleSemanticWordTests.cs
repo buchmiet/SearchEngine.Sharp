@@ -28,11 +28,10 @@ public class SingleSemanticWordTests
     [InlineData("(report)", false)]
     public void TryGetSingleSemanticWord_ClassifiesOperands(string expression, bool expectedSingleWord)
     {
-        var separators = SearchTokenization.Default.QuerySeparatorValues;
         bool actual = QueryExpressionEvaluator.TryGetSingleSemanticWord(
             expression.AsSpan(),
             enableOperators: true,
-            separators,
+            SearchTokenization.Default,
             out _);
 
         Assert.Equal(expectedSingleWord, actual);
@@ -42,12 +41,11 @@ public class SingleSemanticWordTests
     public void GlobMetacharacters_UseGlobMatcher_NotExactPostingFastPath()
     {
         var engine = CreateEngine();
-        var separators = SearchTokenization.Default.QuerySeparatorValues;
 
         Assert.True(QueryExpressionEvaluator.TryGetSingleSemanticWord(
             "report*".AsSpan(),
             enableOperators: true,
-            separators,
+            SearchTokenization.Default,
             out _));
 
         Assert.Equal(new[] { 1, 2 }, engine.Find("report*", WordMatchMethod.Exact, true).OrderBy(x => x));
