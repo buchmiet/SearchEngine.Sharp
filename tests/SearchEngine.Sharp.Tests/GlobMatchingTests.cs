@@ -64,6 +64,10 @@ public class GlobMatchingTests
         var (engine, _) = CreateFileIndex();
         var results = engine.Find("*log", WordMatchMethod.Exact);
         await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 4, 7 }, CollectionOrdering.Matching);
+
+        // Every token "*log" matches above is exactly "log", which a prefix test matches too: "report" ends with
+        // "port" without starting with it.
+        await Assert.That(engine.Find("*port", WordMatchMethod.Exact).OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 7 }, CollectionOrdering.Matching);
     }
 
     [Test]

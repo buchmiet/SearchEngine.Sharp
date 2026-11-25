@@ -159,6 +159,12 @@ public class SearchEngineOperatorTests
         await Assert.That(results).Contains(1); // GA-100 digital watch
         await Assert.That(results).Contains(3); // DW-5600 digital watch
         await Assert.That(results).Contains(5); // PRW-3000 solar watch
+
+        // The query above gives {1,3,5} read left to right as well, since "solar" is also a watch. Here the two
+        // readings differ: clock OR (digital AND watch) = {1,3,4}, (clock OR digital) AND watch = {1,3}.
+        var discriminating = Find(engine, "clock OR digital AND watch");
+
+        await Assert.That(discriminating.OrderBy(x => x)).IsEquivalentTo([1, 3, 4], CollectionOrdering.Matching);
     }
 
     // ══════════════════════════════════════════════
