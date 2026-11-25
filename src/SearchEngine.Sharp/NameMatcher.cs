@@ -109,32 +109,19 @@ public sealed class NameMatcher
     {
         var postfix = _postfix!;
         Span<bool> stack = postfix.Length <= 128 ? stackalloc bool[postfix.Length] : new bool[postfix.Length];
-        int count = 0;
-        foreach (var token in postfix)
-        {
-            switch (token.Operation)
-            {
-                case WordOperations.None:
-                    stack[count++] = MatchTerm(token.Word, lower);
-                    break;
-                case WordOperations.Not:
-                    if (count < 1) return false;
-                    stack[count - 1] = !stack[count - 1];
-                    break;
-                case WordOperations.And:
-                    if (count < 2) return false;
-                    count--;
-                    stack[count - 1] &= stack[count];
-                    break;
-                case WordOperations.Or:
-                    if (count < 2) return false;
-                    count--;
-                    stack[count - 1] |= stack[count];
-                    break;
-            }
-        }
+        var algebra = new TextAlgebra(this, lower);
+        return QueryExpressionEvaluator.Evaluate<bool, TextAlgebra>(postfix, ref algebra, stack);
+    }
 
-        return count > 0 && stack[count - 1];
+    // The terms of one text: true when a token of the text matches the term.
+    private readonly ref struct TextAlgebra(NameMatcher matcher, ReadOnlySpan<char> lower) : QueryExpressionEvaluator.IQueryAlgebra<bool>
+    {
+        private readonly ReadOnlySpan<char> _lower = lower;
+
+        public bool Match(string word) => matcher.MatchTerm(word, _lower);
+        public bool Not(bool operand) => !operand;
+        public bool And(bool left, bool right) => left & right;
+        public bool Or(bool left, bool right) => left | right;
     }
 
     private bool MatchTerm(string word, ReadOnlySpan<char> lower)
@@ -155,31 +142,10 @@ public sealed class NameMatcher
             {
                 if (token.SequenceEqual(word)) return true;
             }
-            else if (ContainsWithin(token, word))
+            else if (QueryMatcher.ContainsWithin(token, word, _tokenization.GraphemeBoundaries))
             {
                 return true;
             }
-        }
-
-        return false;
-    }
-
-    private bool ContainsWithin(ReadOnlySpan<char> token, ReadOnlySpan<char> word)
-    {
-        int start = 0;
-        while (start + word.Length <= token.Length)
-        {
-            int index = token[start..].IndexOf(word);
-            if (index < 0)
-                return false;
-
-            index += start;
-            if (!_tokenization.GraphemeBoundaries
-                || System.Text.Ascii.IsValid(token)
-                || TextFolder.IsOnGraphemeBoundaries(token, index, word.Length))
-                return true;
-
-            start = index + 1;
         }
 
         return false;

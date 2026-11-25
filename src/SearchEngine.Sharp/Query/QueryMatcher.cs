@@ -173,10 +173,29 @@ internal static class QueryMatcher
     private static bool IsOnGraphemeBoundaries(ReadOnlySpan<char> word, int start, int length)
         => Ascii.IsValid(word) || TextFolder.IsOnGraphemeBoundaries(word, start, length);
 
-    // Finds target inside wordsArray[searchStart..searchEnd) with one vectorized IndexOf (instead of comparing
-    // a sliding window at every position). On a match, all documents that contain the indexed word are added to
-    // result; one match per word is enough. With UnicodeMatching.GraphemeBoundaries a match must start and end on
-    // grapheme cluster boundaries, so later occurrences are tried when the first one splits a cluster.
+    // Finds target inside word with one vectorized IndexOf (instead of comparing a sliding window at every
+    // position). With UnicodeMatching.GraphemeBoundaries a match must start and end on grapheme cluster
+    // boundaries, so later occurrences are tried when the first one splits a cluster. Also used by NameMatcher.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)
+    {
+        int from = 0;
+        while (true)
+        {
+            int index = word[from..].IndexOf(target);
+            if (index < 0)
+                return false;
+
+            index += from;
+            if (!graphemeBoundaries || IsOnGraphemeBoundaries(word, index, target.Length))
+                return true;
+
+            from = index + 1;
+        }
+    }
+
+    // On a match of target inside wordsArray[searchStart..searchEnd), all documents that contain the indexed word
+    // are added to result; one match per word is enough.
     private static void MatchSubstring(
         FastBitSet result,
         ReadOnlySpan<char> target,
@@ -188,20 +207,8 @@ internal static class QueryMatcher
         int searchEnd,
         bool graphemeBoundaries)
     {
-        var word = wordsArray[searchStart..searchEnd];
-        int from = 0;
-        while (true)
-        {
-            int index = word[from..].IndexOf(target);
-            if (index < 0)
-                return;
-
-            index += from;
-            if (!graphemeBoundaries || IsOnGraphemeBoundaries(word, index, target.Length))
-                break;
-
-            from = index + 1;
-        }
+        if (!ContainsWithin(wordsArray[searchStart..searchEnd], target, graphemeBoundaries))
+            return;
 
         for (int k = 0; k < postingCount; k++)
             result.Add(postingDocIds[postingOffset + k]);

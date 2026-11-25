@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using SearchEngine;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
@@ -83,12 +85,86 @@ internal static class QueryExpressionEvaluator
         QueryContext qc,
         IndexSnapshot snapshot)
     {
-        var separators = snapshot.Tokenization.QuerySeparatorValues;
-        var tokens = Tokenize(expression.AsSpan(), enableOperators, separators);
-        if (tokens.Count == 0)
+        var postfix = ToPostfix(expression, enableOperators, snapshot.Tokenization.QuerySeparatorValues);
+        if (postfix is null)
             return null;
 
-        return EvaluateTokens(tokens, method, qc, snapshot);
+        var algebra = new IndexAlgebra(method, qc, snapshot);
+        return Evaluate<FastBitSet, IndexAlgebra>(CollectionsMarshal.AsSpan(postfix), ref algebra, new FastBitSet[postfix.Count]);
+    }
+
+    /// <summary>
+    /// What the operands of an expression are and how the operators combine them: a document set per term for an
+    /// index (<see cref="IndexAlgebra"/>), a match flag per term for one text (<see cref="NameMatcher"/>).
+    /// </summary>
+    internal interface IQueryAlgebra<TValue>
+    {
+        TValue Match(string word);
+        TValue Not(TValue operand);
+        TValue And(TValue left, TValue right);
+        TValue Or(TValue left, TValue right);
+    }
+
+    /// <summary>
+    /// Evaluates a postfix expression from <see cref="ToPostfix"/>. <paramref name="stack"/> holds at least
+    /// <c>postfix.Length</c> values. The expression is well formed, so every operator finds its operands.
+    /// </summary>
+    internal static TValue Evaluate<TValue, TAlgebra>(ReadOnlySpan<QueryToken> postfix, ref TAlgebra algebra, scoped Span<TValue> stack)
+        where TAlgebra : IQueryAlgebra<TValue>, allows ref struct
+    {
+        int count = 0;
+        foreach (var token in postfix)
+        {
+            switch (token.Operation)
+            {
+                case WordOperations.None:
+                    stack[count++] = algebra.Match(token.Word);
+                    break;
+                case WordOperations.Not:
+                    stack[count - 1] = algebra.Not(stack[count - 1]);
+                    break;
+                case WordOperations.And:
+                    count--;
+                    stack[count - 1] = algebra.And(stack[count - 1], stack[count]);
+                    break;
+                case WordOperations.Or:
+                    count--;
+                    stack[count - 1] = algebra.Or(stack[count - 1], stack[count]);
+                    break;
+            }
+        }
+
+        Debug.Assert(count == 1);
+        return stack[0];
+    }
+
+    // Document sets of an index snapshot. AND / OR reuse the left operand; NOT copies the all-documents set
+    // rented once per evaluation.
+    private struct IndexAlgebra(WordMatchMethod method, QueryContext qc, IndexSnapshot snapshot) : IQueryAlgebra<FastBitSet>
+    {
+        private FastBitSet? _allRecords;
+
+        public readonly FastBitSet Match(string word) => QueryMatcher.Match(word, method, qc, snapshot);
+
+        public FastBitSet Not(FastBitSet operand)
+        {
+            _allRecords ??= qc.RentAllTrueBitSet();
+            var result = qc.RentCopyOf(_allRecords);
+            result.ExceptWith(operand);
+            return result;
+        }
+
+        public readonly FastBitSet And(FastBitSet left, FastBitSet right)
+        {
+            left.IntersectWith(right);
+            return left;
+        }
+
+        public readonly FastBitSet Or(FastBitSet left, FastBitSet right)
+        {
+            left.UnionWith(right);
+            return left;
+        }
     }
 
     // Splits the expression into a well-formed infix token list (see Append); empty when nothing is left.
@@ -205,13 +281,12 @@ internal static class QueryExpressionEvaluator
             tokens.RemoveAt(tokens.Count - 1);
     }
 
-    // Evaluates the token list using the shunting-yard algorithm (Dijkstra, 1961).
-    // Operators are held in a stack and applied in precedence order as values arrive.
     /// <summary>
-    /// Parses an expression exactly as <see cref="Evaluate"/> does and returns it in postfix order
-    /// (operands as words, operators applied in the order EvaluateTokens applies them).
-    /// Returns <see langword="null"/> when the expression has no operand or is malformed in a way
-    /// that makes <see cref="Evaluate"/> return no result. Used by <see cref="NameMatcher"/>.
+    /// Parses an expression into postfix order (Dijkstra's shunting-yard algorithm): operands as words, operators in
+    /// the order they apply. NOT binds tighter than AND, AND tighter than OR; equal precedence applies left to
+    /// right. Returns <see langword="null"/> when no operand is left after correction. Shared by the index
+    /// (<see cref="Evaluate(string, bool, WordMatchMethod, QueryContext, IndexSnapshot)"/>) and
+    /// <see cref="NameMatcher"/>.
     /// </summary>
     internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchValues<char> separators)
     {
@@ -229,150 +304,35 @@ internal static class QueryExpressionEvaluator
                     output.Add(token);
                     break;
                 case WordOperations.OpenParenthesis:
+                case WordOperations.Not: // prefix operator: applies once the operand that follows is out
                     operators.Add(token.Operation);
                     break;
                 case WordOperations.CloseParenthesis:
-                    while (operators.Count > 0 && operators[^1] != WordOperations.OpenParenthesis)
-                    {
-                        output.Add(QueryToken.CreateOperation(operators[^1]));
-                        operators.RemoveAt(operators.Count - 1);
-                    }
-
-                    if (operators.Count > 0)
-                        operators.RemoveAt(operators.Count - 1);
+                    PopOperators(operators, output, WordOperations.None);
+                    operators.RemoveAt(operators.Count - 1); // the matching "("
                     break;
                 default:
-                    while (operators.Count > 0 && HasHigherOrEqualPrecedence(operators[^1], token.Operation))
-                    {
-                        output.Add(QueryToken.CreateOperation(operators[^1]));
-                        operators.RemoveAt(operators.Count - 1);
-                    }
-
+                    PopOperators(operators, output, token.Operation);
                     operators.Add(token.Operation);
                     break;
             }
         }
 
-        for (int i = operators.Count - 1; i >= 0; i--)
-        {
-            if (operators[i] != WordOperations.OpenParenthesis)
-                output.Add(QueryToken.CreateOperation(operators[i]));
-        }
-
+        PopOperators(operators, output, WordOperations.None);
         return output;
     }
 
-    private static FastBitSet? EvaluateTokens(
-        List<QueryToken> tokens,
-        WordMatchMethod method,
-        QueryContext qc,
-        IndexSnapshot snapshot)
+    // Moves pending operators of the current group to the output, down to the first one that binds less tightly
+    // than `incoming` (all of them when `incoming` is None).
+    private static void PopOperators(List<WordOperations> operators, List<QueryToken> output, WordOperations incoming)
     {
-        var values = new List<FastBitSet>(tokens.Count);
-        var operators = new List<WordOperations>(tokens.Count);
-        FastBitSet? allRecords = null;
-
-        foreach (var token in tokens)
+        while (operators.Count > 0
+               && operators[^1] != WordOperations.OpenParenthesis
+               && GetPrecedence(operators[^1]) >= GetPrecedence(incoming))
         {
-            switch (token.Operation)
-            {
-                case WordOperations.None:
-                    values.Add(QueryMatcher.Match(token.Word, method, qc, snapshot));
-                    break;
-
-                case WordOperations.OpenParenthesis:
-                    operators.Add(token.Operation);
-                    break;
-
-                case WordOperations.CloseParenthesis:
-                    while (operators.Count > 0 && operators[^1] != WordOperations.OpenParenthesis)
-                    {
-                        if (!TryApplyTopOperator(values, operators, qc, ref allRecords))
-                            return null;
-                    }
-
-                    if (operators.Count > 0 && operators[^1] == WordOperations.OpenParenthesis)
-                        operators.RemoveAt(operators.Count - 1);
-                    break;
-
-                default:
-                    while (operators.Count > 0 && HasHigherOrEqualPrecedence(operators[^1], token.Operation))
-                    {
-                        if (!TryApplyTopOperator(values, operators, qc, ref allRecords))
-                            return null;
-                    }
-
-                    operators.Add(token.Operation);
-                    break;
-            }
+            output.Add(QueryToken.CreateOperation(operators[^1]));
+            operators.RemoveAt(operators.Count - 1);
         }
-
-        while (operators.Count > 0)
-        {
-            if (operators[^1] == WordOperations.OpenParenthesis)
-            {
-                operators.RemoveAt(operators.Count - 1);
-                continue;
-            }
-
-            if (!TryApplyTopOperator(values, operators, qc, ref allRecords))
-                return null;
-        }
-
-        return values.Count > 0 ? values[^1] : null;
-    }
-
-    private static bool TryApplyTopOperator(
-        List<FastBitSet> values,
-        List<WordOperations> operators,
-        QueryContext qc,
-        ref FastBitSet? allRecords)
-    {
-        var operation = operators[^1];
-        operators.RemoveAt(operators.Count - 1);
-
-        switch (operation)
-        {
-            case WordOperations.Not:
-                if (values.Count < 1)
-                    return false;
-
-                var operand = values[^1];
-                values.RemoveAt(values.Count - 1);
-
-                allRecords ??= qc.RentAllTrueBitSet();
-                var notResult = qc.RentCopyOf(allRecords);
-                notResult.ExceptWith(operand);
-                values.Add(notResult);
-                return true;
-
-            case WordOperations.And:
-            case WordOperations.Or:
-                if (values.Count < 2)
-                    return false;
-
-                var right = values[^1];
-                values.RemoveAt(values.Count - 1);
-                var left = values[^1];
-
-                if (operation == WordOperations.And)
-                    left.IntersectWith(right);
-                else
-                    left.UnionWith(right);
-
-                return true;
-
-            default:
-                return false;
-        }
-    }
-
-    private static bool HasHigherOrEqualPrecedence(WordOperations left, WordOperations right)
-    {
-        if (left == WordOperations.OpenParenthesis)
-            return false;
-
-        return GetPrecedence(left) >= GetPrecedence(right);
     }
 
     private static int GetPrecedence(WordOperations operation)
@@ -382,7 +342,7 @@ internal static class QueryExpressionEvaluator
             WordOperations.Or => 1,
             WordOperations.And => 2,
             WordOperations.Not => 3,
-            _ => -1
+            _ => 0
         };
     }
 
