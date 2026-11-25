@@ -282,6 +282,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
         // One outstanding read survives timer wake-ups, so a timer publish never leaves an orphaned waiter behind.
         Task<bool>? pendingRead = null;
+        using var wakeTimer = new WakeTimer(_timeProvider);
 
         try
         {
@@ -318,12 +319,11 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
                 // milliseconds) is re-armed for the remaining time by the next iteration of this loop.
                 if (TimeUntilTimerPublish(options, lastRebuildDuration, lastPublishTimestamp, bufferedAt) is { } wait)
                 {
-                    using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    Task timer = Task.Delay(ToTimerDelay(wait), _timeProvider, timerCts.Token);
+                    Task timer = wakeTimer.Arm(ToTimerDelay(wait));
                     if (await Task.WhenAny(pendingRead, timer).ConfigureAwait(false) != pendingRead)
                         continue;
 
-                    await timerCts.CancelAsync().ConfigureAwait(false);
+                    wakeTimer.Disarm();
                 }
 
                 bool entriesAvailable = await pendingRead.ConfigureAwait(false);
@@ -539,6 +539,45 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         => TimeSpan.FromMilliseconds(Math.Ceiling(Min(value, TimeSpan.FromDays(1)).TotalMilliseconds));
 
     private readonly record struct BufferedEntry(int Id, IndexedEntry Entry, long BufferedAtTimestamp);
+
+    /// <summary>
+    /// One timer for the whole ingestion, re-armed for each wait instead of a new delay and cancellation source per
+    /// wake-up. A firing that arrives after the publisher has moved on only causes one extra pass of the loop, which
+    /// re-arms the timer for the time that is really left.
+    /// </summary>
+    private sealed class WakeTimer : IDisposable
+    {
+        private readonly ITimer _timer;
+        private TaskCompletionSource _fired = NewSource();
+
+        public WakeTimer(TimeProvider timeProvider)
+        {
+            _timer = timeProvider.CreateTimer(
+                static state => ((WakeTimer)state!).Fire(),
+                this,
+                Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+        }
+
+        /// <summary>Arms the timer and returns a task that completes when it fires.</summary>
+        public Task Arm(TimeSpan dueTime)
+        {
+            if (_fired.Task.IsCompleted)
+                Volatile.Write(ref _fired, NewSource());
+
+            _timer.Change(dueTime, Timeout.InfiniteTimeSpan);
+            return _fired.Task;
+        }
+
+        public void Disarm() => _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        public void Dispose() => _timer.Dispose();
+
+        private void Fire() => Volatile.Read(ref _fired).TrySetResult();
+
+        // The publisher must not run its rebuild on the timer's callback thread.
+        private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     private sealed class IngestionState(TimeProvider timeProvider)
     {
