@@ -485,30 +485,18 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         if (untilStale <= TimeSpan.Zero)
             return TimeSpan.Zero;
 
-        TimeSpan? untilPace = options.Policy switch
-        {
-            IngestPublishPolicy.TimeDebounce => options.MinInterval - sinceLastPublish,
-            IngestPublishPolicy.Adaptive when batch.Count >= options.MinTimerPublishBatch =>
-                ComputeInterval(options, lastRebuildDuration) - sinceLastPublish,
-            _ => null,
-        };
-
-        if (options.Policy is not (IngestPublishPolicy.TimeDebounce or IngestPublishPolicy.Adaptive))
-            return null;
-
-        return untilPace is { } pace ? Max(TimeSpan.Zero, Min(untilStale, pace)) : untilStale;
-    }
-
-    private static TimeSpan ComputeInterval(IngestPublishOptions options, TimeSpan lastRebuildDuration)
-    {
         return options.Policy switch
         {
-            IngestPublishPolicy.TimeDebounce => options.MinInterval,
-            IngestPublishPolicy.Adaptive => TimeSpan.FromMilliseconds(Math.Max(
-                options.MinInterval.TotalMilliseconds,
-                lastRebuildDuration.TotalMilliseconds * options.AdaptiveMultiplier)),
-            _ => TimeSpan.Zero,
+            IngestPublishPolicy.TimeDebounce => EarlierOf(untilStale, options.MinInterval - sinceLastPublish),
+            IngestPublishPolicy.Adaptive when batch.Count >= options.MinTimerPublishBatch => EarlierOf(
+                untilStale,
+                Max(options.MinInterval, lastRebuildDuration * options.AdaptiveMultiplier) - sinceLastPublish),
+            IngestPublishPolicy.Adaptive => untilStale,
+            _ => null, // FixedBatch and PerEntry arm no timer.
         };
+
+        static TimeSpan EarlierOf(TimeSpan untilStale, TimeSpan untilPace)
+            => Max(TimeSpan.Zero, Min(untilStale, untilPace));
     }
 
     private TimeSpan ElapsedSince(long timestamp)
