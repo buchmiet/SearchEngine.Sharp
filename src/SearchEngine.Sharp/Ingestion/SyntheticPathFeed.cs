@@ -53,6 +53,7 @@ public static class SyntheticPathFeed
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
     public static Dictionary<int, string> CreateDictionary(int count, int seed = 42)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
         var rng = new Random(seed);
         var dict = new Dictionary<int, string>(count);
 

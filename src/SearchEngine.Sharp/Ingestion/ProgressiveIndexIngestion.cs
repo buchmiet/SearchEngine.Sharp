@@ -43,9 +43,10 @@ namespace SearchEngine.Ingestion;
 ///         enumerator that ignores it and never yields again keeps the task pending.</item>
 /// </list>
 /// </remarks>
+/// <exception cref="ArgumentNullException"><paramref name="updater"/> is <see langword="null"/>.</exception>
 public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 {
-    private readonly IIndexUpdater _updater = updater;
+    private readonly IIndexUpdater _updater = updater ?? throw new ArgumentNullException(nameof(updater));
     private readonly TimeProvider _timeProvider = TimeProvider.System;
     private int _isRunning;
 
@@ -77,8 +78,11 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     /// <see cref="IngestionResult.WasCancelled"/> set.</param>
     /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
     /// of this call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
     /// thrown before the scan starts.</exception>
+    /// <exception cref="ArgumentException">The scan yields a <see langword="null"/> entry. The returned task faults
+    /// with it.</exception>
     /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
     /// The returned task faults with it.</exception>
     /// <remarks>The entries are added to what the updater already holds, and an entry replaces the one with the
@@ -90,11 +94,12 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         Action<IngestionPublishEvent>? onPublished = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(entries);
         options ??= new IngestPublishOptions();
         options.Validate();
         return IngestCoreAsync(
             entries,
-            static pair => new IndexedEntry(pair.Value, pair.Value),
+            static pair => IndexedEntry.FromText(pair.Key, pair.Value, nameof(entries)),
             options,
             progress,
             onPublished,
@@ -113,8 +118,11 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     /// <see cref="IngestionResult.WasCancelled"/> set.</param>
     /// <returns>A task that completes when the scan has ended and the last batch is published, with the counters
     /// of this call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A property of <paramref name="options"/> is out of range;
     /// thrown before the scan starts.</exception>
+    /// <exception cref="ArgumentException">The scan yields a <see langword="null"/> entry. The returned task faults
+    /// with it.</exception>
     /// <exception cref="InvalidOperationException">Another <c>IngestAsync</c> call is running on this instance.
     /// The returned task faults with it.</exception>
     /// <remarks>The entries are added to what the updater already holds, and an entry replaces the one with the
@@ -126,11 +134,12 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         Action<IngestionPublishEvent>? onPublished = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(entries);
         options ??= new IngestPublishOptions();
         options.Validate();
         return IngestCoreAsync(
             entries,
-            static pair => pair.Value,
+            static pair => IndexedEntry.Require(pair.Key, pair.Value, nameof(entries)),
             options,
             progress,
             onPublished,

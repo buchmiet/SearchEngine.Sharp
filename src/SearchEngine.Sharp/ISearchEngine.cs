@@ -13,8 +13,9 @@ namespace SearchEngine;
 /// <c>not</c> (ASCII case-insensitive) and balanced parentheses are operators; a malformed expression is corrected,
 /// never rejected. Under <see cref="WordMatchMethod.Regex"/> the whole expression is one pattern and
 /// <c>enableOperators</c> is ignored.</para>
-/// <para>A <see langword="null"/>, empty or whitespace expression matches nothing, unless a non-empty facet filter
-/// is given; then every document that passes the filter matches.</para>
+/// <para>An empty or whitespace expression matches nothing, unless a non-empty facet filter is given; then every
+/// document that passes the filter matches. A <see langword="null"/> expression throws
+/// <see cref="ArgumentNullException"/>.</para>
 /// <para>The first <see cref="WordMatchMethod.Within"/> query and the first
 /// <see cref="SearchSortMode.NaturalSortAscending"/> query on a snapshot can build a lookup structure for that
 /// snapshot, so they take longer than later ones.</para>
@@ -29,6 +30,7 @@ public interface ISearchEngine
     /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
     /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
     /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false);
 
     /// <summary>
@@ -41,6 +43,7 @@ public interface ISearchEngine
     /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
     /// <param name="sortMode">The order of the returned ids.</param>
     /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode);
 
     /// <summary>
@@ -59,6 +62,7 @@ public interface ISearchEngine
     /// <returns>A new list of the ids given to the updater or builder. It is empty when nothing matches.</returns>
     /// <exception cref="ArgumentException"><paramref name="filter"/> names a facet that no document in the snapshot
     /// carries. The check is skipped when the index is empty or the expression matches nothing.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     List<int> Find(
         string expression,
         WordMatchMethod method,
@@ -74,6 +78,7 @@ public interface ISearchEngine
     /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
     /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
     /// <returns>The number of ids that <see cref="Find(string, WordMatchMethod, bool)"/> would return.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false);
 
     /// <summary>
@@ -90,6 +95,7 @@ public interface ISearchEngine
     /// <see cref="Find(string, WordMatchMethod, bool, SearchSortMode, Filters.FacetFilter?)"/> would return.</returns>
     /// <exception cref="ArgumentException"><paramref name="filter"/> names a facet that no document in the snapshot
     /// carries. The check is skipped when the index is empty or the expression matches nothing.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
     int CountMatches(string expression, WordMatchMethod method, bool enableOperators, Filters.FacetFilter? filter);
 
     /// <summary>

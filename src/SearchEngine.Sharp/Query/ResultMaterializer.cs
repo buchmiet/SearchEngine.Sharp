@@ -74,20 +74,14 @@ internal static class ResultMaterializer
         ReadOnlySpan<int> recordIds)
     {
         int[] ordinals = ArrayPool<int>.Shared.Rent(hitCount);
-        string[] keys = ArrayPool<string>.Shared.Rent(hitCount);
         try
         {
             int count = resultSet.CopySetBitOrdinals(ordinals.AsSpan(0, hitCount));
-            string[] sortTexts = snapshot.SortTextArray;
-            for (int i = 0; i < count; i++)
-                keys[i] = NaturalSortKeyBuilder.Build(sortTexts[ordinals[i]]);
-
-            Array.Sort(keys, ordinals, 0, count, StringComparer.Ordinal);
+            NaturalOrder.Sort(ordinals.AsSpan(0, count), snapshot.SortTextArray, snapshot.RecordIds);
             return PostingListOperations.MaterializeRecordIds(recordIds, ordinals.AsSpan(0, count));
         }
         finally
         {
-            ArrayPool<string>.Shared.Return(keys, clearArray: true);
             ArrayPool<int>.Shared.Return(ordinals);
         }
     }

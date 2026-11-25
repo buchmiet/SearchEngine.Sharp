@@ -45,6 +45,30 @@ Changed.
   (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
+- `SearchTokenization.Default` splits queries at a tab too, like indexed text. A query pasted with a tab
+  between its words used to be one term that could never match. `FileMask` is unchanged: a tab stays part of the
+  mask.
+- The `IProgress<float>` of `IndexSnapshotBuilder.Build` and `IIndexUpdater.RebuildFromAsync` is called when the
+  value reaches a new whole percent, at most 102 times per build, and the last report is 100. It used to be called
+  once per entry and once per distinct token (about 209,000 calls for 100,000 file names), which flooded the UI
+  thread when the handler was a `Progress<T>`. The values are cumulative, so nothing is lost between reports.
+- Every public entry point throws `ArgumentNullException` naming the parameter when a reference argument that is
+  not declared nullable is `null`, at the call. Before, most methods threw `NullReferenceException` from inside the
+  library, and some failed later: `FacetFilter.Range(null, ...)` and `Mask(null, ...)` at query time,
+  `new IndexedEntry(null, ...)` at the next rebuild, `RebuildFromAsync(null)` and `IngestAsync(null)` through the
+  returned task. A `null` element in a collection argument (a `null` text or `IndexedEntry` in the entries) throws
+  `ArgumentException` naming the collection, and an updater call that receives one leaves the index unchanged.
+  Arguments that used to accept `null` as a synonym for an empty value now throw: the expression of `Find` and
+  `CountMatches` (a `null` expression used to match nothing), the separators of `SearchTokenization.Create`, the
+  text of `NaturalSortKeyBuilder.Build`, `TextNormalizer.GetWordsFromString` and `ForEachUniqueWord`, and the
+  `joinCharacter` of `NameTokenizer.TokenizeName`. Pass an empty string instead. Parameters declared nullable keep
+  their meaning. See [Argument checks](docs/api.md#argument-checks).
+- `IIndexUpdater.RebuildFromAsync` no longer resumes on the caller's synchronization context after reading the
+  stream, so the rebuild does not run on a UI thread.
+- `IndexSnapshotBuilder.Build` throws `ArgumentException` naming the id when an id occurs more than once in the
+  entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
+  because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the
+  last value wins.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
 - `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
   IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text
@@ -75,6 +99,15 @@ Changed.
   `ArgumentException`, like `FacetValues.Create`.
 - Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own sort permutation; they
   now share one build.
+- `NaturalSortAscending` compared a text part with the separator that followed a shorter part, so `ab` sorted
+  before `a 2`, `xa` before `x1` and `reports` before `report final`. Text parts now compare with text parts as
+  documented, numbers of any length compare by value (`a999999999999` used to sort after `a1000000000000`), and
+  digits of other scripts count with their value. `NaturalSortKeyBuilder.Build` returns keys in a new, shorter
+  layout; keys stored by an earlier version do not compare with new ones. The order is described in
+  [Result ordering](docs/query-semantics.md#result-ordering).
+- `NaturalSortAscending` returned entries with equal sort texts in an unspecified order when the query matched at
+  most 80% of the documents, and in id order otherwise, so the same entries could come out in a different order
+  from one query to the next. Equal sort texts now always come in ascending id order.
 - `AddSearchEngine(initialEntries, ...)` and `AddKeyedSearchEngine(key, initialEntries, ...)` published a first
   snapshot, but the registered `IIndexUpdater` did not hold those entries, so the first `AddEntry`, `RemoveEntry`
   or batch update published an index without them. The updater now starts from the same entries and the same

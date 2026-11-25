@@ -4,6 +4,17 @@ The public types of `SearchEngine.Sharp`, grouped by namespace. Matching rules a
 [query-semantics.md](query-semantics.md), costs and tuning in [performance.md](performance.md), and a worked file
 search in [file-search-guide.md](file-search-guide.md).
 
+## Argument checks
+
+Every public constructor, method and extension method throws `ArgumentNullException`, naming the parameter, when a
+reference argument is `null` and the parameter is not declared nullable (`?`). The check runs at the call: a method
+that returns a `Task` throws before it returns the task. A nullable parameter has a documented meaning for `null`,
+for example `tokenization` (the default preset), `progress` (no reports) or `filter` (no filter).
+
+A `null` element inside a collection argument, such as a `null` text in the entries of `RebuildFrom`, throws
+`ArgumentException` naming the collection. In an asynchronous stream it is found while the stream is read, so the
+returned task faults with it.
+
 ## Namespace `SearchEngine`
 
 ### `ISearchEngine`, `SearchEngineSharp`
@@ -27,7 +38,7 @@ int UniqueWordCount { get; }
 - `Find` returns the ids the caller indexed, in `sortMode` order (`SnapshotOrder` for the overloads without it).
   `CountMatches` returns the same number without building the list.
 - An empty or whitespace `expression` matches nothing, unless a non-empty `filter` is given; then every document
-  that passes the filter matches.
+  that passes the filter matches. A `null` expression throws `ArgumentNullException`.
 - `enableOperators` turns on `AND`, `OR`, `NOT` and parentheses. It is ignored for `WordMatchMethod.Regex`.
 - Throws `ArgumentException` when `filter` names a facet that no indexed document carries (see
   [Facet filters](query-semantics.md#facet-filters) for when this is checked).
@@ -58,7 +69,7 @@ the preset it was built with, and queries always use the preset of the snapshot 
 
 ```csharp
 static SearchTokenization Default { get; }    // token-level search
-static SearchTokenization FileMask { get; }   // the whole SearchText is one token; queries split on whitespace
+static SearchTokenization FileMask { get; }   // the whole SearchText is one token; queries split on space, CR and LF
 static SearchTokenization Create(string indexSeparators, string querySeparators);
 SearchTokenization WithUnicodeMatching(UnicodeMatching options);
 string IndexSeparators { get; }
@@ -66,7 +77,7 @@ string QuerySeparators { get; }
 UnicodeMatching UnicodeMatching { get; }      // None for Default, FileMask and Create
 ```
 
-- `Create` treats a null argument as an empty separator set.
+- `Create` takes an empty string for an empty separator set (the whole text or query is one token).
 - `WithUnicodeMatching` returns a preset with the same separators and the given options. It throws
   `PlatformNotSupportedException` for `Compose` or `RemoveDiacritics` when the process runs in
   globalization-invariant mode.
@@ -118,7 +129,8 @@ bool ContainsEntry(int id);
 - `tokenization` defaults to `SearchTokenization.Default` and applies to every snapshot this updater publishes,
   including the empty one after `Clear`.
 - A `string` entry is indexed as `new IndexedEntry(text, text)`.
-- `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id.
+- `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
+  input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
   `RefreshEntry` returns whether the id existed before (it adds the entry either way).
 - `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither rebuilds then.
   `RemoveEntries` returns the number of ids removed.
@@ -212,7 +224,8 @@ SearchTokenization Tokenization { get; }
 
 ### `IndexSnapshotBuilder`
 
-Builds a snapshot without an updater, for example for the DI overload that takes a snapshot factory.
+Builds a snapshot without an updater. To query it, return it from your own `IIndexSnapshotProvider` and pass that
+provider to `SearchEngineSharp`.
 
 ```csharp
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries);
@@ -224,6 +237,13 @@ static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress);
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization, IProgress<float>? progress);
 ```
+
+- The entries are enumerated once, in the order that becomes `SnapshotOrder`.
+- An id that occurs twice throws `ArgumentException` naming the id. Dictionaries are not checked, because their
+  keys are unique.
+- `progress` receives percentages on the building thread, once each time the value reaches a new whole percent
+  (at most 102 reports per build). The last report is 100, made when the snapshot is complete. `RebuildFromAsync`
+  reports its rebuild the same way.
 
 ## Namespace `SearchEngine.Ingestion`
 

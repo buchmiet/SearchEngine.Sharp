@@ -11,18 +11,20 @@ namespace SearchEngine;
 public sealed class SearchTokenization
 {
     private const string DefaultIndexSeparators = " .,;:/\\\r\n\t|-#[]{}()~£$€";
-    private const string DefaultQuerySeparators = "| -./\n\r\\,#[]{}()~:;$£€";
+    private const string DefaultQuerySeparators = "| -./\n\r\t\\,#[]{}()~:;$£€";
     private const string FileMaskQuerySeparators = " \r\n"; // explicit CR/LF, not Environment.NewLine: query semantics must be identical on every OS
 
     /// <summary>
     /// Gets the preset for token-level search. Indexed text splits on space, tab, CR, LF and
-    /// <c>. , ; : / \ | - # [ ] { } ( ) ~ £ $ €</c>. Queries split on the same characters except tab.
+    /// <c>. , ; : / \ | - # [ ] { } ( ) ~ £ $ €</c>. Queries split on the same characters, so a query pasted with
+    /// a tab between its words finds them like a query with spaces.
     /// </summary>
     public static SearchTokenization Default { get; } = new(DefaultIndexSeparators, DefaultQuerySeparators);
 
     /// <summary>
     /// Gets the preset for file masks: the whole <see cref="IndexedEntry.SearchText"/> is one token, and queries
-    /// split on space, CR and LF only, so <c>*.pdf</c> matches names that end in <c>.pdf</c>.
+    /// split on space, CR and LF only, so <c>*.pdf</c> matches names that end in <c>.pdf</c>. A tab is part of the
+    /// mask, so a name that contains a tab can be matched literally.
     /// </summary>
     public static SearchTokenization FileMask { get; } = new(string.Empty, FileMaskQuerySeparators);
 
@@ -84,11 +86,17 @@ public sealed class SearchTokenization
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 
     /// <summary>Creates a preset with the given separator characters and no Unicode options.</summary>
-    /// <param name="indexSeparators">The characters that split indexed text into tokens. <see langword="null"/> or
-    /// empty makes the whole text one token.</param>
-    /// <param name="querySeparators">The characters that split a query into terms. <see langword="null"/> or empty
-    /// makes the whole query one term.</param>
+    /// <param name="indexSeparators">The characters that split indexed text into tokens. An empty string makes the
+    /// whole text one token.</param>
+    /// <param name="querySeparators">The characters that split a query into terms. An empty string makes the whole
+    /// query one term.</param>
     /// <returns>A new preset.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="indexSeparators"/> or <paramref name="querySeparators"/>
+    /// is <see langword="null"/>.</exception>
     public static SearchTokenization Create(string indexSeparators, string querySeparators)
-        => new(indexSeparators ?? string.Empty, querySeparators ?? string.Empty);
+    {
+        ArgumentNullException.ThrowIfNull(indexSeparators);
+        ArgumentNullException.ThrowIfNull(querySeparators);
+        return new(indexSeparators, querySeparators);
+    }
 }
