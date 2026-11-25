@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace SearchEngine.Filters;
 
 /// <summary>
@@ -27,22 +29,41 @@ public sealed class FacetValues
     /// <summary>
     /// Creates facet values from a dictionary. Returns <see langword="null"/> when empty.
     /// </summary>
+    /// <remarks>
+    /// The entries are enumerated once into a buffer, so the result is consistent even when
+    /// <paramref name="values"/> is a concurrent dictionary that changes during the call.
+    /// Names are validated like <see cref="Create(ReadOnlySpan{KeyValuePair{string, long}})"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A facet name is null or appears more than once.</exception>
     public static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values)
     {
         if (values is null || values.Count == 0)
             return null;
 
-        var names = new string[values.Count];
-        var longs = new long[values.Count];
-        int i = 0;
-        foreach (var (name, value) in values)
+        var pool = ArrayPool<KeyValuePair<string, long>>.Shared;
+        var buffer = pool.Rent(values.Count);
+        int count = 0;
+        try
         {
-            names[i] = name;
-            longs[i] = value;
-            i++;
-        }
+            foreach (var pair in values)
+            {
+                if (count == buffer.Length)
+                {
+                    var larger = pool.Rent(count * 2);
+                    buffer.AsSpan(0, count).CopyTo(larger);
+                    pool.Return(buffer, clearArray: true);
+                    buffer = larger;
+                }
 
-        return new FacetValues(names, longs);
+                buffer[count++] = pair;
+            }
+
+            return count == 0 ? null : Create(buffer.AsSpan(0, count));
+        }
+        finally
+        {
+            pool.Return(buffer, clearArray: true);
+        }
     }
 
     /// <summary>

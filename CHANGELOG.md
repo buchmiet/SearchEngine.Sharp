@@ -37,6 +37,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   are faster than `MaxStaleness / AdaptiveMultiplier`.
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
   with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
+- `FacetValues.FromDictionary` enumerates the source once into a buffer, so a concurrently mutated dictionary can no
+  longer produce a bag with trailing null names or an `IndexOutOfRangeException`, and it rejects null and duplicate
+  names with `ArgumentException` exactly like `FacetValues.Create(span)`.
 
 ### Changed
 
