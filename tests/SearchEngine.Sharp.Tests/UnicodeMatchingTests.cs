@@ -160,7 +160,7 @@ public class UnicodeMatchingTests
         // and the supplementary U+1D167 a musical mark: they stay.
         Assert.Equal(
             "abcd\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67",
-            TextFolder.Fold("a\u0301b\u1AB0c\u1DC4d\uFE20\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67", UnicodeMatching.RemoveDiacritics, isRegex: false));
+            TextFolder.Fold("a\u0301b\u1AB0c\u1DC4d\uFE20\u1ABEe\u20D7f\u20E3\u05D0\u05B8g\uD834\uDD67", UnicodeMatching.RemoveDiacritics));
     }
 
     [Fact]
@@ -207,20 +207,42 @@ public class UnicodeMatchingTests
     {
         const UnicodeMatching all = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
 
-        Assert.Equal("\uD800e\uDC00a\uFFFEss", TextFolder.Fold("\uD800e\u0301\uDC00a\u030A\uFFFE\u00DF", all, isRegex: false));
-        Assert.Equal("\uD800\u00E9\uDC00\uFFFE", TextFolder.Fold("\uD800e\u0301\uDC00\uFFFE", UnicodeMatching.Compose, isRegex: false));
+        Assert.Equal("\uD800e\uDC00a\uFFFEss", TextFolder.Fold("\uD800e\u0301\uDC00a\u030A\uFFFE\u00DF", all));
+        Assert.Equal("\uD800\u00E9\uDC00\uFFFE", TextFolder.Fold("\uD800e\u0301\uDC00\uFFFE", UnicodeMatching.Compose));
+    }
+
+    // A regex pattern runs as written against the folded text: folding the pattern would change its character
+    // classes ([e<U+0301>] composed to [é], [b-å] stripped to the invalid range [b-a]).
+    [NormalizationFact]
+    public void RegexPattern_IsNotFolded_Compose()
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold);
+        string[] names = ["e.txt", "Re\u0301sume\u0301.pdf", "Stra\u00DFe.pdf"];
+        var engine = Index(tokenization, names);
+
+        AssertRegex(engine, tokenization, names, "^[xe\u0301]" + @"\.txt$", [1]);
+        AssertRegex(engine, tokenization, names, "^r\u00E9sum\u00E9", [2]);
+        AssertRegex(engine, tokenization, names, "^re\u0301sume\u0301", []);
+        AssertRegex(engine, tokenization, names, @"^strasse\.pdf$", [3]);
+        AssertRegex(engine, tokenization, names, "^stra\u00DFe" + @"\.pdf$", []);
     }
 
     [NormalizationFact]
-    public void RegexPattern_IsComposedButNotCaseFolded()
+    public void RegexPattern_IsNotFolded_RemoveDiacritics()
     {
-        var engine = Index(
-            SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
-            "Re\u0301sume\u0301.pdf",
-            "Stra\u00DFe.pdf");
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics);
+        string[] names = ["report.pdf", "\u00E9cole.txt", "\u00C5l.txt", "bar"];
+        var engine = Index(tokenization, names);
 
-        Assert.Equal([1], engine.Find("^re\u0301sume\u0301", WordMatchMethod.Regex));
-        Assert.Equal([2], engine.Find(@"^strasse\.pdf$", WordMatchMethod.Regex));
-        Assert.Empty(engine.Find("^stra\u00DFe\\.pdf$", WordMatchMethod.Regex));
+        AssertRegex(engine, tokenization, names, "^[b-\u00E5]", [1, 2, 4]);
+        AssertRegex(engine, tokenization, names, "^[\u00E0-\u00FF]", []);
+        AssertRegex(engine, tokenization, names, "^ecole", [2]);
+    }
+
+    private static void AssertRegex(SearchEngineSharp engine, SearchTokenization tokenization, string[] names, string pattern, int[] expected)
+    {
+        Assert.Equal(expected, engine.Find(pattern, WordMatchMethod.Regex));
+        var matcher = NameMatcher.Create(pattern, WordMatchMethod.Regex, tokenization: tokenization);
+        Assert.Equal(expected, Enumerable.Range(1, names.Length).Where(id => matcher.IsMatch(names[id - 1])));
     }
 }

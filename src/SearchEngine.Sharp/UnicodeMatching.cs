@@ -5,9 +5,10 @@ using System.Text;
 namespace SearchEngine;
 
 /// <summary>
-/// Optional Unicode-aware matching. The folding options are applied to indexed text and to queries
-/// before tokenization; pure ASCII text is never changed, so the cost is paid only for names that
-/// contain non-ASCII characters. Set through <see cref="SearchTokenization.WithUnicodeMatching"/>.
+/// Optional Unicode-aware matching. The folding options are applied to indexed text and to queries;
+/// pure ASCII text is never changed, so the cost is paid only for names that contain non-ASCII characters.
+/// A <see cref="WordMatchMethod.Regex"/> pattern is not folded (that would change its character classes): it runs
+/// as written against the folded text. Set through <see cref="SearchTokenization.WithUnicodeMatching"/>.
 /// </summary>
 [Flags]
 public enum UnicodeMatching
@@ -27,7 +28,6 @@ public enum UnicodeMatching
     /// such as Deseret <c>𐐀</c> and <c>𐐨</c>), plus the full foldings <c>ß</c>/<c>ẞ</c>→<c>ss</c> and the Latin
     /// ligatures U+FB00–U+FB06, and <c>İ</c>→<c>i</c>, <c>ſ</c>→<c>s</c>. Other full foldings (<c>ŉ</c>, Greek
     /// letters with ypogegrammeni, Armenian ligatures) are not applied.
-    /// Not applied to regular expressions (it would change character classes).
     /// </summary>
     CaseFold = 2,
 
@@ -57,7 +57,7 @@ internal static class TextFolder
     // NFC wherever normalization works.
     internal static bool IsNormalizationAvailable { get; } = !"e\u0301".IsNormalized(NormalizationForm.FormC);
 
-    internal static string Fold(string text, UnicodeMatching normalization, bool isRegex)
+    internal static string Fold(string text, UnicodeMatching normalization)
     {
         const UnicodeMatching folding = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
         if ((normalization & folding) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
@@ -67,7 +67,7 @@ internal static class TextFolder
         if (removeDiacritics || (normalization & UnicodeMatching.Compose) != 0)
             text = NormalizeWellFormedRuns(text, removeDiacritics);
 
-        if ((normalization & UnicodeMatching.CaseFold) != 0 && !isRegex)
+        if ((normalization & UnicodeMatching.CaseFold) != 0)
             text = ApplyCaseFolding(text);
 
         return text;

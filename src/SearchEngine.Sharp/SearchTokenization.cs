@@ -67,10 +67,10 @@ public sealed class SearchTokenization
         return new(IndexSeparators, QuerySeparators, options);
     }
 
-    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching, isRegex: false);
+    internal string FoldIndexText(string text) => TextFolder.Fold(text, UnicodeMatching);
 
     internal string FoldQuery(string expression, WordMatchMethod method)
-        => TextFolder.Fold(expression, UnicodeMatching, isRegex: method == WordMatchMethod.Regex);
+        => method == WordMatchMethod.Regex ? expression : TextFolder.Fold(expression, UnicodeMatching);
 
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 

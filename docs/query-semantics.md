@@ -94,12 +94,14 @@ applied to indexed `SearchText` and to queries; ASCII text is never touched):
 | Flag | Effect |
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
-| `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied. Not applied to regex patterns |
+| `CaseFold` | Unicode simple case folding through the invariant casing tables (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`, `ſ`→`s`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
 | `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose` |
 | `GraphemeBoundaries` | `Within` matches must start and end on extended grapheme cluster boundaries (UAX #29) |
 
-Regex patterns are composed (and stripped of diacritics with `RemoveDiacritics`) but not case-folded,
-because folding would change character classes; write `ss` for a folded `ß`. `SortText` is never folded.
+Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
+would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so
+write it in folded form: `ss` for `ß` under `CaseFold`, `e` for `é` under `RemoveDiacritics`, precomposed letters
+under `Compose`. `SortText` is never folded.
 `Compose` and `RemoveDiacritics` need the Unicode normalization data of ICU (or NLS). Globalization-invariant mode
 (`<InvariantGlobalization>true</InvariantGlobalization>` or `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`, common in
 trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
