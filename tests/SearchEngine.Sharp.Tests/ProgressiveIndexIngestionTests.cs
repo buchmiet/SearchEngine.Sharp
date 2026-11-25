@@ -562,6 +562,37 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
+    public async Task Ingest_HandlerThrowsCancellationAfterAPublish_PublishesEachEntryOnce()
+    {
+        // The caller cancels inside the second onPublished, and the handler then observes the token. The batch it
+        // reports is already in the index: the flush on cancellation must not publish it again.
+        var (_, updater, ingestion) = Create();
+        using var cts = new CancellationTokenSource();
+        var events = new List<IngestionPublishEvent>();
+
+        var result = await ingestion.IngestAsync(
+            new CountingFeed(1_000).EnumerateAsync(),
+            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 100 },
+            onPublished: e =>
+            {
+                events.Add(e);
+                if (e.PublishSequence == 1)
+                {
+                    cts.Cancel();
+                    cts.Token.ThrowIfCancellationRequested();
+                }
+            },
+            cancellationToken: cts.Token).WaitAsync(TestTimeout);
+
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesPublished).IsEqualTo(result.EntriesAccepted);
+        await Assert.That(result.EntriesPublished).IsEqualTo(events.Sum(e => e.EntryCount));
+        await Assert.That(result.PublishCount).IsEqualTo(events.Count);
+        await Assert.That(updater.EntryCount).IsEqualTo(result.EntriesAccepted);
+        await Assert.That(events[1].IndexedDocumentCount).IsEqualTo(200);
+    }
+
+    [Test]
     public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then

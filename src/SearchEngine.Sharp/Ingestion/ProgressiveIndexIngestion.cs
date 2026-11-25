@@ -382,9 +382,13 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         lastPublishTimestamp = _timeProvider.GetTimestamp();
         UpdateBatchCap(options, ref batchCap);
 
+        // The batch is in the index: count it and empty the buffer before any handler runs, so a handler that
+        // throws (for example after the caller cancelled) cannot make the flush publish the same entries again.
         int publishedCount = buffer.Count;
         int publishSequence = state.PublishCount;
         state.AddPublished(publishedCount, rebuildDuration);
+        buffer.Clear();
+        bufferedAt.Clear();
 
         var publishEvent = new IngestionPublishEvent
         {
@@ -408,9 +412,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             PublishCount = state.PublishCount,
             PendingCount = Math.Max(0, accepted - published),
         });
-
-        buffer.Clear();
-        bufferedAt.Clear();
     }
 
     private static void AppendEntry(
