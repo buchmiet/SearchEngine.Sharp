@@ -71,8 +71,9 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 
 - **Bigram index is lazy:** built on the first `WordMatchMethod.Within` query against a snapshot instead of in
   every `Build` (16–25% of build time; Exact, glob and regex never use it). The first `Within` query after a
-  publish pays it (1M FileMask names: ~0.17 s once per snapshot, measured on a 20-core x64). Concurrent first `Within` queries share that one build
-  and wait for it (8 at once at 1M names: 0.17 s each, 214 MB allocated in total).
+  publish pays it (1M FileMask names: ~0.17 s once per snapshot, measured on a 20-core x64). Concurrent first
+  `Within` queries share that one build and wait for it (8 at once at 1M names: 0.17 s each, 214 MB allocated in
+  total).
 - **Within:** a candidate word is searched with one vectorized `IndexOf` instead of comparing a sliding window at
   every position: 1.3–5× faster at 1M names on x64 (`within-3` 1.78 → 0.75 ms, one-character queries 12.7 → 3.4 ms).
 - **Glob leaves** `abc*`, `*abc`, `*abc*`, `ab*cd` (no `?`) use vectorized span primitives: 4–6× faster for
