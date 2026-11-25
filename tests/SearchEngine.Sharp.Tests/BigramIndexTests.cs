@@ -5,8 +5,8 @@ namespace SearchEngine.Sharp.Tests;
 
 public class BigramIndexTests
 {
-    [Fact]
-    public void Build_DeduplicatesWordOrdinalPerBigramKey()
+    [Test]
+    public async Task Build_DeduplicatesWordOrdinalPerBigramKey()
     {
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider);
@@ -21,15 +21,15 @@ public class BigramIndexTests
         int bigramAn = ('a' << 16) | 'n';
         int bigramNa = ('n' << 16) | 'a';
 
-        Assert.True(snapshot.BigramWordIndices.TryGetValue(bigramAn, out int[]? anList));
-        Assert.True(snapshot.BigramWordIndices.TryGetValue(bigramNa, out int[]? naList));
+        await Assert.That(snapshot.BigramWordIndices.TryGetValue(bigramAn, out int[]? anList)).IsTrue();
+        await Assert.That(snapshot.BigramWordIndices.TryGetValue(bigramNa, out int[]? naList)).IsTrue();
 
-        Assert.Equal(1, anList!.Count(i => i == wordIndex));
-        Assert.Equal(1, naList!.Count(i => i == wordIndex));
+        await Assert.That(anList!.Count(i => i == wordIndex)).IsEqualTo(1);
+        await Assert.That(naList!.Count(i => i == wordIndex)).IsEqualTo(1);
     }
 
-    [Fact]
-    public void LazyBigramIndex_WithinMatchesBruteForceSubstringScan_AndIsSharedAcrossConcurrentFirstCallers()
+    [Test]
+    public async Task LazyBigramIndex_WithinMatchesBruteForceSubstringScan_AndIsSharedAcrossConcurrentFirstCallers()
     {
         var rng = new Random(5);
         var entries = new Dictionary<int, string>();
@@ -56,9 +56,9 @@ public class BigramIndexTests
                 .Select(e => e.Key)
                 .Order()
                 .ToList();
-            Assert.Equal(expected, results[q].Order().ToList());
+            await Assert.That(results[q].Order().ToList()).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
 
-        Assert.Same(provider.Current.BigramWordIndices, provider.Current.BigramWordIndices);
+        await Assert.That(provider.Current.BigramWordIndices).IsSameReferenceAs(provider.Current.BigramWordIndices);
     }
 }

@@ -35,28 +35,28 @@ public class FacetFilterTests
             ["attrs"] = attrs,
         });
 
-    [Fact]
-    public void Range_InclusiveBoundaries()
+    [Test]
+    public async Task Range_InclusiveBoundaries()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 1000, 2000);
 
         var results = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
-        Assert.Equal(new[] { 1 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Mask_MustHaveAndMustNot()
+    [Test]
+    public async Task Mask_MustHaveAndMustNot()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Mask("attrs", mustHave: 0x2, mustNot: 0x1);
 
         var results = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
-        Assert.Equal(new[] { 2 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Combine_AndsMultiplePredicates()
+    [Test]
+    public async Task Combine_AndsMultiplePredicates()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Combine(
@@ -64,33 +64,33 @@ public class FacetFilterTests
             FacetFilter.Range("modified", 100, 250));
 
         var results = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
-        Assert.Equal(new[] { 1, 2, 4 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2, 4 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void UnknownFacet_ThrowsArgumentException()
+    [Test]
+    public async Task UnknownFacet_ThrowsArgumentException()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("missing", 0, 100);
 
-        var ex = Assert.Throws<ArgumentException>(() =>
-            engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter));
+        var ex = await Assert.That(() =>
+            engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter)).ThrowsExactly<ArgumentException>();
 
-        Assert.Contains("missing", ex.Message, StringComparison.Ordinal);
+        await Assert.That(ex!.Message).Contains("missing", StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void FilterOnly_EmptyExpression_ReturnsMatchingDocuments()
+    [Test]
+    public async Task FilterOnly_EmptyExpression_ReturnsMatchingDocuments()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 5000, long.MaxValue);
 
         var results = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
-        Assert.Equal(new[] { 2, 5 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 2, 5 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void FilterWithNaturalSort_ReturnsSortedSubset()
+    [Test]
+    public async Task FilterWithNaturalSort_ReturnsSortedSubset()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 100, long.MaxValue);
@@ -102,11 +102,11 @@ public class FacetFilterTests
             SearchSortMode.NaturalSortAscending,
             filter);
 
-        Assert.Equal(new[] { 6, 5 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 6, 5 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void CountMatches_WithFilter_EqualsFindCount()
+    [Test]
+    public async Task CountMatches_WithFilter_EqualsFindCount()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Combine(
@@ -116,33 +116,33 @@ public class FacetFilterTests
         int count = engine.CountMatches("report", WordMatchMethod.Within, false, filter);
         var find = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
 
-        Assert.Equal(find.Count, count);
-        Assert.Equal(new[] { 1 }, find.OrderBy(x => x));
+        await Assert.That(count).IsEqualTo(find.Count);
+        await Assert.That(find.OrderBy(x => x)).IsEquivalentTo(new[] { 1 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void GlobWithFilter_IntersectsResults()
+    [Test]
+    public async Task GlobWithFilter_IntersectsResults()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 1000, long.MaxValue);
 
         var results = engine.Find("report*", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
-        Assert.Equal(new[] { 1, 2 }, results.OrderBy(x => x));
+        await Assert.That(results.OrderBy(x => x)).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddEntry_PreservesFacets()
+    [Test]
+    public async Task AddEntry_PreservesFacets()
     {
         var (engine, updater) = CreateEngine();
         updater.AddEntry(1, new IndexedEntry("alpha.txt", "alpha.txt", Facets(100, 1, 0)));
         updater.AddEntry(2, new IndexedEntry("beta.txt", "beta.txt", Facets(200, 2, 0)));
 
         var filter = FacetFilter.Range("size", 150, long.MaxValue);
-        Assert.Equal(new[] { 2 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void AddOrUpdateEntries_UpdatesFacetColumns()
+    [Test]
+    public async Task AddOrUpdateEntries_UpdatesFacetColumns()
     {
         var (engine, updater) = CreateFacetIndex();
         updater.AddOrUpdateEntries([
@@ -150,21 +150,21 @@ public class FacetFilterTests
         ]);
 
         var filter = FacetFilter.Range("size", 8000, long.MaxValue);
-        Assert.Equal(new[] { 2, 5 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).OrderBy(x => x));
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).OrderBy(x => x)).IsEquivalentTo(new[] { 2, 5 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void RemoveEntry_RemovesFacetValues()
+    [Test]
+    public async Task RemoveEntry_RemovesFacetValues()
     {
         var (engine, updater) = CreateFacetIndex();
-        Assert.True(updater.RemoveEntry(2));
+        await Assert.That(updater.RemoveEntry(2)).IsTrue();
 
         var filter = FacetFilter.Range("size", 5000, long.MaxValue);
-        Assert.Equal(new[] { 5 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter)).IsEquivalentTo(new[] { 5 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void RebuildFrom_ReplacesFacetColumns()
+    [Test]
+    public async Task RebuildFrom_ReplacesFacetColumns()
     {
         var (engine, updater) = CreateFacetIndex();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
@@ -173,12 +173,12 @@ public class FacetFilterTests
         });
 
         var filter = FacetFilter.Range("size", 40, 50);
-        Assert.Equal(new[] { 10 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
-        Assert.Equal(1, engine.DocumentCount);
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter)).IsEquivalentTo(new[] { 10 }, CollectionOrdering.Matching);
+        await Assert.That(engine.DocumentCount).IsEqualTo(1);
     }
 
-    [Fact]
-    public void MissingFacetValue_DefaultsToZero()
+    [Test]
+    public async Task MissingFacetValue_DefaultsToZero()
     {
         var (engine, updater) = CreateEngine();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
@@ -188,11 +188,11 @@ public class FacetFilterTests
         });
 
         var filter = FacetFilter.Range("size", 0, 0);
-        Assert.Equal(new[] { 2 }, engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter));
+        await Assert.That(engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void ExactSingleTerm_WithFacetFilter_MatchesWithinPlusFilter()
+    [Test]
+    public async Task ExactSingleTerm_WithFacetFilter_MatchesWithinPlusFilter()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 1000, 5000);
@@ -200,12 +200,12 @@ public class FacetFilterTests
         var within = engine.Find("report-final", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
         var exact = engine.Find("report-final", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
 
-        Assert.Equal(within.OrderBy(x => x), exact.OrderBy(x => x));
-        Assert.Equal(exact.Count, engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter));
+        await Assert.That(exact.OrderBy(x => x)).IsEquivalentTo(within.OrderBy(x => x), CollectionOrdering.Matching);
+        await Assert.That(engine.CountMatches("report-final", WordMatchMethod.Exact, false, filter)).IsEqualTo(exact.Count);
     }
 
-    [Fact]
-    public void ExactSingleTerm_WithFacetFilter_EnableOperatorsTrue_SameAsOff()
+    [Test]
+    public async Task ExactSingleTerm_WithFacetFilter_EnableOperatorsTrue_SameAsOff()
     {
         var (engine, _) = CreateFacetIndex();
         var filter = FacetFilter.Range("size", 1000, 5000);
@@ -213,25 +213,24 @@ public class FacetFilterTests
         var off = engine.Find("log", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter);
         var on = engine.Find("log", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter);
 
-        Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
-        Assert.Equal(
-            engine.CountMatches("log", WordMatchMethod.Exact, true, filter),
-            engine.CountMatches("log", WordMatchMethod.Exact, false, filter));
+        await Assert.That(on.OrderBy(x => x)).IsEquivalentTo(off.OrderBy(x => x), CollectionOrdering.Matching);
+        await Assert.That(engine.CountMatches("log", WordMatchMethod.Exact, false, filter))
+            .IsEqualTo(engine.CountMatches("log", WordMatchMethod.Exact, true, filter));
     }
 
-    [Fact]
-    public void ExactSingleTerm_EnableOperatorsTrue_SameAsOff()
+    [Test]
+    public async Task ExactSingleTerm_EnableOperatorsTrue_SameAsOff()
     {
         var (engine, _) = CreateFacetIndex();
 
         var off = engine.Find("log", WordMatchMethod.Exact, false);
         var on = engine.Find("log", WordMatchMethod.Exact, true);
 
-        Assert.Equal(off.OrderBy(x => x), on.OrderBy(x => x));
+        await Assert.That(on.OrderBy(x => x)).IsEquivalentTo(off.OrderBy(x => x), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void CreateFromPairs_IndexesLikeFromDictionary()
+    [Test]
+    public async Task CreateFromPairs_IndexesLikeFromDictionary()
     {
         var (engine, updater) = CreateEngine();
         updater.RebuildFrom(new Dictionary<int, IndexedEntry>
@@ -241,19 +240,19 @@ public class FacetFilterTests
             [3] = new("c.pdf", "c.pdf", FacetValues.Create("size", 30)),
         });
 
-        Assert.Equal([1, 2], engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("size", 0, 25)));
-        Assert.Equal([2], engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Mask("attrs", 0x2)));
+        await Assert.That(engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("size", 0, 25))).IsEquivalentTo([1, 2], CollectionOrdering.Matching);
+        await Assert.That(engine.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, FacetFilter.Mask("attrs", 0x2))).IsEquivalentTo([2], CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void CreateFromPairs_RejectsDuplicateNames_AndEmptyIsEmpty()
+    [Test]
+    public async Task CreateFromPairs_RejectsDuplicateNames_AndEmptyIsEmpty()
     {
-        Assert.Throws<ArgumentException>(() => FacetValues.Create([new("size", 1L), new("size", 2L)]));
-        Assert.Same(FacetValues.Empty, FacetValues.Create(ReadOnlySpan<KeyValuePair<string, long>>.Empty));
+        await Assert.That(() => FacetValues.Create([new("size", 1L), new("size", 2L)])).ThrowsExactly<ArgumentException>();
+        await Assert.That(FacetValues.Create(ReadOnlySpan<KeyValuePair<string, long>>.Empty)).IsSameReferenceAs(FacetValues.Empty);
     }
 
-    [Fact]
-    public void FacetColumns_SameWhetherEntryCountIsKnownUpFrontOrNot()
+    [Test]
+    public async Task FacetColumns_SameWhetherEntryCountIsKnownUpFrontOrNot()
     {
         var entries = new Dictionary<int, IndexedEntry>();
         for (int id = 0; id < 500; id++)
@@ -264,8 +263,8 @@ public class FacetFilterTests
         var filter = FacetFilter.Combine(FacetFilter.Range("size", 1000, 3000), FacetFilter.Mask("attrs", 0x1));
 
         var expected = entries.Where(e => e.Value.Facets is not null && e.Key / 3 * 10 is >= 1000 and <= 3000 && (e.Key / 3 % 4 & 1) == 1).Select(e => e.Key).Order();
-        Assert.Equal(expected, known.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order());
-        Assert.Equal(expected, streamed.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order());
+        await Assert.That(known.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
+        await Assert.That(streamed.Find("pdf", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Order()).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     private sealed class FixedProvider(SearchEngine.Snapshots.IndexSnapshot snapshot) : IIndexSnapshotProvider

@@ -12,8 +12,8 @@ public class SearchEngineNaturalSortTests
         return (engine, updater);
     }
 
-    [Fact]
-    public void Find_NaturalSortAscending_ReturnsCorrectOrder()
+    [Test]
+    public async Task Find_NaturalSortAscending_ReturnsCorrectOrder()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -37,11 +37,11 @@ public class SearchEngineNaturalSortTests
 
         // Assert - should be in natural order
         var expectedOrder = new[] { 7, 4, 5, 8, 6, 3, 2, 1 };
-        Assert.Equal(expectedOrder, results);
+        await Assert.That(results).IsEquivalentTo(expectedOrder, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_SnapshotOrder_DoesNotSort()
+    [Test]
+    public async Task Find_SnapshotOrder_DoesNotSort()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -58,13 +58,13 @@ public class SearchEngineNaturalSortTests
         var results = engine.Find("ga", WordMatchMethod.Within);
 
         // Assert - both results found (order depends on snapshot)
-        Assert.Equal(2, results.Count);
-        Assert.Contains(1, results);
-        Assert.Contains(2, results);
+        await Assert.That(results.Count).IsEqualTo(2);
+        await Assert.That(results).Contains(1);
+        await Assert.That(results).Contains(2);
     }
 
-    [Fact]
-    public void Find_NaturalSort_SearchTextSeparateFromSortText()
+    [Test]
+    public async Task Find_NaturalSort_SearchTextSeparateFromSortText()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -82,11 +82,11 @@ public class SearchEngineNaturalSortTests
         var resultsByShock = engine.Find("shock", WordMatchMethod.Within, false, SearchSortMode.NaturalSortAscending);
 
         // Assert - sorted by SortText naturally
-        Assert.Equal(new[] { 20, 10 }, resultsByShock);
+        await Assert.That(resultsByShock).IsEquivalentTo(new[] { 20, 10 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_ExactMatch_SameHitSet_WithAndWithoutSort()
+    [Test]
+    public async Task Find_ExactMatch_SameHitSet_WithAndWithoutSort()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -105,11 +105,11 @@ public class SearchEngineNaturalSortTests
         var sorted = engine.Find("ga", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
         // Assert - same set of IDs
-        Assert.Equal(unsorted.OrderBy(x => x), sorted.OrderBy(x => x));
+        await Assert.That(sorted.OrderBy(x => x)).IsEquivalentTo(unsorted.OrderBy(x => x), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_WithinMatch_SameHitSet_WithAndWithoutSort()
+    [Test]
+    public async Task Find_WithinMatch_SameHitSet_WithAndWithoutSort()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -128,11 +128,11 @@ public class SearchEngineNaturalSortTests
         var sorted = engine.Find("model", WordMatchMethod.Within, false, SearchSortMode.NaturalSortAscending);
 
         // Assert - same set of IDs
-        Assert.Equal(unsorted.OrderBy(x => x), sorted.OrderBy(x => x));
+        await Assert.That(sorted.OrderBy(x => x)).IsEquivalentTo(unsorted.OrderBy(x => x), CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_StringEntries_WorksAfterIncrementalUpdates()
+    [Test]
+    public async Task Find_StringEntries_WorksAfterIncrementalUpdates()
     {
         // Arrange
         var (engine, updater) = CreateEngine();
@@ -145,13 +145,13 @@ public class SearchEngineNaturalSortTests
         var results = engine.Find("hello", WordMatchMethod.Exact);
 
         // Assert
-        Assert.Equal(2, results.Count);
-        Assert.Contains(1, results);
-        Assert.Contains(2, results);
+        await Assert.That(results.Count).IsEqualTo(2);
+        await Assert.That(results).Contains(1);
+        await Assert.That(results).Contains(2);
     }
 
-    [Fact]
-    public void Find_NaturalSort_DuplicateSortKeys_TiebreakByRecordId()
+    [Test]
+    public async Task Find_NaturalSort_DuplicateSortKeys_TiebreakByRecordId()
     {
         var (engine, updater) = CreateEngine();
 
@@ -169,11 +169,11 @@ public class SearchEngineNaturalSortTests
             SearchSortMode.NaturalSortAscending);
 
         // Same sort key → stable order by record ID ascending
-        Assert.Equal(new[] { 10, 20, 30 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 10, 20, 30 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_NaturalSort_PartialMatch_OnlySortedSubset()
+    [Test]
+    public async Task Find_NaturalSort_PartialMatch_OnlySortedSubset()
     {
         var (engine, updater) = CreateEngine();
 
@@ -192,12 +192,12 @@ public class SearchEngineNaturalSortTests
             SearchSortMode.NaturalSortAscending);
 
         // Sorted naturally: DW-5600 < GA-100 < GA-1000
-        Assert.Equal(3, results.Count);
-        Assert.Equal(new[] { 4, 2, 1 }, results);
+        await Assert.That(results.Count).IsEqualTo(3);
+        await Assert.That(results).IsEquivalentTo(new[] { 4, 2, 1 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_NaturalSort_LargeDataset_CorrectOrder()
+    [Test]
+    public async Task Find_NaturalSort_LargeDataset_CorrectOrder()
     {
         var (engine, updater) = CreateEngine();
 
@@ -213,19 +213,19 @@ public class SearchEngineNaturalSortTests
         var results = engine.Find("watch", WordMatchMethod.Exact, false,
             SearchSortMode.NaturalSortAscending);
 
-        Assert.Equal(200, results.Count);
+        await Assert.That(results.Count).IsEqualTo(200);
 
         // Verify natural order: GA-1, GA-2, ..., GA-10, GA-11, ..., GA-200
         // (NOT lexicographic: GA-1, GA-10, GA-100, ...)
-        Assert.Equal(1, results[0]);     // GA-1
-        Assert.Equal(2, results[1]);     // GA-2
-        Assert.Equal(10, results[9]);    // GA-10
-        Assert.Equal(100, results[99]);  // GA-100
-        Assert.Equal(200, results[199]); // GA-200
+        await Assert.That(results[0]).IsEqualTo(1);     // GA-1
+        await Assert.That(results[1]).IsEqualTo(2);     // GA-2
+        await Assert.That(results[9]).IsEqualTo(10);    // GA-10
+        await Assert.That(results[99]).IsEqualTo(100);  // GA-100
+        await Assert.That(results[199]).IsEqualTo(200); // GA-200
     }
 
-    [Fact]
-    public void Find_NaturalSort_AfterAddEntry_StillCorrect()
+    [Test]
+    public async Task Find_NaturalSort_AfterAddEntry_StillCorrect()
     {
         var (engine, updater) = CreateEngine();
 
@@ -242,11 +242,11 @@ public class SearchEngineNaturalSortTests
             SearchSortMode.NaturalSortAscending);
 
         // GA-50 < GA-100 < GA-1000
-        Assert.Equal(new[] { 2, 1, 3 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 2, 1, 3 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_NaturalSort_AfterRemoveEntry_StillCorrect()
+    [Test]
+    public async Task Find_NaturalSort_AfterRemoveEntry_StillCorrect()
     {
         var (engine, updater) = CreateEngine();
 
@@ -262,11 +262,11 @@ public class SearchEngineNaturalSortTests
         var results = engine.Find("watch", WordMatchMethod.Exact, false,
             SearchSortMode.NaturalSortAscending);
 
-        Assert.Equal(new[] { 1, 3 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 1, 3 }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void Find_NaturalSort_MixedPrefixes_SortedCorrectly()
+    [Test]
+    public async Task Find_NaturalSort_MixedPrefixes_SortedCorrectly()
     {
         var (engine, updater) = CreateEngine();
 
@@ -285,6 +285,6 @@ public class SearchEngineNaturalSortTests
             SearchSortMode.NaturalSortAscending);
 
         // DW < GA < PRW (alphabetic), then numeric within prefix
-        Assert.Equal(new[] { 2, 5, 4, 3, 1 }, results);
+        await Assert.That(results).IsEquivalentTo(new[] { 2, 5, 4, 3, 1 }, CollectionOrdering.Matching);
     }
 }

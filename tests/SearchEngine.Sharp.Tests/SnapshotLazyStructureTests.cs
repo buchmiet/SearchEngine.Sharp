@@ -11,41 +11,43 @@ public class SnapshotLazyStructureTests
 {
     private const int Callers = 8;
 
-    [Fact]
-    public void BigramIndex_ConcurrentFirstWithinQueries_BuildItOnce()
+    [Test]
+    public async Task BigramIndex_ConcurrentFirstWithinQueries_BuildItOnce()
     {
         var (provider, engine) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
 
-        int[] counts = RunConcurrently(() => engine.Find("ab", WordMatchMethod.Within).Count);
+        int[] counts = await RunConcurrently(() => engine.Find("ab", WordMatchMethod.Within).Count);
 
-        Assert.Equal(1, snapshot.BigramBuildCount);
-        Assert.All(counts, count => Assert.Equal(counts[0], count));
+        await Assert.That(snapshot.BigramBuildCount).IsEqualTo(1);
+        foreach (int count in counts)
+            await Assert.That(count).IsEqualTo(counts[0]);
     }
 
-    [Fact]
-    public void SortedPermutation_ConcurrentFirstNaturalSortQueries_BuildItOnce()
+    [Test]
+    public async Task SortedPermutation_ConcurrentFirstNaturalSortQueries_BuildItOnce()
     {
         var (provider, engine) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
 
-        int[] firstIds = RunConcurrently(
+        int[] firstIds = await RunConcurrently(
             () => engine.Find("*", WordMatchMethod.Exact, enableOperators: false, SearchSortMode.NaturalSortAscending)[0]);
 
-        Assert.Equal(1, snapshot.SortedPermutationBuildCount);
-        Assert.All(firstIds, id => Assert.Equal(firstIds[0], id));
+        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
+        foreach (int id in firstIds)
+            await Assert.That(id).IsEqualTo(firstIds[0]);
     }
 
-    [Fact]
-    public void LazyStructures_RepeatedReads_ReturnTheSameInstance()
+    [Test]
+    public async Task LazyStructures_RepeatedReads_ReturnTheSameInstance()
     {
         var (provider, _) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
 
-        Assert.Same(snapshot.BigramWordIndices, snapshot.BigramWordIndices);
-        Assert.Same(snapshot.GetSortedPermutation(), snapshot.GetSortedPermutation());
-        Assert.Equal(1, snapshot.BigramBuildCount);
-        Assert.Equal(1, snapshot.SortedPermutationBuildCount);
+        await Assert.That(snapshot.BigramWordIndices).IsSameReferenceAs(snapshot.BigramWordIndices);
+        await Assert.That(snapshot.GetSortedPermutation()).IsSameReferenceAs(snapshot.GetSortedPermutation());
+        await Assert.That(snapshot.BigramBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
     }
 
     // 30,000 distinct names: every build takes milliseconds, so callers released together
@@ -63,7 +65,7 @@ public class SnapshotLazyStructureTests
 
     // Each caller gets its own thread (LongRunning), so all of them reach the barrier even when
     // the thread pool is busy with other tests.
-    private static int[] RunConcurrently(Func<int> query)
+    private static async Task<int[]> RunConcurrently(Func<int> query)
     {
         using var start = new Barrier(Callers);
         var callers = new Task<int>[Callers];
@@ -76,7 +78,6 @@ public class SnapshotLazyStructureTests
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        Task.WaitAll(callers);
-        return [.. callers.Select(caller => caller.Result)];
+        return await Task.WhenAll(callers);
     }
 }

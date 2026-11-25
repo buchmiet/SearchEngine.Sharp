@@ -4,8 +4,8 @@ namespace SearchEngine.Sharp.Tests;
 
 public class NaturalSortKeyBuilderTests
 {
-    [Fact]
-    public void NaturalSortKey_ProducesCorrectOrder_ForCasioModels()
+    [Test]
+    public async Task NaturalSortKey_ProducesCorrectOrder_ForCasioModels()
     {
         var inputs = new[]
         {
@@ -35,56 +35,56 @@ public class NaturalSortKeyBuilderTests
             .OrderBy(NaturalSortKeyBuilder.Build, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(expectedOrder, sorted);
+        await Assert.That(sorted).IsEquivalentTo(expectedOrder, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void NaturalSortKey_NumberBeforeText_AtSamePosition()
+    [Test]
+    public async Task NaturalSortKey_NumberBeforeText_AtSamePosition()
     {
         var key1 = NaturalSortKeyBuilder.Build("GA-100-1");
         var key100A = NaturalSortKeyBuilder.Build("GA-100A");
 
-        Assert.True(string.Compare(key1, key100A, StringComparison.Ordinal) < 0,
-            $"Expected GA-100-1 key '{key1}' < GA-100A key '{key100A}'");
+        await Assert.That(string.Compare(key1, key100A, StringComparison.Ordinal)).IsLessThan(0)
+            .Because($"Expected GA-100-1 key '{key1}' < GA-100A key '{key100A}'");
     }
 
-    [Fact]
-    public void NaturalSortKey_NumericComparison_NotLexicographic()
+    [Test]
+    public async Task NaturalSortKey_NumericComparison_NotLexicographic()
     {
         var key2 = NaturalSortKeyBuilder.Build("GA-2");
         var key10 = NaturalSortKeyBuilder.Build("GA-10");
 
-        Assert.True(string.Compare(key2, key10, StringComparison.Ordinal) < 0,
-            $"Expected GA-2 key '{key2}' < GA-10 key '{key10}'");
+        await Assert.That(string.Compare(key2, key10, StringComparison.Ordinal)).IsLessThan(0)
+            .Because($"Expected GA-2 key '{key2}' < GA-10 key '{key10}'");
     }
 
-    [Fact]
-    public void NaturalSortKey_ShorterSequenceFirst_WhenAllTokensEqual()
+    [Test]
+    public async Task NaturalSortKey_ShorterSequenceFirst_WhenAllTokensEqual()
     {
         var key100 = NaturalSortKeyBuilder.Build("GA-100");
         var key1001 = NaturalSortKeyBuilder.Build("GA-100-1");
 
-        Assert.True(string.Compare(key100, key1001, StringComparison.Ordinal) < 0,
-            $"Expected GA-100 key '{key100}' < GA-100-1 key '{key1001}'");
+        await Assert.That(string.Compare(key100, key1001, StringComparison.Ordinal)).IsLessThan(0)
+            .Because($"Expected GA-100 key '{key100}' < GA-100-1 key '{key1001}'");
     }
 
-    [Fact]
-    public void NaturalSortKey_TextTokens_CaseInsensitive()
+    [Test]
+    public async Task NaturalSortKey_TextTokens_CaseInsensitive()
     {
         var keyLower = NaturalSortKeyBuilder.Build("ga-100");
         var keyUpper = NaturalSortKeyBuilder.Build("GA-100");
 
-        Assert.Equal(keyLower, keyUpper);
+        await Assert.That(keyUpper).IsEqualTo(keyLower);
     }
 
-    [Fact]
-    public void NaturalSortKey_EmptyString_ReturnsEmpty()
+    [Test]
+    public async Task NaturalSortKey_EmptyString_ReturnsEmpty()
     {
-        Assert.Equal(string.Empty, NaturalSortKeyBuilder.Build(""));
+        await Assert.That(NaturalSortKeyBuilder.Build("")).IsEqualTo(string.Empty);
     }
 
-    [Fact]
-    public void NaturalSortKey_ComplexModel_GST()
+    [Test]
+    public async Task NaturalSortKey_ComplexModel_GST()
     {
         var inputs = new[]
         {
@@ -97,11 +97,11 @@ public class NaturalSortKeyBuilderTests
             .OrderBy(NaturalSortKeyBuilder.Build, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { "GST-B400C-1A", "GST-B400D-1A", "GST-B400D-1B" }, sorted);
+        await Assert.That(sorted).IsEquivalentTo(new[] { "GST-B400C-1A", "GST-B400D-1A", "GST-B400D-1B" }, CollectionOrdering.Matching);
     }
 
-    [Fact]
-    public void NaturalSortKey_DW_Models()
+    [Test]
+    public async Task NaturalSortKey_DW_Models()
     {
         var inputs = new[]
         {
@@ -115,12 +115,12 @@ public class NaturalSortKeyBuilderTests
             .OrderBy(NaturalSortKeyBuilder.Build, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[]
+        await Assert.That(sorted).IsEquivalentTo(new[]
         {
             "DW-5600BB-1",
             "DW-5600BB-1A",
             "DW-5600BB-2",
             "DW-5600E-1"
-        }, sorted);
+        }, CollectionOrdering.Matching);
     }
 }
