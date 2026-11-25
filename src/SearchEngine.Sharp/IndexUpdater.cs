@@ -37,6 +37,14 @@ public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenizat
     private readonly Lock _rebuildGate = new();
     private Dictionary<int, IndexedEntry> _entries = [];
 
+    // Starts from entries whose snapshot was published by the caller (dependency injection), so the first
+    // mutation rebuilds from them instead of dropping them.
+    internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization, IReadOnlyDictionary<int, IndexedEntry> seed)
+        : this(provider, tokenization)
+    {
+        _entries = new Dictionary<int, IndexedEntry>(seed);
+    }
+
     /// <inheritdoc />
     public int EntryCount
     {

@@ -67,6 +67,16 @@ internal static class ResultMaterializer
         if (SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount))
             return MaterializeNaturalSortKOnly(snapshot, resultSet, hitCount, recordIds);
 
+        return MaterializeNaturalSortFullPermutation(snapshot, resultSet, hitCount, recordIds);
+    }
+
+    // Walks the sort permutation of the whole snapshot and keeps the hits: cost grows with the document count.
+    internal static List<int> MaterializeNaturalSortFullPermutation(
+        IndexSnapshot snapshot,
+        FastBitSet resultSet,
+        int hitCount,
+        ReadOnlySpan<int> recordIds)
+    {
         var results = new List<int>(hitCount);
         var permutation = snapshot.GetSortedPermutation();
         foreach (int ordinal in permutation)
@@ -78,7 +88,8 @@ internal static class ResultMaterializer
         return results;
     }
 
-    private static List<int> MaterializeNaturalSortKOnly(
+    // Builds a sort key for each hit and sorts only the hits: cost grows with the hit count.
+    internal static List<int> MaterializeNaturalSortKOnly(
         IndexSnapshot snapshot,
         FastBitSet resultSet,
         int hitCount,

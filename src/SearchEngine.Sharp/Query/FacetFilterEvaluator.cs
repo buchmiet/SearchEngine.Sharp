@@ -31,7 +31,17 @@ internal static class FacetFilterEvaluator
             return;
         }
 
-        var resolved = ResolvePredicates(predicates, snapshot);
+        ApplyFullScan(results, filter, snapshot, qc);
+    }
+
+    // Tests every document against the filter, then intersects: cost grows with the document count.
+    internal static void ApplyFullScan(
+        FastBitSet results,
+        FacetFilter filter,
+        IndexSnapshot snapshot,
+        QueryContext qc)
+    {
+        var resolved = ResolvePredicates(filter.Predicates, snapshot);
         var matching = qc.RentEmptyBitSet();
 
         for (int ordinal = 0; ordinal < matching.Length; ordinal++)
@@ -43,7 +53,8 @@ internal static class FacetFilterEvaluator
         results.IntersectWith(matching);
     }
 
-    private static void ApplyOnHitsInPlace(
+    // Tests only the documents that already match the text query: cost grows with the hit count.
+    internal static void ApplyOnHitsInPlace(
         FastBitSet results,
         FacetFilter filter,
         IndexSnapshot snapshot,

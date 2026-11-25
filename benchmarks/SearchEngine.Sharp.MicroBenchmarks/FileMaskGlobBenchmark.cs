@@ -38,7 +38,7 @@ public class FileMaskGlobBenchmark
         _globJpg = "*.jpg";
     }
 
-    [Benchmark(Baseline = true, Description = "Default tokenization — *.pdf (broken: '.' splits query)")]
+    [Benchmark(Baseline = true, Description = "Default tokenization — *.pdf (the dot splits the query into two tokens)")]
     public int GlobPdf_DefaultTokenization()
         => _defaultEngine.Find(_globPdf, WordMatchMethod.Exact, enableOperators: true).Count;
 
@@ -46,7 +46,7 @@ public class FileMaskGlobBenchmark
     public int GlobPdf_FileMask()
         => _fileMaskEngine.Find(_globPdf, WordMatchMethod.Exact, enableOperators: true).Count;
 
-    [Benchmark(Description = "FileMask — *.pdf + facet (full N facet scan)")]
+    [Benchmark(Description = "FileMask tokenization — *.pdf with a size filter")]
     public int GlobPdfFacet_FileMask()
         => _fileMaskEngine.Find(
             _globPdf,
@@ -55,7 +55,7 @@ public class FileMaskGlobBenchmark
             SearchSortMode.SnapshotOrder,
             _filter).Count;
 
-    [Benchmark(Description = "FileMask — *.jpg whole filename")]
+    [Benchmark(Description = "FileMask tokenization — whole-filename *.jpg")]
     public int GlobJpg_FileMask()
         => _fileMaskEngine.Find(_globJpg, WordMatchMethod.Exact, enableOperators: true).Count;
 }
