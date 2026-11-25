@@ -17,17 +17,31 @@ public static class SyntheticPathFeed
     /// <summary>
     /// Yields <paramref name="count"/> synthetic paths, optionally waiting before each one to simulate slow I/O.
     /// </summary>
-    /// <param name="count">The number of paths. Zero or less yields nothing.</param>
+    /// <param name="count">The number of paths. Zero yields nothing.</param>
     /// <param name="seed">The seed of the random generator.</param>
     /// <param name="delayPerEntry">The wait before each path; no wait when zero or negative.</param>
     /// <param name="cancellationToken">Stops the enumeration.</param>
     /// <returns>The paths, keyed by id.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative. Thrown at the call, before
+    /// the stream is enumerated.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static async IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(
+    public static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(
         int count,
         int seed = 42,
         TimeSpan delayPerEntry = default,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        return EnumerateCoreAsync(count, seed, delayPerEntry, cancellationToken);
+    }
+
+    // The iterator behind EnumerateAsync. An iterator runs nothing until it is enumerated, so the argument check
+    // stays in the caller.
+    private static async IAsyncEnumerable<KeyValuePair<int, string>> EnumerateCoreAsync(
+        int count,
+        int seed,
+        TimeSpan delayPerEntry,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var rng = new Random(seed);
 

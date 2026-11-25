@@ -69,6 +69,8 @@ Changed.
   entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
   because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the
   last value wins.
+- `SyntheticPathFeed.EnumerateAsync` throws `ArgumentOutOfRangeException` naming `count` when the count is
+  negative, at the call, like `CreateDictionary`. It used to yield nothing.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published (it was always 0).
 - `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
   IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text

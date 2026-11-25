@@ -358,6 +358,9 @@ static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(int count, int
 static Dictionary<int, string> CreateDictionary(int count, int seed = 42);
 ```
 
+Both methods throw `ArgumentOutOfRangeException` for a negative `count`. `EnumerateAsync` throws it at the call,
+before the stream is read.
+
 ## Namespace `SearchEngine.Sorting`
 
 ### `NaturalSortKeyBuilder`
