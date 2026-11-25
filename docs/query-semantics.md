@@ -100,6 +100,8 @@ applied to indexed `SearchText` and to queries; ASCII text is never touched):
 
 Regex patterns are composed (and stripped of diacritics with `RemoveDiacritics`) but not case-folded,
 because folding would change character classes; write `ss` for a folded `ß`. `SortText` is never folded.
+Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and U+FFFE cannot be normalized: those code
+units are kept as they are and the text around them is folded, so such a name still matches itself.
 
 ## Index-side tokenization (Default preset)
 

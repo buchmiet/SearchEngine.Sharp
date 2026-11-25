@@ -79,6 +79,40 @@ public class UnicodeMatchingTests
         Assert.Empty(bounded.Find("👩", WordMatchMethod.Within));
     }
 
+    // Lone surrogates (legal in NTFS names) and U+FFFE make string.Normalize throw; folding must not.
+    [Theory]
+    [InlineData(UnicodeMatching.Compose)]
+    [InlineData(UnicodeMatching.RemoveDiacritics)]
+    [InlineData(UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.GraphemeBoundaries)]
+    public void IllFormedText_IsIndexedAndMatchesItself(UnicodeMatching options)
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(options);
+        string[] names = ["ok.txt", "report\uD800.txt", "\uDC00cafe\u0301.txt", "a\uFFFEb.txt", "zdj\uD83D\uDE00.jpg"];
+        var engine = Index(tokenization, names);
+
+        Assert.Equal([1], engine.Find("ok.txt", WordMatchMethod.Exact));
+        Assert.Equal([2], engine.Find("report\uD800.txt", WordMatchMethod.Exact));
+        Assert.Equal([2], engine.Find("report\uD800*", WordMatchMethod.Exact, enableOperators: true));
+        Assert.Equal([3], engine.Find("\uDC00caf\u00E9*", WordMatchMethod.Exact));
+        Assert.Equal([4], engine.Find("a\uFFFEb.txt", WordMatchMethod.Exact));
+        Assert.Equal(1, engine.CountMatches("*\uFFFE*", WordMatchMethod.Exact));
+        Assert.Empty(engine.Find("zdj\uD83D", WordMatchMethod.Exact));
+        Assert.Equal([5], engine.Find("zdj\uD83D\uDE00*", WordMatchMethod.Exact));
+
+        foreach (string name in names)
+            Assert.True(NameMatcher.Create(name, WordMatchMethod.Exact, tokenization: tokenization).IsMatch(name));
+        Assert.False(NameMatcher.Create("zdj\uD83D", WordMatchMethod.Exact, tokenization: tokenization).IsMatch(names[4]));
+    }
+
+    [Fact]
+    public void IllFormedText_FoldsTheWellFormedRunsAndKeepsTheRest()
+    {
+        const UnicodeMatching all = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
+
+        Assert.Equal("\uD800e\uDC00a\uFFFEss", TextFolder.Fold("\uD800e\u0301\uDC00a\u030A\uFFFE\u00DF", all, isRegex: false));
+        Assert.Equal("\uD800\u00E9\uDC00\uFFFE", TextFolder.Fold("\uD800e\u0301\uDC00\uFFFE", UnicodeMatching.Compose, isRegex: false));
+    }
+
     [Fact]
     public void RegexPattern_IsComposedButNotCaseFolded()
     {

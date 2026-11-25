@@ -55,15 +55,64 @@ internal static class TextFolder
         if ((normalization & folding) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
             return text;
 
-        if ((normalization & UnicodeMatching.RemoveDiacritics) != 0)
-            text = RemoveDiacritics(text);
-        else if ((normalization & UnicodeMatching.Compose) != 0 && !text.IsNormalized(NormalizationForm.FormC))
-            text = text.Normalize(NormalizationForm.FormC);
+        bool removeDiacritics = (normalization & UnicodeMatching.RemoveDiacritics) != 0;
+        if (removeDiacritics || (normalization & UnicodeMatching.Compose) != 0)
+            text = NormalizeWellFormedRuns(text, removeDiacritics);
 
         if ((normalization & UnicodeMatching.CaseFold) != 0 && !isRegex && text.AsSpan().ContainsAny(CaseFoldSpecials))
             text = ApplyCaseFoldSpecials(text);
 
         return text;
+    }
+
+    // string.Normalize and string.IsNormalized throw ArgumentException on ill-formed UTF-16 (a lone surrogate, which
+    // file systems such as NTFS allow in names) and on U+FFFE. Such a code unit takes no part in composition, so it is
+    // kept as it is and the well-formed runs around it are normalized on their own: the text still matches itself.
+    private static string NormalizeWellFormedRuns(string text, bool removeDiacritics)
+    {
+        int invalid = IndexOfUnnormalizable(text);
+        if (invalid < 0)
+            return Normalize(text, removeDiacritics);
+
+        var sb = new StringBuilder(text.Length);
+        int start = 0;
+        while (invalid >= 0)
+        {
+            sb.Append(Normalize(text[start..invalid], removeDiacritics)).Append(text[invalid]);
+            start = invalid + 1;
+            int next = IndexOfUnnormalizable(text.AsSpan(start));
+            invalid = next < 0 ? -1 : start + next;
+        }
+
+        return sb.Append(Normalize(text[start..], removeDiacritics)).ToString();
+    }
+
+    private static int IndexOfUnnormalizable(ReadOnlySpan<char> text)
+    {
+        if (!text.ContainsAnyInRange('\uD800', '\uDFFF') && !text.Contains('\uFFFE'))
+            return -1;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (char.IsHighSurrogate(ch) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                i++;
+            else if (char.IsSurrogate(ch) || ch == '\uFFFE')
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static string Normalize(string text, bool removeDiacritics)
+    {
+        if (text.Length == 0)
+            return text;
+
+        if (removeDiacritics)
+            return RemoveDiacritics(text);
+
+        return text.IsNormalized(NormalizationForm.FormC) ? text : text.Normalize(NormalizationForm.FormC);
     }
 
     private static string RemoveDiacritics(string text)
