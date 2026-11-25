@@ -22,7 +22,7 @@ Console.WriteLine($"Artifacts: {MicroBenchmarkConfig.ArtifactsDirectory}");
 Console.WriteLine();
 
 var summary = BenchmarkSwitcher
-    .FromAssembly(typeof(Program).Assembly)
+    .FromAssembly(typeof(MicroBenchmarkConfig).Assembly)
     .Run(args, new MicroBenchmarkConfig());
 
 _ = summary;
