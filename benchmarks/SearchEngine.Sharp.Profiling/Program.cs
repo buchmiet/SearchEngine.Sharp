@@ -118,9 +118,6 @@ static class FindRun
             case "C":
                 foreach (var path in StreamingScan.Find(req)) OnHit(path);
                 break;
-            case "F":
-                foreach (var path in StreamingScan.FindWithNameMatcher(req)) OnHit(path);
-                break;
             case "D":
                 await foreach (var path in StreamingScan.FindParallel(req, a.Int("threads", Math.Min(8, Environment.ProcessorCount))))
                     OnHit(path);
