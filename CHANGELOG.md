@@ -6,8 +6,9 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [0.6.0] - 2026-11-24
 
-Requires .NET 11. The public API gains members; the changes to members that shipped in 0.5.6 are listed under
-Changed.
+Requires .NET 11. Code written for 0.5.6 may need changes: two members of `IngestionResult` are renamed, one
+`AddSearchEngine` overload is replaced, and most methods now throw `ArgumentNullException` or `ArgumentException`
+for invalid arguments. Every change to what shipped in 0.5.6 is listed under Changed.
 
 ### Added
 

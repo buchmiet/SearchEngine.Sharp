@@ -10,7 +10,8 @@ namespace SearchEngine;
 /// Snapshots are published by the <see cref="IndexUpdater"/> created with this provider and by the registration
 /// methods of <see cref="DependencyInjection.ServiceCollectionExtensions"/> that take initial content. A publish
 /// replaces the reference atomically. A query that read <see cref="Current"/> before a publish keeps using that
-/// snapshot to the end; the snapshot never changes, so the query sees a consistent index.
+/// snapshot to the end; the content of a snapshot never changes (it only builds two lookup structures on first use),
+/// so the query sees a consistent index.
 /// </remarks>
 public sealed class IndexSnapshotProvider : IIndexSnapshotProvider
 {

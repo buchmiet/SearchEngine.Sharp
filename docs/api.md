@@ -225,7 +225,9 @@ static FacetFilter Combine(params FacetFilter[] filters);
 
 ### `IndexSnapshot`
 
-An immutable index. Any number of threads may query one snapshot at once.
+An index whose content never changes. Any number of threads may query one snapshot at once. The lookup structures
+for `Within` and for `NaturalSortAscending` are built on the first query that needs them, once per snapshot;
+concurrent first callers wait for that build.
 
 ```csharp
 static readonly IndexSnapshot Empty;    // empty snapshot with SearchTokenization.Default
