@@ -121,4 +121,71 @@ public class NaturalSortTieBreakTests
             await Assert.That(engine.Find("even", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending)).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
     }
+
+    // 4,000 documents. Word "pN" matches every N-th id, so its hit density is 1/N: 0.1%, 0.5%, 1%, 10%, 50%, 100%.
+    // Sort texts repeat in 97 natural keys, written in forms that compare equal, so ties are common.
+    private const int StrategyDocumentCount = 4_000;
+    private static readonly int[] Periods = [1000, 200, 100, 10, 2, 1];
+
+    private static IndexSnapshot BuildStrategySnapshot()
+    {
+        var entries = new List<KeyValuePair<int, IndexedEntry>>(StrategyDocumentCount);
+        for (int id = StrategyDocumentCount; id >= 1; id--)
+        {
+            string searchText = string.Join(' ', Periods.Where(period => id % period == 0).Select(period => $"p{period}"));
+            int key = id * 7919 % 97;
+            string sortText = (id % 3) switch { 0 => $"File {key}", 1 => $"file 0{key}", _ => $"FILE_{key}" };
+            entries.Add(new(id, new IndexedEntry(searchText, sortText, FacetValues.Create("n", id))));
+        }
+
+        return IndexSnapshotBuilder.Build(entries);
+    }
+
+    public static IEnumerable<(int Period, bool Filtered)> StrategyCases()
+        => Periods.SelectMany(period => new[] { (period, false), (period, true) });
+
+    [Test]
+    [MethodDataSource(nameof(StrategyCases))]
+    public async Task Cold_and_built_permutation_snapshots_give_the_reference_order(int period, bool filtered)
+    {
+        var cold = BuildStrategySnapshot();
+        var warm = BuildStrategySnapshot();
+        _ = warm.GetSortedPermutation();
+        FacetFilter? filter = filtered ? FacetFilter.Range("n", 1, 3_000) : null;
+        var expected = Expected(cold, id => id % period == 0 && (!filtered || id <= 3_000));
+
+        var coldResults = new SearchEngineSharp(new FixedSnapshotProvider(cold))
+            .Find($"p{period}", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending, filter);
+        var warmResults = new SearchEngineSharp(new FixedSnapshotProvider(warm))
+            .Find($"p{period}", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending, filter);
+
+        await Assert.That(coldResults).IsEquivalentTo(expected, CollectionOrdering.Matching);
+        await Assert.That(warmResults).IsEquivalentTo(coldResults, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Few_hits_on_a_cold_snapshot_do_not_build_the_permutation()
+    {
+        var snapshot = BuildStrategySnapshot();
+        var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
+
+        _ = engine.Find("p10", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
+
+        await Assert.That(snapshot.IsSortedPermutationBuilt).IsFalse();
+        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task The_built_permutation_replaces_sorting_the_hits_above_the_limit()
+    {
+        var snapshot = BuildStrategySnapshot();
+        int aboveLimit = (int)(StrategyDocumentCount * SelectivityThresholds.NaturalSortBuiltPermutationSortKMaxFraction) + 1;
+
+        await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsTrue();
+        _ = snapshot.GetSortedPermutation();
+
+        await Assert.That(snapshot.IsSortedPermutationBuilt).IsTrue();
+        await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsFalse();
+        await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit - 1)).IsTrue();
+    }
 }
