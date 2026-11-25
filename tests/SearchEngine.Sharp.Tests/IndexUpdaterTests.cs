@@ -154,21 +154,28 @@ public class IndexUpdaterTests
         }
     }
 
-    public static TheoryData<string> Presets => new() { "default", "filemask", "custom", "unicode" };
-
     private static SearchTokenization PresetByName(string name) => name switch
     {
         "default" => SearchTokenization.Default,
         "filemask" => SearchTokenization.FileMask,
-        "custom" => SearchTokenization.Create("_", " "),
-        _ => SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold),
+        _ => SearchTokenization.Create("_", " "),
     };
 
     [Theory]
-    [MemberData(nameof(Presets))]
+    [InlineData("default")]
+    [InlineData("filemask")]
+    [InlineData("custom")]
     public void Clear_KeepsTheConfigurationOfTheUpdater(string preset)
+        => AssertClearKeepsTheConfiguration(PresetByName(preset));
+
+    // Compose needs Unicode normalization, so this preset is skipped in globalization-invariant mode.
+    [NormalizationFact]
+    public void Clear_KeepsTheConfigurationOfTheUpdater_WithUnicodeMatching()
+        => AssertClearKeepsTheConfiguration(
+            SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold));
+
+    private static void AssertClearKeepsTheConfiguration(SearchTokenization tokenization)
     {
-        var tokenization = PresetByName(preset);
         var (engine, updater, provider) = Create(tokenization);
         var entries = new Dictionary<int, string>
         {
