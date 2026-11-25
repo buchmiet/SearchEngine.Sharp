@@ -51,7 +51,15 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 - Concurrent first `NaturalSortAscending` queries on a new snapshot each built their own copy of the sort
   permutation (8 at once at 1M names: 2.3 s each, 1.1 GB allocated); they now share one build (0.8 s, 161 MB).
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
-  with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
+  with `NOT AND` or `NOT OR`, and returned nothing for misplaced operators elsewhere (`a NOT AND b`, `(AND a)`,
+  `(a OR) b`, `a () b`). Malformed operator sequences are now corrected by the documented rules at the start and
+  end of the expression and of every parenthesised group.
+- Indexing compared raw tokens case-insensitively but stored them lowercased: a document whose tokens become equal
+  only after lowercasing (`Straße STRAẞE`, `k` and the Kelvin sign) was posted twice, so `Find` returned its id
+  twice and `CountMatches` counted it twice; the second of two tokens that are equal only under case-insensitive
+  comparison (`ς σ`, `µ μ`, Greek symbol variants such as `β ϐ`) was never indexed. Tokens are now deduplicated on
+  their lowercase form with ordinal comparison. `TextNormalizer.ForEachUniqueWord` requires an ordinal set and
+  throws `ArgumentException` otherwise.
 - `FacetValues.FromDictionary` enumerates the source once into a buffer, so a concurrently mutated dictionary can no
   longer produce a bag with trailing null names or an `IndexOutOfRangeException`, and it rejects null and duplicate
   names with `ArgumentException` exactly like `FacetValues.Create(span)`.
@@ -81,11 +89,13 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
 
 ### Tests
 
-- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); leading `NOT AND`/`NOT OR`; lazy bigram index vs brute
+- Deterministic facet-ingestion and growth-aware publish-count tests (both were timing-dependent); malformed
+  operator sequences at the start, middle and end of expressions and groups (52 cases); lazy bigram index vs brute
   force with concurrent first callers; one build of the bigram index and of the sort permutation for 8
   concurrent first callers; 50,000 random glob/word pairs (fast paths vs general matcher); facet
   columns with known and unknown entry count; staleness back-off vs strict; Unicode matching (13 cases);
-  `NameMatcher` vs index (20 queries × 4 presets).
+  `NameMatcher` vs index (20 queries × 4 presets, and every combination of 20 texts × 43 queries × 3 methods ×
+  8 tokenizations, including empty text, custom separators and a regex timeout).
 
 ### Benchmarks
 

@@ -179,7 +179,7 @@ internal static class GlobMatcher
             Kind.Prefix => word.Length >= _head.Length && word[0] == _head[0] && word.StartsWith(_head)
                 && IsBoundary(word, _head.Length),
             Kind.Suffix => word.EndsWith(_tail) && IsBoundary(word, word.Length - _tail.Length),
-            Kind.Contains => _graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, _head) >= 0 : word.IndexOf(_head) >= 0,
+            Kind.Contains => QueryMatcher.ContainsWithin(word, _head, _graphemeBoundaries),
             Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail)
                 && IsBoundary(word, _head.Length) && IsBoundary(word, word.Length - _tail.Length),
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),

@@ -157,10 +157,15 @@ Rules:
      expression. If unbalanced, every parenthesis degrades to a plain separator.
 4. With `enableOperators: false` (the default), `and` / `or` / `not` are ordinary
    search terms and parentheses are plain separators.
-5. Malformed expressions are corrected, not rejected:
-   - Leading `AND` / `OR` and all trailing operators are dropped.
-   - `AND AND` collapses to a single `AND`; `NOT NOT` cancels out;
-     any other adjacent binary-operator pair collapses to `AND`.
+5. Malformed expressions are corrected, not rejected. The start and end of a
+   parenthesised group are treated like the start and end of the expression:
+   - Leading `AND` / `OR` and all trailing operators are dropped
+     (`(AND a)` = `a`, `(a OR) b` = `a AND b`).
+   - `NOT NOT` counts as one `NOT`. A binary operator followed by `NOT` is kept
+     (`a AND NOT b`). Any other pair of adjacent operators collapses to `AND`,
+     wherever it occurs: `a AND AND b`, `a OR OR b`, `a NOT AND b` and
+     `a AND NOT AND b` all mean `a AND b`.
+   - An empty group `()` is dropped.
 6. An expression that is empty, whitespace, or reduces to nothing after correction
    returns no results — unless a non-empty facet filter is supplied
    (see [filter-only queries](#filter-only-queries)).

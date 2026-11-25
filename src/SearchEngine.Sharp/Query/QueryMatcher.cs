@@ -175,10 +175,15 @@ internal static class QueryMatcher
         return result;
     }
 
-    // Finds target inside wordsArray[searchStart..searchEnd) with one vectorized IndexOf (instead of comparing
-    // a sliding window at every position). On a match, all documents that contain the indexed word are added to
-    // result; one match per word is enough. With UnicodeMatching.GraphemeBoundaries a match must start and end on
-    // grapheme cluster boundaries (TextFolder.IndexOfOnGraphemeBoundaries).
+    // Finds target inside word with one vectorized IndexOf (instead of comparing a sliding window at every
+    // position). With UnicodeMatching.GraphemeBoundaries a match must start and end on grapheme cluster boundaries
+    // (TextFolder.IndexOfOnGraphemeBoundaries). Also used by NameMatcher and by *x* globs (GlobMatcher.Shape).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)
+        => (graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, target) : word.IndexOf(target)) >= 0;
+
+    // On a match of target inside wordsArray[searchStart..searchEnd), all documents that contain the indexed word
+    // are added to result; one match per word is enough.
     private static void MatchSubstring(
         FastBitSet result,
         ReadOnlySpan<char> target,
@@ -190,9 +195,7 @@ internal static class QueryMatcher
         int searchEnd,
         bool graphemeBoundaries)
     {
-        var word = wordsArray[searchStart..searchEnd];
-        int index = graphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(word, target) : word.IndexOf(target);
-        if (index < 0)
+        if (!ContainsWithin(wordsArray[searchStart..searchEnd], target, graphemeBoundaries))
             return;
 
         for (int k = 0; k < postingCount; k++)

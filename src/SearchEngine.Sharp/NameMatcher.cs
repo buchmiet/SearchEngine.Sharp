@@ -60,9 +60,6 @@ public sealed class NameMatcher
         if (_postfix is null && _regex is null)
             return false;
 
-        if (text.IsEmpty)
-            return false;
-
         string? folded = null;
         if (_tokenization.UnicodeMatching != UnicodeMatching.None && !System.Text.Ascii.IsValid(text))
         {
@@ -70,6 +67,8 @@ public sealed class NameMatcher
             text = folded;
         }
 
+        // As in the index, tokens are split on the separators of the (folded) text and then lowercased: a
+        // separator that lowercasing would create or remove does not move a token boundary.
         char[]? rented = text.Length > 256 ? ArrayPool<char>.Shared.Rent(text.Length) : null;
         Span<char> lower = rented is null ? stackalloc char[text.Length] : rented.AsSpan(0, text.Length);
         for (int i = 0; i < text.Length; i++)
@@ -77,7 +76,7 @@ public sealed class NameMatcher
 
         try
         {
-            return _regex is not null ? MatchRegex(lower) : Evaluate(lower);
+            return _regex is not null ? MatchRegex(text, lower) : Evaluate(text, lower);
         }
         finally
         {
@@ -86,64 +85,53 @@ public sealed class NameMatcher
         }
     }
 
-    private bool MatchRegex(ReadOnlySpan<char> lower)
+    // Every token is tried: the index returns nothing when the pattern times out on any word, so a timeout after
+    // an earlier hit is still no match.
+    private bool MatchRegex(ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
+        bool matched = false;
         try
         {
-            foreach (var range in Tokens(lower))
-            {
-                if (_regex!.IsMatch(lower[range]))
-                    return true;
-            }
+            foreach (var range in Tokens(text))
+                matched |= _regex!.IsMatch(lower[range]);
         }
         catch (RegexMatchTimeoutException)
         {
-            return false; // the index treats a timeout as an empty result
+            return false;
         }
 
-        return false;
+        return matched;
     }
 
-    private bool Evaluate(ReadOnlySpan<char> lower)
+    private bool Evaluate(ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
         var postfix = _postfix!;
         Span<bool> stack = postfix.Length <= 128 ? stackalloc bool[postfix.Length] : new bool[postfix.Length];
-        int count = 0;
-        foreach (var token in postfix)
-        {
-            switch (token.Operation)
-            {
-                case WordOperations.None:
-                    stack[count++] = MatchTerm(token.Word, lower);
-                    break;
-                case WordOperations.Not:
-                    if (count < 1) return false;
-                    stack[count - 1] = !stack[count - 1];
-                    break;
-                case WordOperations.And:
-                    if (count < 2) return false;
-                    count--;
-                    stack[count - 1] &= stack[count];
-                    break;
-                case WordOperations.Or:
-                    if (count < 2) return false;
-                    count--;
-                    stack[count - 1] |= stack[count];
-                    break;
-            }
-        }
-
-        return count > 0 && stack[count - 1];
+        var algebra = new TextAlgebra(this, text, lower);
+        return QueryExpressionEvaluator.Evaluate<bool, TextAlgebra>(postfix, ref algebra, stack);
     }
 
-    private bool MatchTerm(string word, ReadOnlySpan<char> lower)
+    // The terms of one text: true when a token of the text matches the term. A text without tokens is still a
+    // document, so "*" and NOT terms match it.
+    private readonly ref struct TextAlgebra(NameMatcher matcher, ReadOnlySpan<char> text, ReadOnlySpan<char> lower) : QueryExpressionEvaluator.IQueryAlgebra<bool>
+    {
+        private readonly ReadOnlySpan<char> _text = text;
+        private readonly ReadOnlySpan<char> _lower = lower;
+
+        public bool Match(string word) => matcher.MatchTerm(word, _text, _lower);
+        public bool Not(bool operand) => !operand;
+        public bool And(bool left, bool right) => left & right;
+        public bool Or(bool left, bool right) => left | right;
+    }
+
+    private bool MatchTerm(string word, ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
         if (word.Length == 1 && word[0] == '*')
             return true;
 
         bool glob = GlobMatcher.ContainsMetacharacters(word);
         var shape = glob ? new GlobMatcher.Shape(word, _tokenization.GraphemeBoundaries) : default;
-        foreach (var range in Tokens(lower))
+        foreach (var range in Tokens(text))
         {
             var token = lower[range];
             if (glob)
@@ -154,7 +142,7 @@ public sealed class NameMatcher
             {
                 if (token.SequenceEqual(word)) return true;
             }
-            else if (ContainsWithin(token, word))
+            else if (QueryMatcher.ContainsWithin(token, word, _tokenization.GraphemeBoundaries))
             {
                 return true;
             }
@@ -163,10 +151,7 @@ public sealed class NameMatcher
         return false;
     }
 
-    private bool ContainsWithin(ReadOnlySpan<char> token, ReadOnlySpan<char> word)
-        => (_tokenization.GraphemeBoundaries ? TextFolder.IndexOfOnGraphemeBoundaries(token, word) : token.IndexOf(word)) >= 0;
-
-    private TokenEnumerator Tokens(ReadOnlySpan<char> lower) => new(lower, _tokenization.IndexSeparatorValues);
+    private TokenEnumerator Tokens(ReadOnlySpan<char> text) => new(text, _tokenization.IndexSeparatorValues);
 
     private ref struct TokenEnumerator(ReadOnlySpan<char> text, SearchValues<char> separators)
     {

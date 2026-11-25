@@ -136,11 +136,12 @@ static class BuildCost
         var tok = SearchTokenization.FileMask;
         var t = new Dictionary<string, double>();
 
-        var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        var separators = System.Buffers.SearchValues.Create(tok.IndexSeparators);
         var sw = Stopwatch.StartNew();
         int words = 0;
         foreach (var (_, e) in entries)
-            TextNormalizer.ForEachUniqueWord(e.SearchText, unique, System.Buffers.SearchValues.Create(tok.IndexSeparators), ref words, static (ref int n, string _) => n++);
+            TextNormalizer.ForEachUniqueWord(e.SearchText, unique, separators, ref words, static (ref int n, string _) => n++);
         t["tokenizeOnlyMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
 
         long a0 = GC.GetTotalAllocatedBytes(true);
