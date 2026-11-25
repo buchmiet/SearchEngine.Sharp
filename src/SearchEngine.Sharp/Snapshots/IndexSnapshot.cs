@@ -38,13 +38,18 @@ namespace SearchEngine.Snapshots;
 // readers always see a consistent snapshot.
 
 /// <summary>
-/// Immutable snapshot of the search index.
-/// Thread-safe for concurrent reads. Its content never changes after construction.
+/// An immutable index built by <see cref="IndexSnapshotBuilder"/> or an <see cref="IndexUpdater"/>. Any number of
+/// threads may query one snapshot at once.
 /// </summary>
+/// <remarks>
+/// The content never changes after construction. Two lookup structures are built on first use instead: one for
+/// <see cref="WordMatchMethod.Within"/> terms and one for <see cref="SearchSortMode.NaturalSortAscending"/>. Each is
+/// built once per snapshot; concurrent first callers wait for that build.
+/// </remarks>
 public sealed class IndexSnapshot
 {
     /// <summary>
-    /// Empty snapshot singleton.
+    /// Gets a shared empty snapshot that uses <see cref="SearchTokenization.Default"/>.
     /// </summary>
     public static readonly IndexSnapshot Empty = CreateEmpty(SearchTokenization.Default);
 
@@ -130,10 +135,13 @@ public sealed class IndexSnapshot
     // Facet columns parallel to RecordIds/document ordinals. Empty when no facets are indexed.
     internal readonly Dictionary<string, long[]> FacetColumns;
 
-    /// <summary>Tokenization preset used when this snapshot was built.</summary>
+    /// <summary>Gets the preset this snapshot was built with. Every query on the snapshot uses it.</summary>
     public SearchTokenization Tokenization { get; }
 
+    /// <summary>Gets the number of documents in the snapshot, one for each entry the builder enumerated.</summary>
     public int DocumentCount { get; }
+
+    /// <summary>Gets the number of distinct tokens across all documents of the snapshot.</summary>
     public int UniqueWordCount { get; }
 
     internal IndexSnapshot(

@@ -6,7 +6,7 @@ namespace SearchEngine;
 // that calls IndexSnapshotProvider.Publish. All mutating operations are serialised
 // through _rebuildGate so concurrent callers never see a partially-updated index.
 //
-// Why full rebuild on every mutation?
+// Reason for a full rebuild on every mutation:
 //   The index data structures (flat arrays, sorted word list, bigram index) do not
 //   support incremental updates: inserting or removing a word would require
 //   re-sorting and re-packing all arrays. A full rebuild is simple and correct, and it is
@@ -28,8 +28,17 @@ namespace SearchEngine;
 
 /// <summary>
 /// Keeps the entries of an index and publishes a new snapshot to the <see cref="IndexSnapshotProvider"/> after
-/// each mutation. Mutations are serialized; queries read the published snapshot without taking the lock.
+/// each change. Changes are serialized; queries read the published snapshot without taking the lock.
 /// </summary>
+/// <param name="provider">The provider that receives every snapshot this updater builds. Use one updater per
+/// provider: two updaters on one provider overwrite each other's snapshots.</param>
+/// <param name="tokenization">The preset of every snapshot this updater builds, including the empty one published
+/// by <see cref="Clear"/>; <see cref="SearchTokenization.Default"/> when <see langword="null"/>.</param>
+/// <remarks>
+/// The updater starts empty and does not read the snapshot that <paramref name="provider"/> already holds: its first
+/// change publishes a snapshot built only from the entries given to the updater. All members are safe to call from
+/// several threads.
+/// </remarks>
 public sealed class IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null) : IIndexUpdater
 {
     private readonly IndexSnapshotProvider _provider = provider;

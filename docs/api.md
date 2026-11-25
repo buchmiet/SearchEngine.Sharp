@@ -252,7 +252,9 @@ Task<IngestionResult> IngestAsync(
     CancellationToken cancellationToken = default);
 ```
 
-- One `IngestAsync` call per instance at a time; a second concurrent call throws `InvalidOperationException`.
+- The entries are added to what the updater already holds; an entry replaces the one with the same id.
+- One `IngestAsync` call per instance at a time; the task of a second concurrent call faults with
+  `InvalidOperationException`.
   Invalid options throw `ArgumentOutOfRangeException` before the scan starts.
 - The scanner writes into a bounded channel and waits when it is full. Queries on the same provider are safe
   throughout.
@@ -329,7 +331,7 @@ Reported after each publish.
 
 ### `SyntheticPathFeed`
 
-Deterministic synthetic paths (6 to 7 tokens each) for tests, demos and benchmarks.
+Deterministic synthetic paths (5 to 8 tokens each, joined with `-`) for tests, demos and benchmarks.
 
 ```csharp
 static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(int count, int seed = 42, TimeSpan delayPerEntry = default, CancellationToken cancellationToken = default);

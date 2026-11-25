@@ -1,17 +1,20 @@
 namespace SearchEngine.Filters;
 
 /// <summary>
-/// AND-combined facet predicates applied after the text expression is evaluated.
+/// Facet predicates joined with AND, applied after the text expression is evaluated (including <c>NOT</c>).
 /// </summary>
 /// <remarks>
-/// A document that was indexed without a value for a facet that other documents carry has the value 0 for it.
-/// A query throws <see cref="ArgumentException"/> when a predicate names a facet that no document in the snapshot
-/// carries, unless the index is empty or the text expression matches no documents.
+/// <para>A document that was indexed without a value for a facet that other documents carry has the value 0 for
+/// it, so a range that includes 0, or a mask whose <c>mustHave</c> is 0, matches such documents.</para>
+/// <para>A query throws <see cref="ArgumentException"/> when a predicate names a facet that no document in the
+/// snapshot carries, unless the index is empty or the text expression matches no documents. Names are not checked
+/// when the filter is created.</para>
+/// <para>There is no OR between predicates. Instances are immutable and safe to share between threads.</para>
 /// </remarks>
 public sealed class FacetFilter
 {
     /// <summary>
-    /// Filter that matches all documents (no facet constraints).
+    /// Gets the filter without predicates. A query that receives it behaves as if no filter were given.
     /// </summary>
     public static FacetFilter None { get; } = new([]);
 
@@ -23,15 +26,21 @@ public sealed class FacetFilter
     }
 
     /// <summary>
-    /// Gets whether this filter contains any predicates.
+    /// Gets whether this filter has no predicates.
     /// </summary>
     public bool IsEmpty => _predicates.Length == 0;
 
     internal ReadOnlySpan<FacetPredicate> Predicates => _predicates;
 
     /// <summary>
-    /// Creates a filter with one inclusive range predicate.
+    /// Creates a filter with one range predicate: a document matches when its value of <paramref name="facet"/>
+    /// lies between <paramref name="minInclusive"/> and <paramref name="maxInclusive"/>, both included.
     /// </summary>
+    /// <param name="facet">The facet name (case-sensitive).</param>
+    /// <param name="minInclusive">The smallest matching value.</param>
+    /// <param name="maxInclusive">The largest matching value. When it is less than
+    /// <paramref name="minInclusive"/>, no document matches.</param>
+    /// <returns>A new filter. For equality pass the same value twice.</returns>
     public static FacetFilter Range(string facet, long minInclusive, long maxInclusive)
         => new([FacetPredicate.Range(facet, minInclusive, maxInclusive)]);
 
@@ -39,12 +48,19 @@ public sealed class FacetFilter
     /// Creates a filter with one bitmask predicate: a document matches when all bits of
     /// <paramref name="mustHave"/> are set in its value and no bit of <paramref name="mustNot"/> is.
     /// </summary>
+    /// <param name="facet">The facet name (case-sensitive).</param>
+    /// <param name="mustHave">The bits that must be set.</param>
+    /// <param name="mustNot">The bits that must be clear.</param>
+    /// <returns>A new filter.</returns>
     public static FacetFilter Mask(string facet, long mustHave, long mustNot = 0)
         => new([FacetPredicate.Mask(facet, mustHave, mustNot)]);
 
     /// <summary>
-    /// Combines multiple filters with logical AND.
+    /// Joins the predicates of all <paramref name="filters"/> with AND.
     /// </summary>
+    /// <param name="filters">The filters to join.</param>
+    /// <returns>A new filter with every predicate of <paramref name="filters"/>, or <see cref="None"/> when they
+    /// have no predicates.</returns>
     public static FacetFilter Combine(params FacetFilter[] filters)
     {
         if (filters.Length == 0)

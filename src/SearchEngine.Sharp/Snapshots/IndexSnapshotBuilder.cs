@@ -37,31 +37,65 @@ namespace SearchEngine.Snapshots;
 //   Within query against a snapshot, not during Build.
 
 /// <summary>
-/// Builds immutable IndexSnapshot instances.
+/// Builds an <see cref="IndexSnapshot"/> from a set of entries without an <see cref="IndexUpdater"/>.
 /// </summary>
+/// <remarks>
+/// <para>The build takes time and memory linear in the total length of the search texts, plus sorting the distinct
+/// tokens. Each call is independent and safe to run on several threads at once.</para>
+/// <para>Ids are not checked for uniqueness: an id that occurs twice becomes two documents, and queries return it
+/// twice. An <see cref="IDictionary{TKey, TValue}"/> rules that out.</para>
+/// <para>A document without a value for a facet that other documents carry gets 0 in that facet.</para>
+/// <para>The progress values are percentages: the first half covers reading the entries, the second half packing
+/// the tokens. When the entries do not expose their count without enumerating, the first half reports 50
+/// throughout. The last report is below 100; the build is complete when the method returns.
+/// <see cref="IProgress{T}.Report"/> is called on the building thread once per entry and once per distinct token, so
+/// keep the handler cheap.</para>
+/// <para>A snapshot built here can be published through the
+/// <see cref="DependencyInjection.ServiceCollectionExtensions"/> overload that takes a snapshot factory.</para>
+/// </remarks>
 public static class IndexSnapshotBuilder
 {
     /// <summary>
-    /// Builds an IndexSnapshot from string entries.
+    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries: each text is searched
+    /// and sorted, and no entry has facets.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries)
         => Build(entries, SearchTokenization.Default);
 
     /// <summary>
-    /// Builds an IndexSnapshot from string entries with a tokenization preset.
+    /// Builds a snapshot from string entries: each text is searched and sorted, and the entries have no facets.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
+    /// queries.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
     /// <summary>
-    /// Builds an IndexSnapshot from string entries with progress reporting.
+    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries: each text is searched
+    /// and sorted, and no entry has facets.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
     /// <summary>
-    /// Builds an IndexSnapshot from string entries with a tokenization preset and progress reporting.
+    /// Builds a snapshot from string entries: each text is searched and sorted, and the entries have no facets.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
+    /// queries.</param>
+    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(
         IEnumerable<KeyValuePair<int, string>> entries,
         SearchTokenization tokenization,
@@ -71,26 +105,44 @@ public static class IndexSnapshotBuilder
     }
 
     /// <summary>
-    /// Builds an IndexSnapshot from IndexedEntry entries.
+    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/> values.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
         => Build(entries, SearchTokenization.Default);
 
     /// <summary>
-    /// Builds an IndexSnapshot from IndexedEntry entries with a tokenization preset.
+    /// Builds a snapshot from <see cref="IndexedEntry"/> values.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
+    /// queries.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
     /// <summary>
-    /// Builds an IndexSnapshot from IndexedEntry entries with progress reporting.
+    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/> values.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
     /// <summary>
-    /// Builds an IndexSnapshot from IndexedEntry entries with a tokenization preset and progress reporting.
+    /// Builds a snapshot from <see cref="IndexedEntry"/> values.
     /// </summary>
+    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
+    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
+    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
+    /// queries.</param>
+    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
+    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
     public static IndexSnapshot Build(
         IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         SearchTokenization tokenization,
