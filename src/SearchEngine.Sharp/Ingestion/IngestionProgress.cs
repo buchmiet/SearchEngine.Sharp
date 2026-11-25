@@ -1,28 +1,28 @@
 namespace SearchEngine.Ingestion;
 
 /// <summary>
-/// Progress notification emitted while an ingestion is running.
+/// The counters of a running ingestion, reported after each publish.
 /// </summary>
 public readonly struct IngestionProgress
 {
     /// <summary>
-    /// Entries accepted from the scan source so far (including the current buffer).
+    /// Gets the number of entries taken from the scan so far, including those not yet published.
     /// </summary>
     public int EntriesAccepted { get; init; }
 
     /// <summary>
-    /// Entries published to the index so far.
+    /// Gets the number of entries published so far. An id published twice counts twice.
     /// </summary>
     public int EntriesPublished { get; init; }
 
     /// <summary>
-    /// Number of index publishes completed so far.
+    /// Gets the number of publishes so far.
     /// </summary>
     public int PublishCount { get; init; }
 
     /// <summary>
-    /// Entries accepted but not yet published when this report was made. Progress is reported after each
-    /// publish, so these are the entries queued behind it (<see cref="EntriesAccepted"/> minus
+    /// Gets the number of entries accepted but not yet published when this report was made, that is the entries
+    /// queued behind the publish just finished (<see cref="EntriesAccepted"/> minus
     /// <see cref="EntriesPublished"/>, never below zero).
     /// </summary>
     public int PendingCount { get; init; }
