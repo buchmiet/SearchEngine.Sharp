@@ -111,7 +111,7 @@ internal static class QueryMatcher
         int minLen = GlobMatcher.MinMatchLength(patternSpan);
         bool hasStar = GlobMatcher.PatternHasStar(patternSpan);
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
-        var shape = new GlobMatcher.Shape(patternSpan, graphemeBoundaries);
+        var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
         if (!shape.IsSpecialized)
             return MatchGlobGeneral(patternSpan, minLen, hasStar, graphemeBoundaries, qc, snapshot);
 

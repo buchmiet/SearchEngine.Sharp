@@ -24,12 +24,25 @@ public sealed class NameMatcher
     private readonly QueryExpressionEvaluator.QueryToken[]? _postfix;
     private readonly Regex? _regex;
 
+    // Glob terms compiled once, by position in _postfix; null for operators and for terms without metacharacters.
+    private readonly GlobMatcher.Shape?[]? _globs;
+
     private NameMatcher(SearchTokenization tokenization, WordMatchMethod method, QueryExpressionEvaluator.QueryToken[]? postfix, Regex? regex)
     {
         _tokenization = tokenization;
         _method = method;
         _postfix = postfix;
         _regex = regex;
+        if (postfix is not null)
+        {
+            _globs = new GlobMatcher.Shape?[postfix.Length];
+            for (int i = 0; i < postfix.Length; i++)
+            {
+                string word = postfix[i].Word;
+                if (postfix[i].Operation == WordOperations.None && GlobMatcher.ContainsMetacharacters(word))
+                    _globs[i] = new GlobMatcher.Shape(word, tokenization.GraphemeBoundaries);
+            }
+        }
     }
 
     /// <summary>Compiles <paramref name="expression"/> once for many <see cref="IsMatch"/> calls.</summary>
@@ -118,19 +131,20 @@ public sealed class NameMatcher
         private readonly ReadOnlySpan<char> _text = text;
         private readonly ReadOnlySpan<char> _lower = lower;
 
-        public bool Match(string word) => matcher.MatchTerm(word, _text, _lower);
+        public bool Match(int position, string word) => matcher.MatchTerm(position, word, _text, _lower);
         public bool Not(bool operand) => !operand;
         public bool And(bool left, bool right) => left & right;
         public bool Or(bool left, bool right) => left | right;
     }
 
-    private bool MatchTerm(string word, ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
+    private bool MatchTerm(int position, string word, ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
         if (word.Length == 1 && word[0] == '*')
             return true;
 
-        bool glob = GlobMatcher.ContainsMetacharacters(word);
-        var shape = glob ? new GlobMatcher.Shape(word, _tokenization.GraphemeBoundaries) : default;
+        var compiled = _globs![position];
+        bool glob = compiled.HasValue;
+        var shape = compiled.GetValueOrDefault();
         foreach (var range in Tokens(text))
         {
             var token = lower[range];

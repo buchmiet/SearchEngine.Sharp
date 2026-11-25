@@ -81,7 +81,8 @@ internal static class QueryExpressionEvaluator
     /// </summary>
     internal interface IQueryAlgebra<TValue>
     {
-        TValue Match(string word);
+        // position: index of the term in the postfix expression, for algebras that compile terms in advance.
+        TValue Match(int position, string word);
         TValue Not(TValue operand);
         TValue And(TValue left, TValue right);
         TValue Or(TValue left, TValue right);
@@ -95,12 +96,13 @@ internal static class QueryExpressionEvaluator
         where TAlgebra : IQueryAlgebra<TValue>, allows ref struct
     {
         int count = 0;
-        foreach (var token in postfix)
+        for (int position = 0; position < postfix.Length; position++)
         {
+            var token = postfix[position];
             switch (token.Operation)
             {
                 case WordOperations.None:
-                    stack[count++] = algebra.Match(token.Word);
+                    stack[count++] = algebra.Match(position, token.Word);
                     break;
                 case WordOperations.Not:
                     stack[count - 1] = algebra.Not(stack[count - 1]);
@@ -126,7 +128,7 @@ internal static class QueryExpressionEvaluator
     {
         private FastBitSet? _allRecords;
 
-        public readonly FastBitSet Match(string word) => QueryMatcher.Match(word, method, qc, snapshot);
+        public readonly FastBitSet Match(int position, string word) => QueryMatcher.Match(word, method, qc, snapshot);
 
         public FastBitSet Not(FastBitSet operand)
         {

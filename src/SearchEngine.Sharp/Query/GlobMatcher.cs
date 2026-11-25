@@ -113,22 +113,28 @@ internal static class GlobMatcher
     /// everything else falls back to <see cref="IsWholeWordMatch"/>. Results are identical, with and without the
     /// grapheme boundary check.
     /// </summary>
-    internal readonly ref struct Shape
+    /// <remarks>
+    /// Built once per pattern (per query on an index, once in <see cref="NameMatcher.Create"/>) and stored as offsets
+    /// into the pattern string, so it can be kept in a field.
+    /// </remarks>
+    internal readonly struct Shape
     {
-        private readonly ReadOnlySpan<char> _pattern;
-        private readonly ReadOnlySpan<char> _head;
-        private readonly ReadOnlySpan<char> _tail;
+        private readonly string _pattern;
+        private readonly int _headStart, _headLength, _tailStart, _tailLength;
         private readonly Kind _kind;
         private readonly bool _graphemeBoundaries;
 
         private enum Kind { General, Prefix, Suffix, Contains, PrefixSuffix }
 
-        internal Shape(ReadOnlySpan<char> pattern, bool graphemeBoundaries = false)
+        private ReadOnlySpan<char> Head => _pattern.AsSpan(_headStart, _headLength);
+        private ReadOnlySpan<char> Tail => _pattern.AsSpan(_tailStart, _tailLength);
+
+        internal Shape(string pattern, bool graphemeBoundaries = false)
         {
             _pattern = pattern;
             _graphemeBoundaries = graphemeBoundaries;
             _kind = Kind.General;
-            if (pattern.IndexOf('?') >= 0)
+            if (pattern.AsSpan().IndexOf('?') >= 0)
                 return;
 
             int first = pattern.IndexOf('*');
@@ -146,27 +152,27 @@ internal static class GlobMatcher
                 return;
             }
 
-            var inner = pattern[innerStart..innerEnd];
-            if (leading && trailing && inner.IndexOf('*') < 0)
+            bool innerHasStar = pattern.AsSpan(innerStart, innerEnd - innerStart).IndexOf('*') >= 0;
+            if (leading && trailing && !innerHasStar)
             {
                 _kind = Kind.Contains;
-                _head = inner;
+                (_headStart, _headLength) = (innerStart, innerEnd - innerStart);
             }
-            else if (leading && !trailing && inner.IndexOf('*') < 0)
+            else if (leading && !trailing && !innerHasStar)
             {
                 _kind = Kind.Suffix;
-                _tail = inner;
+                (_tailStart, _tailLength) = (innerStart, innerEnd - innerStart);
             }
-            else if (!leading && trailing && inner.IndexOf('*') < 0)
+            else if (!leading && trailing && !innerHasStar)
             {
                 _kind = Kind.Prefix;
-                _head = inner;
+                (_headStart, _headLength) = (innerStart, innerEnd - innerStart);
             }
             else if (!leading && !trailing && first == last)
             {
                 _kind = Kind.PrefixSuffix;
-                _head = pattern[..first];
-                _tail = pattern[(first + 1)..];
+                (_headStart, _headLength) = (0, first);
+                (_tailStart, _tailLength) = (first + 1, pattern.Length - first - 1);
             }
         }
 
@@ -176,12 +182,12 @@ internal static class GlobMatcher
         internal bool IsMatch(ReadOnlySpan<char> word) => _kind switch
         {
             // First-character check before the vectorized compare: most words differ there.
-            Kind.Prefix => word.Length >= _head.Length && word[0] == _head[0] && word.StartsWith(_head)
-                && IsBoundary(word, _head.Length),
-            Kind.Suffix => word.EndsWith(_tail) && IsBoundary(word, word.Length - _tail.Length),
-            Kind.Contains => QueryMatcher.ContainsWithin(word, _head, _graphemeBoundaries),
-            Kind.PrefixSuffix => word.Length >= _head.Length + _tail.Length && word.StartsWith(_head) && word.EndsWith(_tail)
-                && IsBoundary(word, _head.Length) && IsBoundary(word, word.Length - _tail.Length),
+            Kind.Prefix => word.Length >= _headLength && word[0] == _pattern[_headStart] && word.StartsWith(Head)
+                && IsBoundary(word, _headLength),
+            Kind.Suffix => word.EndsWith(Tail) && IsBoundary(word, word.Length - _tailLength),
+            Kind.Contains => QueryMatcher.ContainsWithin(word, Head, _graphemeBoundaries),
+            Kind.PrefixSuffix => word.Length >= _headLength + _tailLength && word.StartsWith(Head) && word.EndsWith(Tail)
+                && IsBoundary(word, _headLength) && IsBoundary(word, word.Length - _tailLength),
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
