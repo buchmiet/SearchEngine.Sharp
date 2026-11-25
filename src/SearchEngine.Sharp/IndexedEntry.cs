@@ -9,7 +9,38 @@ namespace SearchEngine;
 /// original name. It is not tokenized, and the Unicode options do not change it.</param>
 /// <param name="Facets">Optional named <see langword="long"/> values that a <see cref="Filters.FacetFilter"/> tests.
 /// A document without a value for a facet that other documents carry has 0 in that facet.</param>
+/// <exception cref="ArgumentNullException"><paramref name="SearchText"/> or <paramref name="SortText"/> is
+/// <see langword="null"/>.</exception>
 public sealed record IndexedEntry(
     string SearchText,
     string SortText,
-    Filters.FacetValues? Facets = null);
+    Filters.FacetValues? Facets = null)
+{
+    /// <summary>Gets the text that is split into tokens and matched.</summary>
+    /// <exception cref="ArgumentNullException">The value set is <see langword="null"/>.</exception>
+    public string SearchText
+    {
+        get;
+        init => field = value ?? throw new ArgumentNullException(nameof(SearchText));
+    } = SearchText ?? throw new ArgumentNullException(nameof(SearchText));
+
+    /// <summary>Gets the text that <see cref="SearchSortMode.NaturalSortAscending"/> orders by.</summary>
+    /// <exception cref="ArgumentNullException">The value set is <see langword="null"/>.</exception>
+    public string SortText
+    {
+        get;
+        init => field = value ?? throw new ArgumentNullException(nameof(SortText));
+    } = SortText ?? throw new ArgumentNullException(nameof(SortText));
+
+    // The entry of a string element of the collection argument paramName: the same text is searched and sorted.
+    internal static IndexedEntry FromText(int id, string? text, string paramName)
+        => text is null ? throw NullElement(id, paramName) : new IndexedEntry(text, text);
+
+    // An IndexedEntry element of the collection argument paramName.
+    internal static IndexedEntry Require(int id, IndexedEntry? entry, string paramName)
+        => entry ?? throw NullElement(id, paramName);
+
+    // A null element makes the collection argument invalid; it is not a null argument.
+    internal static ArgumentException NullElement(int id, string paramName)
+        => new($"The entry with id {id} is null.", paramName);
+}

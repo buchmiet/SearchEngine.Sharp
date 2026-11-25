@@ -12,13 +12,16 @@ namespace SearchEngine;
 /// </summary>
 /// <param name="snapshotProvider">The provider whose <see cref="IIndexSnapshotProvider.Current"/> snapshot each
 /// query reads.</param>
+/// <exception cref="ArgumentNullException"><paramref name="snapshotProvider"/> is <see langword="null"/>.</exception>
 public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) : ISearchEngine
 {
-    /// <inheritdoc />
-    public int DocumentCount => snapshotProvider.Current.DocumentCount;
+    private readonly IIndexSnapshotProvider _snapshotProvider = snapshotProvider ?? throw new ArgumentNullException(nameof(snapshotProvider));
 
     /// <inheritdoc />
-    public int UniqueWordCount => snapshotProvider.Current.UniqueWordCount;
+    public int DocumentCount => _snapshotProvider.Current.DocumentCount;
+
+    /// <inheritdoc />
+    public int UniqueWordCount => _snapshotProvider.Current.UniqueWordCount;
 
     /// <inheritdoc />
     public List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false)
@@ -29,7 +32,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     /// <inheritdoc />
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false)
     {
-        var snapshot = snapshotProvider.Current;
+        ArgumentNullException.ThrowIfNull(expression);
+        var snapshot = _snapshotProvider.Current;
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return 0;
 
@@ -56,7 +60,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     /// <inheritdoc />
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators, FacetFilter? filter)
     {
-        var snapshot = snapshotProvider.Current;
+        ArgumentNullException.ThrowIfNull(expression);
+        var snapshot = _snapshotProvider.Current;
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return 0;
 
@@ -83,7 +88,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     /// <inheritdoc />
     public List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode)
     {
-        var snapshot = snapshotProvider.Current;
+        ArgumentNullException.ThrowIfNull(expression);
+        var snapshot = _snapshotProvider.Current;
         if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
             return [];
 
@@ -117,7 +123,8 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         SearchSortMode sortMode,
         FacetFilter? filter)
     {
-        var snapshot = snapshotProvider.Current;
+        ArgumentNullException.ThrowIfNull(expression);
+        var snapshot = _snapshotProvider.Current;
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return [];
 

@@ -64,7 +64,9 @@ public static class IndexSnapshotBuilder
     /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
     /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries)
         => Build(entries, SearchTokenization.Default);
 
@@ -76,7 +78,10 @@ public static class IndexSnapshotBuilder
     /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
     /// queries.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
+    /// <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
@@ -88,7 +93,9 @@ public static class IndexSnapshotBuilder
     /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
     /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
@@ -101,7 +108,10 @@ public static class IndexSnapshotBuilder
     /// queries.</param>
     /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
+    /// <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(
         IEnumerable<KeyValuePair<int, string>> entries,
         SearchTokenization tokenization,
@@ -116,7 +126,9 @@ public static class IndexSnapshotBuilder
     /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
     /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
         => Build(entries, SearchTokenization.Default);
 
@@ -128,7 +140,10 @@ public static class IndexSnapshotBuilder
     /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
     /// queries.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
+    /// <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
@@ -139,7 +154,9 @@ public static class IndexSnapshotBuilder
     /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
     /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
@@ -152,7 +169,10 @@ public static class IndexSnapshotBuilder
     /// queries.</param>
     /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
     /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
+    /// <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
+    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(
         IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         SearchTokenization tokenization,
@@ -169,6 +189,8 @@ public static class IndexSnapshotBuilder
         SearchTokenization tokenization,
         IProgress<float>? progress)
     {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(tokenization);
         var indexSeparators = tokenization.IndexSeparatorValues;
         int entryCount = entries.TryGetNonEnumeratedCount(out int count) ? count : 0;
         var stringPool = new WordStringPool();
@@ -195,6 +217,9 @@ public static class IndexSnapshotBuilder
 
         foreach (var (key, entry) in entries)
         {
+            if (entry is null)
+                throw IndexedEntry.NullElement(key, nameof(entries));
+
             if (seenIds is not null && !seenIds.Add(key))
                 throw new ArgumentException($"The id {key} occurs more than once. Each id must name one document.", nameof(entries));
 

@@ -52,6 +52,19 @@ Changed.
   value reaches a new whole percent, at most 102 times per build, and the last report is 100. It used to be called
   once per entry and once per distinct token (about 209,000 calls for 100,000 file names), which flooded the UI
   thread when the handler was a `Progress<T>`. The values are cumulative, so nothing is lost between reports.
+- Every public entry point throws `ArgumentNullException` naming the parameter when a reference argument that is
+  not declared nullable is `null`, at the call. Before, most methods threw `NullReferenceException` from inside the
+  library, and some failed later: `FacetFilter.Range(null, ...)` and `Mask(null, ...)` at query time,
+  `new IndexedEntry(null, ...)` at the next rebuild, `RebuildFromAsync(null)` and `IngestAsync(null)` through the
+  returned task. A `null` element in a collection argument (a `null` text or `IndexedEntry` in the entries) throws
+  `ArgumentException` naming the collection, and an updater call that receives one leaves the index unchanged.
+  Arguments that used to accept `null` as a synonym for an empty value now throw: the expression of `Find` and
+  `CountMatches` (a `null` expression used to match nothing), the separators of `SearchTokenization.Create`, the
+  text of `NaturalSortKeyBuilder.Build`, `TextNormalizer.GetWordsFromString` and `ForEachUniqueWord`, and the
+  `joinCharacter` of `NameTokenizer.TokenizeName`. Pass an empty string instead. Parameters declared nullable keep
+  their meaning. See [Argument checks](docs/api.md#argument-checks).
+- `IIndexUpdater.RebuildFromAsync` no longer resumes on the caller's synchronization context after reading the
+  stream, so the rebuild does not run on a UI thread.
 - `IndexSnapshotBuilder.Build` throws `ArgumentException` naming the id when an id occurs more than once in the
   entries. Such an id used to become two documents, and queries returned it twice. Dictionaries are not checked,
   because their keys are unique. The updater's batch methods are unchanged: when their input repeats an id, the

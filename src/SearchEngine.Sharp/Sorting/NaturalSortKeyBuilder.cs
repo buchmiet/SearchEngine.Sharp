@@ -45,13 +45,15 @@ public static class NaturalSortKeyBuilder
     /// Builds the natural sort key of <paramref name="sortText"/>.
     /// </summary>
     /// <param name="sortText">The text to build the key for, usually <see cref="IndexedEntry.SortText"/>.</param>
-    /// <returns>The key, or an empty string for a <see langword="null"/> or empty text. The key is meant only for
-    /// ordinal comparison with other keys; it is not readable text.</returns>
+    /// <returns>The key, or an empty string for an empty text. The key is meant only for ordinal comparison with
+    /// other keys; it is not readable text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sortText"/> is <see langword="null"/>.</exception>
     /// <remarks>For texts of up to 341 characters the only allocation is the returned string. The method is
     /// thread-safe.</remarks>
     public static string Build(string sortText)
     {
-        if (string.IsNullOrEmpty(sortText))
+        ArgumentNullException.ThrowIfNull(sortText);
+        if (sortText.Length == 0)
             return string.Empty;
 
         int maxLength = checked(sortText.Length * MaxKeyCharsPerInputChar);

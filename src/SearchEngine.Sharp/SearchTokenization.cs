@@ -86,11 +86,17 @@ public sealed class SearchTokenization
     internal bool GraphemeBoundaries => (UnicodeMatching & UnicodeMatching.GraphemeBoundaries) != 0;
 
     /// <summary>Creates a preset with the given separator characters and no Unicode options.</summary>
-    /// <param name="indexSeparators">The characters that split indexed text into tokens. <see langword="null"/> or
-    /// empty makes the whole text one token.</param>
-    /// <param name="querySeparators">The characters that split a query into terms. <see langword="null"/> or empty
-    /// makes the whole query one term.</param>
+    /// <param name="indexSeparators">The characters that split indexed text into tokens. An empty string makes the
+    /// whole text one token.</param>
+    /// <param name="querySeparators">The characters that split a query into terms. An empty string makes the whole
+    /// query one term.</param>
     /// <returns>A new preset.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="indexSeparators"/> or <paramref name="querySeparators"/>
+    /// is <see langword="null"/>.</exception>
     public static SearchTokenization Create(string indexSeparators, string querySeparators)
-        => new(indexSeparators ?? string.Empty, querySeparators ?? string.Empty);
+    {
+        ArgumentNullException.ThrowIfNull(indexSeparators);
+        ArgumentNullException.ThrowIfNull(querySeparators);
+        return new(indexSeparators, querySeparators);
+    }
 }
