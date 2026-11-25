@@ -22,14 +22,28 @@ namespace SearchEngine.Ingestion;
 ///   <item>When <paramref name="cancellationToken"/> is signaled, the scan stops accepting new
 ///         entries.</item>
 ///   <item>When <see cref="IngestPublishOptions.FlushOnCancellation"/> is <see langword="true"/>
-///         (default), buffered entries are published before the task completes.</item>
-///   <item>When <see langword="false"/>, buffered-but-unpublished entries are discarded.</item>
+///         (default), every accepted entry that is not yet published, including entries still queued in
+///         the channel, is published before the task completes.</item>
+///   <item>When <see langword="false"/>, accepted-but-unpublished entries are discarded.</item>
 ///   <item>Entries already published remain in the index.</item>
 /// </list>
 /// <para><b>Completion contract</b></para>
 /// <list type="bullet">
 ///   <item>On successful scan completion, any remaining buffer is always flushed (final publish).</item>
 ///   <item>Scan exceptions are propagated after attempting a final buffer flush.</item>
+/// </list>
+/// <para><b>Failure contract</b></para>
+/// <list type="bullet">
+///   <item>An exception from the <see cref="IIndexUpdater"/>, a <see cref="Published"/> or
+///         <c>onPublished</c> handler, or <see cref="IProgress{T}.Report"/> stops the publisher. The scan is
+///         cancelled through the token passed to its <see cref="IAsyncEnumerable{T}"/>, its enumerator is
+///         disposed, and the returned task faults with that exception. Entries already published remain in the
+///         index; buffered ones are not published.</item>
+///   <item>If the scanner and the publisher both fail (for example, the final flush after a scan error fails),
+///         the scanner's exception is the one that surfaces.</item>
+///   <item>The task completes only after the scanner has stopped, so the scanner must observe the token it
+///         receives in <c>GetAsyncEnumerator</c> (an iterator marked <c>[EnumeratorCancellation]</c> does); an
+///         enumerator that ignores it and never yields again keeps the task pending.</item>
 /// </list>
 /// </remarks>
 public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
@@ -117,8 +131,14 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
 
             var state = new IngestionState(_timeProvider);
 
-            Task producer = ProduceAsync(entries, toIndexedEntry, channel.Writer, state, cancellationToken);
-            Task consumer = ConsumeAsync(channel.Reader, options, state, progress, onPublished, cancellationToken);
+            // The publisher cancels the scanner when it fails, so a scanner blocked on a full channel
+            // (or still scanning) stops instead of waiting for a reader that no longer exists.
+            using var producerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            Task producer = ProduceAsync(entries, toIndexedEntry, channel.Writer, state, producerCts.Token);
+            Task consumer = CancelProducerOnFaultAsync(
+                ConsumeAsync(channel.Reader, options, state, progress, onPublished, cancellationToken),
+                producerCts);
 
             bool completed = false;
             bool cancelled = false;
@@ -131,7 +151,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 cancelled = true;
-                await AwaitConsumerAfterCancelAsync(consumer).ConfigureAwait(false);
             }
 
             return state.ToResult(completed, cancelled);
@@ -139,6 +158,19 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         finally
         {
             Volatile.Write(ref _isRunning, 0);
+        }
+    }
+
+    private static async Task CancelProducerOnFaultAsync(Task consumer, CancellationTokenSource producerCts)
+    {
+        try
+        {
+            await consumer.ConfigureAwait(false);
+        }
+        catch
+        {
+            await producerCts.CancelAsync().ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -254,9 +286,18 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (flushOnCancel && buffer.Count > 0)
+            if (flushOnCancel)
             {
-                PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
+                // The scanner is cancelled too. Entries it already handed over may still sit in the
+                // channel; read until it has completed the channel so every accepted entry is published.
+                while (await WaitForEntryAsync(reader, CancellationToken.None).ConfigureAwait(false))
+                {
+                    while (reader.TryRead(out BufferedEntry entry))
+                        AppendEntry(buffer, bufferedAt, entry);
+                }
+
+                if (buffer.Count > 0)
+                    PublishBatch(buffer, bufferedAt, state, options, progress, onPublished, ref lastPublishTimestamp, ref lastRebuildDuration, ref batchCap);
             }
 
             throw;
@@ -276,22 +317,6 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             // The scanner failed and the channel is drained. The failure surfaces from the producer
             // task; the publisher must still flush its buffer first.
             return false;
-        }
-    }
-
-    private static async Task AwaitConsumerAfterCancelAsync(Task consumer)
-    {
-        try
-        {
-            await consumer.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when cancellation was requested.
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw;
         }
     }
 

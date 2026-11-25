@@ -223,9 +223,14 @@ Task<IngestionResult> IngestAsync(
     CancellationToken cancellationToken = default);
 ```
 
-Cancellation: the scan stops accepting entries; buffered entries are flushed when
-`IngestPublishOptions.FlushOnCancellation` is `true` (default), otherwise discarded.
-Entries already published stay in the index.
+Cancellation: the scan stops accepting entries; accepted entries not yet published (buffered or still queued
+between scanner and publisher) are flushed when `IngestPublishOptions.FlushOnCancellation` is `true` (default),
+otherwise discarded. Entries already published stay in the index.
+
+Failure: an exception from the updater, `Published`, `onPublished` or `IProgress<T>` cancels the scan (through
+the token given to its `IAsyncEnumerable`), disposes its enumerator and faults the task with that exception; if the
+scanner failed as well, its exception surfaces. The task completes only after the scanner has stopped, so scanners
+must honour the cancellation token (`[EnumeratorCancellation]`).
 
 ### `IngestPublishPolicy`
 

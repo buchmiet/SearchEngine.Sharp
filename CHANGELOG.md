@@ -40,6 +40,12 @@ Public API changes are additive only (reflection comparison against 0.5.6); the 
   slightly before its publish was due, or a buffer below `MinTimerPublishBatch` that reached `MaxStaleness`, waited
   for the next scanner entry instead of publishing. The publisher now always re-arms a timer while entries are
   buffered.
+- `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
+  `IIndexUpdater`, a `Published` or `onPublished` handler, or `IProgress<T>`) while the scanner was blocked on a
+  full channel. The scanner is now cancelled and disposed and the task faults with the original exception. A scan
+  error that arrived while the publisher was waiting no longer skips the final flush of buffered entries, and a
+  cancelled ingestion with `FlushOnCancellation` also publishes entries still queued in the channel (they counted as
+  accepted but were dropped).
 - `Find`/`CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions starting
   with `NOT AND` or `NOT OR`; the dangling operators are now dropped like any other leading binary operator.
 
