@@ -4,6 +4,13 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+### Performance
+
+- A facet filter combined with a text query now checks only the text hits when they are up to 75% of the index
+  (was 50%). Between 50% and 75% such queries filter faster: 18% faster at 65% on 100,000 file names. Above 80%,
+  scanning every document is still faster, and those queries keep the scan.
+- Counting the hits of a result set is 22-33% faster on ARM64 (Apple M1) and up to 20% faster on x64.
+
 ## [0.6.0] - 2026-11-24
 
 Requires .NET 11. The public API gains members; the changes to members that shipped in 0.5.6 are listed under

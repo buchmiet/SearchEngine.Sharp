@@ -11,9 +11,3 @@ internal static class TestIndex
         return (new SearchEngineSharp(provider), new IndexUpdater(provider, tokenization), provider);
     }
 }
-
-/// <summary>A provider that always returns one snapshot, for tests that build a snapshot directly.</summary>
-internal sealed class FixedSnapshotProvider(IndexSnapshot snapshot) : IIndexSnapshotProvider
-{
-    public IndexSnapshot Current => snapshot;
-}

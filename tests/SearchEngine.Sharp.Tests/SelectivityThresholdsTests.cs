@@ -15,8 +15,8 @@ public class SelectivityThresholdsTests
 
     [Test]
     [Arguments(10, 100_000, true)]
-    [Arguments(50_000, 100_000, true)]
-    [Arguments(50_001, 100_000, false)]
+    [Arguments(75_000, 100_000, true)]
+    [Arguments(75_001, 100_000, false)]
     [Arguments(100_000, 100_000, false)]
     public async Task UseFacetOnHitsPath_MatchesBdnCrossover(int hits, int documents, bool expected)
         => await Assert.That(SelectivityThresholds.UseFacetOnHitsPath(hits, documents)).IsEqualTo(expected);

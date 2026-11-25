@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.Json;
 using SearchEngine.Filters;
+using SearchEngine.Sharp.Tests;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Profiling;
@@ -91,7 +92,7 @@ sealed class TieredIndex
         _state = new(Engine(IndexSnapshotBuilder.Build(_all, tok)), null, [], 0);
     }
 
-    static SearchEngineSharp Engine(IndexSnapshot s) => new(new Bench.Fixed(s));
+    static SearchEngineSharp Engine(IndexSnapshot s) => new(new FixedSnapshotProvider(s));
 
     public void Upsert(int id, IndexedEntry e) { lock (_gate) { _all[id] = e; _delta[id] = e; Publish(tombstone: id); } }
 
@@ -192,7 +193,7 @@ static class Persistent
             if (rng2.Next(3) == 0) { check.Remove(id); reference.Remove(id); }
             else { var e = new IndexedEntry($"changed-{i}.pdf", $"changed-{i}.pdf", FacetValues.Create("attrs", 0)); check.Upsert(id, e); reference[id] = e; }
         }
-        var refEngine = new SearchEngineSharp(new Bench.Fixed(IndexSnapshotBuilder.Build(reference, tok)));
+        var refEngine = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(reference, tok)));
         bool same = true;
         foreach (var q in new[] { "*.pdf", "*report*", "changed-1*", "*" })
         {

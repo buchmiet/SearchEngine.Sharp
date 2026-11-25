@@ -11,6 +11,8 @@
   <ItemGroup>
     <!-- scripts/ holds stand-alone file-based programs (apidiff.cs), not part of this project -->
     <Compile Remove="scripts/**" />
+    <!-- One fixed snapshot provider for the tests and this project -->
+    <Compile Include="..\..\tests\SearchEngine.Sharp.Tests\FixedSnapshotProvider.cs" Link="FixedSnapshotProvider.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />

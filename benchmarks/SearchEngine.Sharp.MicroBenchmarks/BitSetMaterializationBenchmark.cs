@@ -31,7 +31,7 @@ public class BitSetMaterializationBenchmark
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(FileSearchDataFactory.ToIndexedEntries(data.Documents));
         _snapshot = provider.Current;
-        _bitSet = HitSets.Sparse(DocumentCount, HitCount);
+        _bitSet = HitSets.Random(DocumentCount, HitCount, seed: 1);
     }
 
     [Benchmark(Description = "ResultMaterializer, snapshot order")]

@@ -7,27 +7,36 @@ namespace SearchEngine.Sharp.MicroBenchmarks;
 /// </summary>
 internal static class HitSets
 {
+    /// <summary>The hit count of <paramref name="density"/> (0 to 1) of <paramref name="documentCount"/> documents.</summary>
+    internal static int CountFor(double density, int documentCount) => (int)Math.Round(density * documentCount);
+
     /// <summary>
-    /// Creates a set of <paramref name="hitCount"/> hits spread evenly over <paramref name="documentCount"/> ordinals.
+    /// Creates a set of exactly <paramref name="hitCount"/> hits at ordinals chosen uniformly at random, as a text
+    /// query scatters its hits over the index.
     /// </summary>
-    internal static FastBitSet Sparse(int documentCount, int hitCount)
+    internal static FastBitSet Random(int documentCount, int hitCount, int seed)
     {
         var bitSet = new FastBitSet(documentCount);
-        if (hitCount <= 0)
-            return bitSet;
+        bitSet.AddAll(RandomOrdinals(documentCount, hitCount, seed));
+        return bitSet;
+    }
 
-        int k = Math.Min(hitCount, documentCount);
-        if (k >= documentCount)
+    /// <summary>Returns <paramref name="hitCount"/> distinct ordinals below <paramref name="documentCount"/>, in random order.</summary>
+    internal static int[] RandomOrdinals(int documentCount, int hitCount, int seed)
+    {
+        int count = Math.Clamp(hitCount, 0, documentCount);
+        var ordinals = new int[documentCount];
+        for (int i = 0; i < documentCount; i++)
+            ordinals[i] = i;
+
+        // Partial Fisher-Yates shuffle: the first count entries are a uniform sample.
+        var random = new Random(seed);
+        for (int i = 0; i < count; i++)
         {
-            bitSet.FillAllTrue();
-            return bitSet;
+            int j = random.Next(i, documentCount);
+            (ordinals[i], ordinals[j]) = (ordinals[j], ordinals[i]);
         }
 
-        // Spread hits across the index to avoid artificially dense low-ordinal clustering.
-        int stride = Math.Max(1, documentCount / k);
-        for (int i = 0, added = 0; added < k; i += stride, added++)
-            bitSet.Add(i);
-
-        return bitSet;
+        return ordinals[..count];
     }
 }

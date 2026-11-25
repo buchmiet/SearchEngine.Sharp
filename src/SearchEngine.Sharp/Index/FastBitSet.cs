@@ -1,8 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86; // Avx, Avx2, Popcnt
+using System.Runtime.InteropServices;
 
 namespace SearchEngine.Index;
 
@@ -17,13 +15,11 @@ namespace SearchEngine.Index;
 //   IntersectWith → AND (documents matching A and B)
 //   ExceptWith    → AND NOT (documents matching A but not B; used to implement NOT)
 //
-// Each SIMD operation processes multiple ulongs per loop iteration:
-//   AVX2  (x64)   : 256-bit registers = 4 ulongs per iteration
-//   AdvSimd (ARM) : 128-bit registers = 2 ulongs per iteration
-//   Scalar        : 1 ulong per iteration (fallback)
+// The three set operations share one loop over Vector<ulong> (256 bits with AVX2, 128 bits with ARM64 AdvSimd)
+// followed by a scalar tail. The population count is a scalar loop: BitOperations.PopCount compiles to POPCNT on
+// x64 and to CNT with ADDV on ARM64.
 //
-// The width threshold guards (>= 4 or >= 2) prevent entering a SIMD loop that
-// can never execute a single full-width iteration.
+// Only the first _wordCount words belong to the set: a wrapped pooled buffer can be longer.
 internal sealed class FastBitSet
 {
     private readonly ulong[] _bits;
@@ -47,6 +43,8 @@ internal sealed class FastBitSet
         _bits = bits;
     }
 
+    private Span<ulong> Words => _bits.AsSpan(0, _wordCount);
+
     public static FastBitSet CreateAllTrue(int length)
     {
         var bitSet = new FastBitSet(length);
@@ -56,17 +54,16 @@ internal sealed class FastBitSet
 
     public void FillAllTrue()
     {
-        Array.Fill(_bits, ulong.MaxValue, 0, _wordCount);
+        Words.Fill(ulong.MaxValue);
         // Mask off bits beyond _length in the last word so GetTrueCount stays correct.
         int remainder = _length & 63;
-        if (remainder > 0 && _wordCount > 0)
+        if (remainder > 0)
             _bits[_wordCount - 1] = (1UL << remainder) - 1;
     }
 
-    public void Clear() => Array.Clear(_bits, 0, _wordCount);
+    public void Clear() => Words.Clear();
 
-    public void CopyFrom(FastBitSet other) =>
-        other._bits.AsSpan(0, _wordCount).CopyTo(_bits.AsSpan(0, _wordCount));
+    public void CopyFrom(FastBitSet other) => other.Words.CopyTo(Words);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Add(int index) => _bits[index >> 6] |= 1UL << (index & 63);
@@ -80,81 +77,29 @@ internal sealed class FastBitSet
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Get(int index) => (_bits[index >> 6] & (1UL << (index & 63))) != 0;
 
-    public void ExceptWith(FastBitSet other)
-    {
-        if (_wordCount == 0)
-            return;
+    public void ExceptWith(FastBitSet other) => Combine<AndNotOperation>(Words, other.Words);
 
-        if (Avx2.IsSupported && _wordCount >= 4)
-        {
-            ExceptVector256(other);
-            return;
-        }
+    public void IntersectWith(FastBitSet other) => Combine<AndOperation>(Words, other.Words);
 
-        if (AdvSimd.IsSupported && _wordCount >= 2)
-        {
-            ExceptAdvSimd(other);
-            return;
-        }
+    public void UnionWith(FastBitSet other) => Combine<OrOperation>(Words, other.Words);
 
-        ExceptScalar(other, 0);
-    }
-
-    public void IntersectWith(FastBitSet other)
-    {
-        if (_wordCount == 0)
-            return;
-
-        if (Avx2.IsSupported && _wordCount >= 4)
-        {
-            IntersectVector256(other);
-            return;
-        }
-
-        if (AdvSimd.IsSupported && _wordCount >= 2)
-        {
-            IntersectAdvSimd(other);
-            return;
-        }
-
-        IntersectScalar(other, 0);
-    }
-
-    public void UnionWith(FastBitSet other)
-    {
-        if (_wordCount == 0)
-            return;
-
-        if (Avx2.IsSupported && _wordCount >= 4)
-        {
-            UnionVector256(other);
-            return;
-        }
-
-        if (AdvSimd.IsSupported && _wordCount >= 2)
-        {
-            UnionAdvSimd(other);
-            return;
-        }
-
-        UnionScalar(other, 0);
-    }
-
-    // Counts set bits across all words using the best available popcount instruction.
-    // AdvSimd is checked before Popcnt because on ARM the vectorised byte-popcount +
-    // horizontal-sum is faster than scalar Popcnt in a tight loop.
+    // Four words per iteration: on x64 the loop overhead otherwise limits the rate below one POPCNT per cycle
+    // (measured 10-20% slower on an i7-10750H at 10k to 1M bits).
     public int GetTrueCount()
     {
-        if (_wordCount == 0)
-            return 0;
+        ReadOnlySpan<ulong> words = Words;
+        int count = 0;
+        int i = 0;
+        for (; i <= words.Length - 4; i += 4)
+        {
+            count += BitOperations.PopCount(words[i]) + BitOperations.PopCount(words[i + 1])
+                   + BitOperations.PopCount(words[i + 2]) + BitOperations.PopCount(words[i + 3]);
+        }
 
-        if (AdvSimd.IsSupported && _wordCount >= 2)
-            return GetTrueCountAdvSimd();
+        for (; i < words.Length; i++)
+            count += BitOperations.PopCount(words[i]);
 
-        if (Popcnt.X64.IsSupported)
-            return GetTrueCountPopcnt();
-
-        return GetTrueCountScalar();
+        return count;
     }
 
     /// <summary>
@@ -163,12 +108,13 @@ internal sealed class FastBitSet
     /// </summary>
     internal int CopySetBitOrdinals(Span<int> destination)
     {
+        ReadOnlySpan<ulong> words = Words;
         int written = 0;
         int limit = _length;
 
-        for (int wordIndex = 0; wordIndex < _wordCount; wordIndex++)
+        for (int wordIndex = 0; wordIndex < words.Length; wordIndex++)
         {
-            ulong bits = _bits[wordIndex];
+            ulong bits = words[wordIndex];
             while (bits != 0)
             {
                 int bit = BitOperations.TrailingZeroCount(bits);
@@ -187,259 +133,52 @@ internal sealed class FastBitSet
         return written;
     }
 
-    internal int ForEachSetBit(Action<int> action)
-    {
-        int count = 0;
-        int limit = _length;
-
-        for (int wordIndex = 0; wordIndex < _wordCount; wordIndex++)
-        {
-            ulong bits = _bits[wordIndex];
-            while (bits != 0)
-            {
-                int bit = BitOperations.TrailingZeroCount(bits);
-                int ordinal = (wordIndex << 6) + bit;
-                if (ordinal >= limit)
-                    break;
-
-                action(ordinal);
-                count++;
-                bits &= bits - 1;
-            }
-        }
-
-        return count;
-    }
-
+    // Applies TOperation word by word: whole Vector<ulong> blocks first, then the remaining words one at a time.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void ExceptVector256(FastBitSet other)
+    private static void Combine<TOperation>(Span<ulong> left, ReadOnlySpan<ulong> right)
+        where TOperation : struct, IBitwiseOperation
     {
-        const int width = 4;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
+        right = right[..left.Length];
+        int done = 0;
+        if (Vector.IsHardwareAccelerated)
         {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = Avx.LoadVector256(leftBase + i);
-                var right = Avx.LoadVector256(rightBase + i);
-                Avx.Store(leftBase + i, Avx2.AndNot(right, left));
-            }
-
-            if (i < _wordCount)
-                ExceptScalar(other, i);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void ExceptAdvSimd(FastBitSet other)
-    {
-        const int width = 2;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
-        {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = AdvSimd.LoadVector128(leftBase + i);
-                var right = AdvSimd.LoadVector128(rightBase + i);
-                // ARM BIC: left & ~right in a single instruction
-                AdvSimd.Store(leftBase + i, AdvSimd.BitwiseClear(left, right));
-            }
-
-            if (i < _wordCount)
-                ExceptScalar(other, i);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void IntersectVector256(FastBitSet other)
-    {
-        const int width = 4;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
-        {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = Avx.LoadVector256(leftBase + i);
-                var right = Avx.LoadVector256(rightBase + i);
-                Avx.Store(leftBase + i, Avx2.And(left, right));
-            }
-
-            if (i < _wordCount)
-                IntersectScalar(other, i);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void IntersectAdvSimd(FastBitSet other)
-    {
-        const int width = 2;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
-        {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = AdvSimd.LoadVector128(leftBase + i);
-                var right = AdvSimd.LoadVector128(rightBase + i);
-                AdvSimd.Store(leftBase + i, AdvSimd.And(left, right));
-            }
-
-            if (i < _wordCount)
-                IntersectScalar(other, i);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void UnionVector256(FastBitSet other)
-    {
-        const int width = 4;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
-        {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = Avx.LoadVector256(leftBase + i);
-                var right = Avx.LoadVector256(rightBase + i);
-                Avx.Store(leftBase + i, Avx2.Or(left, right));
-            }
-
-            if (i < _wordCount)
-                UnionScalar(other, i);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private unsafe void UnionAdvSimd(FastBitSet other)
-    {
-        const int width = 2;
-        fixed (ulong* leftBase = _bits)
-        fixed (ulong* rightBase = other._bits)
-        {
-            int i = 0;
-            int limit = _wordCount - width;
-            for (; i <= limit; i += width)
-            {
-                var left = AdvSimd.LoadVector128(leftBase + i);
-                var right = AdvSimd.LoadVector128(rightBase + i);
-                AdvSimd.Store(leftBase + i, AdvSimd.Or(left, right));
-            }
-
-            if (i < _wordCount)
-                UnionScalar(other, i);
-        }
-    }
-
-    private void ExceptScalar(FastBitSet other, int startIndex)
-    {
-        var span = _bits.AsSpan(0, _wordCount);
-        var otherSpan = other._bits.AsSpan(0, _wordCount);
-
-        for (int i = startIndex; i < _wordCount; i++)
-            span[i] &= ~otherSpan[i];
-    }
-
-    private void IntersectScalar(FastBitSet other, int startIndex)
-    {
-        var span = _bits.AsSpan(0, _wordCount);
-        var otherSpan = other._bits.AsSpan(0, _wordCount);
-
-        for (int i = startIndex; i < _wordCount; i++)
-            span[i] &= otherSpan[i];
-    }
-
-    private void UnionScalar(FastBitSet other, int startIndex)
-    {
-        var span = _bits.AsSpan(0, _wordCount);
-        var otherSpan = other._bits.AsSpan(0, _wordCount);
-
-        for (int i = startIndex; i < _wordCount; i++)
-            span[i] |= otherSpan[i];
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private int GetTrueCountAdvSimd()
-    {
-        const int width = 2;
-        int count = 0;
-        var span = _bits.AsSpan(0, _wordCount);
-        ref ulong bitsRef = ref Unsafe.AsRef(in span[0]);
-
-        int i = 0;
-        int limit = _wordCount - width;
-        for (; i <= limit; i += width)
-        {
-            // Load two ulongs as a 128-bit vector, popcount each byte, then sum.
-            var vector = Vector128.LoadUnsafe(ref bitsRef, (nuint)i);
-            var popCountBytes = AdvSimd.PopCount(vector.AsByte());
-            count += SumVectorBytes(popCountBytes);
+            Span<Vector<ulong>> leftBlocks = MemoryMarshal.Cast<ulong, Vector<ulong>>(left);
+            ReadOnlySpan<Vector<ulong>> rightBlocks = MemoryMarshal.Cast<ulong, Vector<ulong>>(right)[..leftBlocks.Length];
+            for (int i = 0; i < leftBlocks.Length; i++)
+                leftBlocks[i] = TOperation.Apply(leftBlocks[i], rightBlocks[i]);
+            done = leftBlocks.Length * Vector<ulong>.Count;
         }
 
-        for (; i < _wordCount; i++)
-            count += BitOperations.PopCount(span[i]);
-
-        return count;
+        for (int i = done; i < left.Length; i++)
+            left[i] = TOperation.Apply(left[i], right[i]);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private int GetTrueCountPopcnt()
+    private interface IBitwiseOperation
     {
-        int count = 0;
-        var span = _bits.AsSpan(0, _wordCount);
+        static abstract Vector<ulong> Apply(Vector<ulong> left, Vector<ulong> right);
 
-        int i = 0;
-        int limit = _wordCount - 4;
-        for (; i <= limit; i += 4)
-        {
-            count += (int)Popcnt.X64.PopCount(span[i]);
-            count += (int)Popcnt.X64.PopCount(span[i + 1]);
-            count += (int)Popcnt.X64.PopCount(span[i + 2]);
-            count += (int)Popcnt.X64.PopCount(span[i + 3]);
-        }
-
-        for (; i < _wordCount; i++)
-            count += (int)Popcnt.X64.PopCount(span[i]);
-
-        return count;
+        static abstract ulong Apply(ulong left, ulong right);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetTrueCountScalar()
+    private readonly struct AndOperation : IBitwiseOperation
     {
-        int count = 0;
-        var span = _bits.AsSpan(0, _wordCount);
+        public static Vector<ulong> Apply(Vector<ulong> left, Vector<ulong> right) => left & right;
 
-        int i = 0;
-        int limit = _wordCount - 4;
-        for (; i <= limit; i += 4)
-        {
-            count += BitOperations.PopCount(span[i]);
-            count += BitOperations.PopCount(span[i + 1]);
-            count += BitOperations.PopCount(span[i + 2]);
-            count += BitOperations.PopCount(span[i + 3]);
-        }
-
-        for (; i < _wordCount; i++)
-            count += BitOperations.PopCount(span[i]);
-
-        return count;
+        public static ulong Apply(ulong left, ulong right) => left & right;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int SumVectorBytes(Vector128<byte> vector)
+    private readonly struct OrOperation : IBitwiseOperation
     {
-        int count = 0;
-        ref byte refByte = ref Unsafe.As<Vector128<byte>, byte>(ref vector);
-        for (nuint i = 0; i < (nuint)Vector128<byte>.Count; i++)
-            count += Unsafe.Add(ref refByte, i);
-        return count;
+        public static Vector<ulong> Apply(Vector<ulong> left, Vector<ulong> right) => left | right;
+
+        public static ulong Apply(ulong left, ulong right) => left | right;
+    }
+
+    private readonly struct AndNotOperation : IBitwiseOperation
+    {
+        // Vector.AndNot(left, right) is left & ~right: one VPANDN on x64, one BIC on ARM64.
+        public static Vector<ulong> Apply(Vector<ulong> left, Vector<ulong> right) => Vector.AndNot(left, right);
+
+        public static ulong Apply(ulong left, ulong right) => left & ~right;
     }
 }

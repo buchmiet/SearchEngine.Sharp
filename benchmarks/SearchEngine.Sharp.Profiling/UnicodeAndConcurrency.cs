@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SearchEngine.DependencyInjection;
 using SearchEngine.Filters;
 using SearchEngine.Ingestion;
+using SearchEngine.Sharp.Tests;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Profiling;
@@ -66,8 +67,8 @@ static class UnicodeProbe
         var onDisk = Directory.EnumerateFiles(dir).Select(Path.GetFileName).ToList();
         var entries = new Dictionary<int, IndexedEntry>();
         for (int i = 0; i < onDisk.Count; i++) entries[i] = new IndexedEntry(onDisk[i]!, onDisk[i]!);
-        var def = new SearchEngineSharp(new Bench.Fixed(IndexSnapshotBuilder.Build(entries, SearchTokenization.Default)));
-        var fm = new SearchEngineSharp(new Bench.Fixed(IndexSnapshotBuilder.Build(entries, SearchTokenization.FileMask)));
+        var def = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(entries, SearchTokenization.Default)));
+        var fm = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(entries, SearchTokenization.FileMask)));
 
         foreach (var c in Cases)
         {
@@ -98,7 +99,7 @@ static class UnicodeProbe
             [1] = new("👨‍👩‍👧", "x"),               // ZWJ family
             [2] = new("ıx ix", "x"),                 // both tokens in one document
         };
-        var ge = new SearchEngineSharp(new Bench.Fixed(IndexSnapshotBuilder.Build(g, SearchTokenization.Default)));
+        var ge = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(g, SearchTokenization.Default)));
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             mode = "unicode-grapheme",
