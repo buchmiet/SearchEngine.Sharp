@@ -17,10 +17,19 @@ internal static class ResultMaterializer
             return [];
 
         var recordIds = snapshot.RecordIds.AsSpan();
+        if (hitCount == 1)
+        {
+            Span<int> single = stackalloc int[1];
+            resultSet.CopySetBitOrdinals(single);
+            return [recordIds[single[0]]];
+        }
 
-        return sortMode == SearchSortMode.NaturalSortAscending
-            ? MaterializeNaturalSort(snapshot, resultSet, hitCount, recordIds)
-            : MaterializeSnapshotOrder(resultSet, hitCount, recordIds);
+        if (sortMode != SearchSortMode.NaturalSortAscending)
+            return MaterializeSnapshotOrder(resultSet, hitCount, recordIds);
+
+        return SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount)
+            ? MaterializeNaturalSortKOnly(snapshot, resultSet, hitCount, recordIds)
+            : MaterializeNaturalSortFullPermutation(snapshot, resultSet, hitCount, recordIds);
     }
 
     private static List<int> MaterializeSnapshotOrder(
@@ -28,46 +37,16 @@ internal static class ResultMaterializer
         int hitCount,
         ReadOnlySpan<int> recordIds)
     {
-        if (hitCount == 1)
-        {
-            Span<int> single = stackalloc int[1];
-            resultSet.CopySetBitOrdinals(single);
-            return [recordIds[single[0]]];
-        }
-
         int[] ordinals = ArrayPool<int>.Shared.Rent(hitCount);
         try
         {
             int count = resultSet.CopySetBitOrdinals(ordinals.AsSpan(0, hitCount));
-            var results = new List<int>(count);
-            for (int i = 0; i < count; i++)
-                results.Add(recordIds[ordinals[i]]);
-
-            return results;
+            return PostingListOperations.MaterializeRecordIds(recordIds, ordinals.AsSpan(0, count));
         }
         finally
         {
             ArrayPool<int>.Shared.Return(ordinals);
         }
-    }
-
-    private static List<int> MaterializeNaturalSort(
-        IndexSnapshot snapshot,
-        FastBitSet resultSet,
-        int hitCount,
-        ReadOnlySpan<int> recordIds)
-    {
-        if (hitCount == 1)
-        {
-            Span<int> single = stackalloc int[1];
-            resultSet.CopySetBitOrdinals(single);
-            return [recordIds[single[0]]];
-        }
-
-        if (SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount))
-            return MaterializeNaturalSortKOnly(snapshot, resultSet, hitCount, recordIds);
-
-        return MaterializeNaturalSortFullPermutation(snapshot, resultSet, hitCount, recordIds);
     }
 
     // Walks the sort permutation of the whole snapshot and keeps the hits: cost grows with the document count.
@@ -78,8 +57,7 @@ internal static class ResultMaterializer
         ReadOnlySpan<int> recordIds)
     {
         var results = new List<int>(hitCount);
-        var permutation = snapshot.GetSortedPermutation();
-        foreach (int ordinal in permutation)
+        foreach (int ordinal in snapshot.GetSortedPermutation())
         {
             if (resultSet.Get(ordinal))
                 results.Add(recordIds[ordinal]);
@@ -105,12 +83,7 @@ internal static class ResultMaterializer
                 keys[i] = NaturalSortKeyBuilder.Build(sortTexts[ordinals[i]]);
 
             Array.Sort(keys, ordinals, 0, count, StringComparer.Ordinal);
-
-            var results = new List<int>(count);
-            for (int i = 0; i < count; i++)
-                results.Add(recordIds[ordinals[i]]);
-
-            return results;
+            return PostingListOperations.MaterializeRecordIds(recordIds, ordinals.AsSpan(0, count));
         }
         finally
         {

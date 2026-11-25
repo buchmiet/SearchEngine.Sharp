@@ -7,39 +7,10 @@ namespace SearchEngine.Query;
 /// </summary>
 internal static class GlobMatcher
 {
-    internal static bool ContainsMetacharacters(ReadOnlySpan<char> pattern)
-    {
-        for (int i = 0; i < pattern.Length; i++)
-        {
-            if (pattern[i] is '*' or '?')
-                return true;
-        }
+    internal static bool ContainsMetacharacters(ReadOnlySpan<char> pattern) => pattern.ContainsAny('*', '?');
 
-        return false;
-    }
-
-    internal static int MinMatchLength(ReadOnlySpan<char> pattern)
-    {
-        int count = 0;
-        for (int i = 0; i < pattern.Length; i++)
-        {
-            if (pattern[i] != '*')
-                count++;
-        }
-
-        return count;
-    }
-
-    internal static bool PatternHasStar(ReadOnlySpan<char> pattern)
-    {
-        for (int i = 0; i < pattern.Length; i++)
-        {
-            if (pattern[i] == '*')
-                return true;
-        }
-
-        return false;
-    }
+    // Every character but '*' consumes exactly one character of the word.
+    internal static int MinMatchLength(ReadOnlySpan<char> pattern) => pattern.Length - pattern.Count('*');
 
     /// <summary>
     /// Returns true when <paramref name="word"/> fully matches <paramref name="pattern"/>.
@@ -134,7 +105,7 @@ internal static class GlobMatcher
             _pattern = pattern;
             _graphemeBoundaries = graphemeBoundaries;
             _kind = Kind.General;
-            if (pattern.AsSpan().IndexOf('?') >= 0)
+            if (pattern.Contains('?'))
                 return;
 
             int first = pattern.IndexOf('*');
@@ -152,7 +123,7 @@ internal static class GlobMatcher
                 return;
             }
 
-            bool innerHasStar = pattern.AsSpan(innerStart, innerEnd - innerStart).IndexOf('*') >= 0;
+            bool innerHasStar = pattern.AsSpan(innerStart, innerEnd - innerStart).Contains('*');
             if (leading && trailing && !innerHasStar)
             {
                 _kind = Kind.Contains;

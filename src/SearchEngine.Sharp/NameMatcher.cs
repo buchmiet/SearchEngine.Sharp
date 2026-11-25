@@ -94,8 +94,7 @@ public sealed class NameMatcher
         // separator that lowercasing would create or remove does not move a token boundary.
         char[]? rented = text.Length > 256 ? ArrayPool<char>.Shared.Rent(text.Length) : null;
         Span<char> lower = rented is null ? stackalloc char[text.Length] : rented.AsSpan(0, text.Length);
-        for (int i = 0; i < text.Length; i++)
-            lower[i] = TextNormalizer.ToLowerInvariantFast(text[i]);
+        TextNormalizer.ToLowerInvariantFast(text, lower);
 
         try
         {

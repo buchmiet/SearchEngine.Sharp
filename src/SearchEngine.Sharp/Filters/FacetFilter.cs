@@ -42,7 +42,7 @@ public sealed class FacetFilter
     /// <paramref name="minInclusive"/>, no document matches.</param>
     /// <returns>A new filter. For equality pass the same value twice.</returns>
     public static FacetFilter Range(string facet, long minInclusive, long maxInclusive)
-        => new([FacetPredicate.Range(facet, minInclusive, maxInclusive)]);
+        => new([new FacetRange(facet, minInclusive, maxInclusive)]);
 
     /// <summary>
     /// Creates a filter with one bitmask predicate: a document matches when all bits of
@@ -53,7 +53,7 @@ public sealed class FacetFilter
     /// <param name="mustNot">The bits that must be clear.</param>
     /// <returns>A new filter.</returns>
     public static FacetFilter Mask(string facet, long mustHave, long mustNot = 0)
-        => new([FacetPredicate.Mask(facet, mustHave, mustNot)]);
+        => new([new FacetMask(facet, mustHave, mustNot)]);
 
     /// <summary>
     /// Joins the predicates of all <paramref name="filters"/> with AND.
@@ -85,36 +85,11 @@ public sealed class FacetFilter
     }
 }
 
-internal readonly struct FacetPredicate
-{
-    internal FacetPredicateKind Kind { get; init; }
-    internal string Facet { get; init; }
-    internal long MinInclusive { get; init; }
-    internal long MaxInclusive { get; init; }
-    internal long MustHave { get; init; }
-    internal long MustNot { get; init; }
+// One condition on one facet column. The kinds are a closed set, so the evaluator's switch over them is exhaustive.
+internal closed record class FacetPredicate(string Facet);
 
-    internal static FacetPredicate Range(string facet, long minInclusive, long maxInclusive)
-        => new()
-        {
-            Kind = FacetPredicateKind.Range,
-            Facet = facet,
-            MinInclusive = minInclusive,
-            MaxInclusive = maxInclusive,
-        };
+// minInclusive <= value <= maxInclusive.
+internal sealed record class FacetRange(string Facet, long MinInclusive, long MaxInclusive) : FacetPredicate(Facet);
 
-    internal static FacetPredicate Mask(string facet, long mustHave, long mustNot)
-        => new()
-        {
-            Kind = FacetPredicateKind.Mask,
-            Facet = facet,
-            MustHave = mustHave,
-            MustNot = mustNot,
-        };
-}
-
-internal enum FacetPredicateKind
-{
-    Range,
-    Mask,
-}
+// Every bit of MustHave set and no bit of MustNot set.
+internal sealed record class FacetMask(string Facet, long MustHave, long MustNot) : FacetPredicate(Facet);

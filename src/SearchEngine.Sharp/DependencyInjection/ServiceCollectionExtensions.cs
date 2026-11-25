@@ -19,14 +19,7 @@ public static class ServiceCollectionExtensions
     /// Registers SearchEngine.Sharp with a tokenization preset for all index rebuilds.
     /// </summary>
     public static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization)
-    {
-        services.AddSingleton<IndexSnapshotProvider>();
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
-    }
+        => AddIndexServices(services, key: null, initialIndex: null, tokenization, ServiceLifetime.Scoped);
 
     /// <summary>
     /// Same as AddSearchEngine, but registers ISearchEngine as transient.
@@ -38,14 +31,7 @@ public static class ServiceCollectionExtensions
     /// Same as AddSearchEngine with a tokenization preset, but registers ISearchEngine as transient.
     /// </summary>
     public static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization)
-    {
-        services.AddSingleton<IndexSnapshotProvider>();
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp =>
-            new IndexUpdater(sp.GetRequiredService<IndexSnapshotProvider>(), tokenization));
-        services.AddTransient<ISearchEngine, SearchEngineSharp>();
-        return services;
-    }
+        => AddIndexServices(services, key: null, initialIndex: null, tokenization, ServiceLifetime.Transient);
 
     /// <summary>
     /// Registers services and publishes a first snapshot built from <paramref name="initialEntries"/>.
@@ -71,10 +57,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IDictionary<int, string> initialEntries,
         SearchTokenization tokenization)
-    {
-        var initial = new InitialIndex(CopyEntries(initialEntries));
-        return AddIndexServices(services, _ => initial, tokenization);
-    }
+        => AddIndexServices(services, key: null, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
 
     /// <summary>
     /// Registers services and publishes a first snapshot built from the entries returned by
@@ -104,21 +87,12 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(entriesFactory);
 
-        return AddIndexServices(services, sp => new InitialIndex(CopyEntries(entriesFactory(sp))), tokenization);
-    }
-
-    private static IServiceCollection AddIndexServices(
-        IServiceCollection services,
-        Func<IServiceProvider, InitialIndex> initialIndex,
-        SearchTokenization tokenization)
-    {
-        services.AddSingleton(initialIndex);
-        services.AddSingleton<IndexSnapshotProvider>(sp => CreateProvider(sp.GetRequiredService<InitialIndex>(), tokenization));
-        services.AddSingleton<IIndexSnapshotProvider>(sp => sp.GetRequiredService<IndexSnapshotProvider>());
-        services.AddSingleton<IIndexUpdater>(sp => new IndexUpdater(
-            sp.GetRequiredService<IndexSnapshotProvider>(), tokenization, sp.GetRequiredService<InitialIndex>().Entries));
-        services.AddScoped<ISearchEngine, SearchEngineSharp>();
-        return services;
+        return AddIndexServices(
+            services,
+            key: null,
+            sp => new InitialIndex(CopyEntries(entriesFactory(sp))),
+            tokenization,
+            ServiceLifetime.Scoped);
     }
 
     /// <summary>
@@ -136,16 +110,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         string key,
         SearchTokenization tokenization)
-    {
-        services.AddKeyedSingleton<IndexSnapshotProvider>(key);
-        services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
-            sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
-        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization));
-        services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
-            new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
-        return services;
-    }
+        => AddIndexServices(services, key, initialIndex: null, tokenization, ServiceLifetime.Scoped);
 
     /// <summary>
     /// Registers keyed services and publishes a first snapshot built from <paramref name="initialEntries"/>.
@@ -168,21 +133,54 @@ public static class ServiceCollectionExtensions
         string key,
         IDictionary<int, string> initialEntries,
         SearchTokenization tokenization)
-    {
-        var initial = new InitialIndex(CopyEntries(initialEntries));
+        => AddIndexServices(services, key, CopiedNow(initialEntries), tokenization, ServiceLifetime.Scoped);
 
-        services.AddKeyedSingleton<IndexSnapshotProvider>(key, (_, _) => CreateProvider(initial, tokenization));
+    // The one registration of an index, keyed or not: a null key registers ordinary (non-keyed) services, and a
+    // keyed lookup with a null key resolves them. initialIndex null: the index starts empty and nothing is published.
+    // Otherwise the first snapshot and the updater start from the same InitialIndex, built once per container.
+    private static IServiceCollection AddIndexServices(
+        IServiceCollection services,
+        string? key,
+        Func<IServiceProvider, InitialIndex>? initialIndex,
+        SearchTokenization tokenization,
+        ServiceLifetime engineLifetime)
+    {
+        if (initialIndex is null)
+        {
+            services.AddKeyedSingleton(key, (_, _) => new IndexSnapshotProvider());
+            services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
+                new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization));
+        }
+        else
+        {
+            services.AddKeyedSingleton(key, (sp, _) => initialIndex(sp));
+            services.AddKeyedSingleton(key, (sp, k) =>
+                CreateProvider(sp.GetRequiredKeyedService<InitialIndex>(k), tokenization));
+            services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) => new IndexUpdater(
+                sp.GetRequiredKeyedService<IndexSnapshotProvider>(k),
+                tokenization,
+                sp.GetRequiredKeyedService<InitialIndex>(k).Entries));
+        }
+
         services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
             sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
-        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-            new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, initial.Entries));
-        services.AddKeyedScoped<ISearchEngine>(key, (sp, k) =>
-            new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)));
+        services.Add(ServiceDescriptor.DescribeKeyed(
+            typeof(ISearchEngine),
+            key,
+            (sp, k) => new SearchEngineSharp(sp.GetRequiredKeyedService<IIndexSnapshotProvider>(k)),
+            engineLifetime));
         return services;
     }
 
     // The entries an index starts with: the first snapshot is built from them and the updater starts from them.
     private sealed record InitialIndex(IReadOnlyDictionary<int, IndexedEntry> Entries);
+
+    // Copies the entries at registration, so later changes to the caller's dictionary do not reach the index.
+    private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> entries)
+    {
+        var initial = new InitialIndex(CopyEntries(entries));
+        return _ => initial;
+    }
 
     private static Dictionary<int, IndexedEntry> CopyEntries(IDictionary<int, string> entries)
     {

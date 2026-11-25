@@ -162,9 +162,7 @@ public static class TextNormalizer
         else if (wordSpan.Length <= MaxStackWordLength)
         {
             Span<char> lower = stackalloc char[wordSpan.Length];
-            for (int i = 0; i < wordSpan.Length; i++)
-                lower[i] = ToLowerInvariantFast(wordSpan[i]);
-
+            ToLowerInvariantFast(wordSpan, lower);
             if (lookup.Contains(lower))
                 return;
 
@@ -182,16 +180,20 @@ public static class TextNormalizer
     }
 
     /// <summary>Returns a lowercase copy of <paramref name="source"/>, converted character by character with
-    /// <see cref="ToLowerInvariantFast"/>.</summary>
+    /// <see cref="ToLowerInvariantFast(char)"/>.</summary>
     /// <param name="source">The characters to copy.</param>
     /// <returns>A new string of the same length.</returns>
     public static string CreateNormalizedWord(ReadOnlySpan<char> source)
     {
-        return string.Create(source.Length, source, static (destination, state) =>
-        {
-            for (int i = 0; i < state.Length; i++)
-                destination[i] = ToLowerInvariantFast(state[i]);
-        });
+        return string.Create(source.Length, source, static (destination, state) => ToLowerInvariantFast(state, destination));
+    }
+
+    // Per UTF-16 code unit, like ToLowerInvariantFast(char). MemoryExtensions.ToLowerInvariant and ToLowerOrdinal are not
+    // equivalent: both also lowercase supplementary-plane letters, which only UnicodeMatching.CaseFold does here.
+    internal static void ToLowerInvariantFast(ReadOnlySpan<char> source, Span<char> destination)
+    {
+        for (int i = 0; i < source.Length; i++)
+            destination[i] = ToLowerInvariantFast(source[i]);
     }
 
     private static bool IsNormalized(ReadOnlySpan<char> word)

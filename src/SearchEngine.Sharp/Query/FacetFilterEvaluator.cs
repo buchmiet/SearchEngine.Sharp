@@ -17,21 +17,14 @@ internal static class FacetFilterEvaluator
         if (filter.IsEmpty)
             return;
 
-        ReadOnlySpan<FacetPredicate> predicates = filter.Predicates;
-        if (predicates.Length == 0)
-            return;
-
         int hitCount = results.GetTrueCount();
         if (hitCount == 0)
             return;
 
         if (SelectivityThresholds.UseFacetOnHitsPath(hitCount, snapshot.DocumentCount))
-        {
             ApplyOnHitsInPlace(results, filter, snapshot, hitCount);
-            return;
-        }
-
-        ApplyFullScan(results, filter, snapshot, qc);
+        else
+            ApplyFullScan(results, filter, snapshot, qc);
     }
 
     // Tests every document against the filter, then intersects: cost grows with the document count.
@@ -40,18 +33,7 @@ internal static class FacetFilterEvaluator
         FacetFilter filter,
         IndexSnapshot snapshot,
         QueryContext qc)
-    {
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
-        var matching = qc.RentEmptyBitSet();
-
-        for (int ordinal = 0; ordinal < matching.Length; ordinal++)
-        {
-            if (MatchesAll(resolved, ordinal))
-                matching.Add(ordinal);
-        }
-
-        results.IntersectWith(matching);
-    }
+        => results.IntersectWith(BuildMatchingBitSet(filter, snapshot, qc));
 
     // Tests only the documents that already match the text query: cost grows with the hit count.
     internal static void ApplyOnHitsInPlace(
@@ -197,14 +179,14 @@ internal static class FacetFilterEvaluator
         return results;
     }
 
-    private static ResolvedPredicate[] ResolvePredicates(
+    internal static ResolvedPredicate[] ResolvePredicates(
         ReadOnlySpan<FacetPredicate> predicates,
         IndexSnapshot snapshot)
     {
         var resolved = new ResolvedPredicate[predicates.Length];
         for (int i = 0; i < predicates.Length; i++)
         {
-            ref readonly FacetPredicate predicate = ref predicates[i];
+            FacetPredicate predicate = predicates[i];
             if (!snapshot.FacetColumns.TryGetValue(predicate.Facet, out long[]? column))
             {
                 throw new ArgumentException($"Unknown facet '{predicate.Facet}'.");
@@ -216,7 +198,7 @@ internal static class FacetFilterEvaluator
         return resolved;
     }
 
-    private static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
+    internal static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
     {
         for (int i = 0; i < resolved.Length; i++)
         {
@@ -227,18 +209,12 @@ internal static class FacetFilterEvaluator
         return true;
     }
 
-    private static bool Matches(in FacetPredicate predicate, long value)
+    // FacetPredicate is closed: this switch is exhaustive, and a new kind is a compile error here until it is handled.
+    private static bool Matches(FacetPredicate predicate, long value) => predicate switch
     {
-        return predicate.Kind switch
-        {
-            FacetPredicateKind.Range =>
-                value >= predicate.MinInclusive && value <= predicate.MaxInclusive,
-            FacetPredicateKind.Mask =>
-                (value & predicate.MustHave) == predicate.MustHave
-                && (value & predicate.MustNot) == 0,
-            _ => false,
-        };
-    }
+        FacetRange range => value >= range.MinInclusive && value <= range.MaxInclusive,
+        FacetMask mask => (value & mask.MustHave) == mask.MustHave && (value & mask.MustNot) == 0,
+    };
 
-    private readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
+    internal readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
 }
