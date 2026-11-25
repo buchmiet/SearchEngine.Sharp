@@ -191,9 +191,12 @@ internal static class GlobMatcher
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
-        // Both positions are unit boundaries of word.
+        // Both positions are unit boundaries of word. Code points need no boundary table, so that case skips it.
         private bool AreBoundaries(ReadOnlySpan<char> word, int first, int second)
         {
+            if (!_graphemeBoundaries)
+                return TextUnitBoundaries.IsCodePointBoundary(word, first) && TextUnitBoundaries.IsCodePointBoundary(word, second);
+
             var boundaries = new TextUnitBoundaries(word, _graphemeBoundaries, default);
             try
             {

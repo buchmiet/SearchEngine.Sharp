@@ -181,4 +181,24 @@ public class GlobMatchingTests
             await Assert.That(actual).IsEqualTo(expected).Because($"pattern '{pattern}' word '{word}': expected {expected}");
         }
     }
+
+    // The prefix and suffix shapes check code point boundaries without the boundary table; surrogate halves in both
+    // alphabets make the general matcher reject a literal that ends or starts inside a pair.
+    [Test]
+    public async Task ShapeFastPaths_AgreeWithGeneralMatcher_OnSurrogatePairs()
+    {
+        var rng = new Random(321);
+        const string patternAlphabet = "a😀**?";
+        const string wordAlphabet = "a😀";
+        for (int n = 0; n < 50_000; n++)
+        {
+            var pattern = new string(Enumerable.Range(0, rng.Next(1, 7)).Select(_ => patternAlphabet[rng.Next(patternAlphabet.Length)]).ToArray());
+            var word = new string(Enumerable.Range(0, rng.Next(0, 8)).Select(_ => wordAlphabet[rng.Next(wordAlphabet.Length)]).ToArray());
+
+            bool expected = SearchEngine.Query.GlobMatcher.IsWholeWordMatch(pattern, word);
+            bool actual = new SearchEngine.Query.GlobMatcher.Shape(pattern).IsMatch(word);
+
+            await Assert.That(actual).IsEqualTo(expected).Because($"pattern {Convert.ToHexString(System.Text.Encoding.Unicode.GetBytes(pattern))} word {Convert.ToHexString(System.Text.Encoding.Unicode.GetBytes(word))}");
+        }
+    }
 }

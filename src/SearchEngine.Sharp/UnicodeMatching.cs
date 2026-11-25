@@ -359,13 +359,14 @@ internal ref struct TextUnitBoundaries
     /// <summary>True when <paramref name="position"/> (0 to the word's length) is a unit boundary.</summary>
     internal bool IsBoundary(int position)
     {
+        if (!_graphemeClusters)
+            return IsCodePointBoundary(_word, position);
+
         if (position <= 0 || position >= _word.Length)
             return true;
 
         char before = _word[position - 1];
         char after = _word[position];
-        if (!_graphemeClusters)
-            return !(char.IsHighSurrogate(before) && char.IsLowSurrogate(after));
 
         // Two ASCII characters are always split, except CR LF (UAX #29 rules GB3 to GB5).
         if (char.IsAscii(before) && char.IsAscii(after))
@@ -376,6 +377,12 @@ internal ref struct TextUnitBoundaries
 
         return _isBoundary[position];
     }
+
+    /// <summary>True when <paramref name="position"/> (0 to the word's length) does not split a surrogate pair: the
+    /// unit boundary for code points, which needs no table.</summary>
+    internal static bool IsCodePointBoundary(ReadOnlySpan<char> word, int position)
+        => position <= 0 || position >= word.Length
+            || !(char.IsHighSurrogate(word[position - 1]) && char.IsLowSurrogate(word[position]));
 
     /// <summary>The end of the unit that starts at <paramref name="position"/>, which is a boundary before the end of
     /// the word.</summary>
