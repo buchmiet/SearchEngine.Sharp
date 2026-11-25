@@ -171,11 +171,14 @@ cost, and the time between publishes decides how stale the index is.
 
 ### Policies
 
+The policy is a case of `IngestPublishPolicy`, set in `IngestPublishOptions.Policy`. Each case has only the
+settings it uses (the full list with defaults is in [the API reference](api.md#ingestpublishpolicy)).
+
 | Policy | Publishes when | Use it for |
 |---|---|---|
-| `Adaptive` (default) | the buffer reaches the batch cap; or `max(MinInterval, AdaptiveMultiplier × last rebuild)` has passed and at least `MinTimerPublishBatch` entries wait; or the oldest entry has waited `MaxStaleness` | scans of any speed and size |
-| `TimeDebounce` | `MinInterval` has passed since the last publish and the buffer is not empty | scans where you want a fixed refresh rate |
-| `FixedBatch` | the buffer reaches `FixedBatchSize` | tests and benchmarks; it has no timer, so an idle scanner leaves entries unpublished |
+| `Adaptive` (default) | the buffer reaches the batch cap; or `max(MinInterval, RebuildMultiplier × last rebuild)` has passed and at least `MinTimerPublishBatch` entries wait; or the oldest entry has waited `MaxStaleness`. A timer drives the time-based publishes | scans of any speed and size |
+| `TimeDebounce` | `MinInterval` has passed since the last publish and the buffer is not empty; or the oldest entry has waited `MaxStaleness`. A timer drives both. The number of buffered entries never starts a publish | scans where you want a fixed refresh rate |
+| `FixedBatch` | the buffer reaches `BatchSize`; or an entry arrives while the oldest buffered entry has waited `MaxStaleness`. No timer, so an idle scanner leaves entries unpublished | tests and benchmarks |
 | `PerEntry` | after every entry | a baseline only: total work grows with the square of the entry count |
 
 100,000 synthetic paths fed as fast as possible (`--ingestion-policy` benchmark, same machine):
@@ -189,31 +192,36 @@ cost, and the time between publishes decides how stale the index is.
 
 ### Options
 
-- `GrowthAwareBatchCap` (default `true`, `Adaptive` only) raises the batch cap after each publish to the number of
+These are the settings of `Adaptive`, except where noted.
+
+- `GrowthAwareBatchCap` (default `true`) raises the batch cap after each publish to the number of
   indexed documents. A fast scan then publishes at 2k, 4k, 8k, 16k and so on, which keeps the total rebuild work
   near twice one full build. Leave it on unless you need publishes of a constant size.
-- `FixedBatchSize` (default 2,000) is the first batch cap under `Adaptive` and the batch size of `FixedBatch`.
-  Smaller values show the first results sooner and cost more rebuilds.
-- `MinInterval` (default 100 ms) is the shortest time between timer publishes under `Adaptive` and
-  `TimeDebounce`.
-- `AdaptiveMultiplier` (`k`, default 2) spaces timer publishes by `k` times the last rebuild, so while the timer
+- `BatchCap` (default 2,000) is the first batch cap. `FixedBatch.BatchSize` (default 2,000) is the size of every
+  batch under `FixedBatch`. Smaller values show the first results sooner and cost more rebuilds.
+- `MinInterval` (default 100 ms) is the shortest time between timer publishes. `TimeDebounce` has the same
+  setting.
+- `RebuildMultiplier` (`k`, default 2) spaces timer publishes by `k` times the last rebuild, so while the timer
   drives the publishes about `1 / (1 + k)` of the time goes into rebuilds. Raise it to spend less CPU on rebuilds; lower it for fresher
   results.
 - `MinTimerPublishBatch` (default 200) keeps a slow scan from rebuilding for a handful of new entries. Staleness
   overrides it.
-- `ChannelCapacity` (default 10,000) bounds the queue between scanner and publisher. When it is full the scanner
-  waits.
-- `FlushOnCancellation` (default `true`) publishes everything accepted when the scan is cancelled.
+- `IngestPublishOptions.ChannelCapacity` (default 10,000, any policy) bounds the queue between scanner and
+  publisher. When it is full the scanner waits.
+- `IngestPublishOptions.FlushOnCancellation` (default `true`, any policy) publishes everything accepted when the
+  scan is cancelled.
 
 ### `MaxStaleness` and the worst case
 
 `MaxStaleness` (default 1 s) is the longest an accepted entry should wait before the publish that contains it
 starts. That publish's rebuild comes on top, as does time spent in `Published` and `onPublished` handlers.
-`Adaptive` and `TimeDebounce` enforce it with a timer, so it holds while the scanner is idle; `FixedBatch` and
-`PerEntry` check it only when the next entry arrives or the scan ends.
+`Adaptive` and `TimeDebounce` enforce it with a timer, so it holds while the scanner is idle. `FixedBatch`
+publishes for staleness only when the next entry arrives, never from a timer: an idle scanner leaves a stale
+buffer unpublished until it hands over another entry or ends. `PerEntry` has no `MaxStaleness`, because it
+publishes every entry as soon as it arrives.
 
 Under `Adaptive`, a staleness publish also waits until `k × R` has passed since the previous rebuild ended,
-where `R` is the duration of that rebuild and `k` is `AdaptiveMultiplier`. An entry that arrives just as a rebuild
+where `R` is the duration of that rebuild and `k` is `RebuildMultiplier`. An entry that arrives just as a rebuild
 starts therefore waits for that rebuild and the gap after it:
 
 ```

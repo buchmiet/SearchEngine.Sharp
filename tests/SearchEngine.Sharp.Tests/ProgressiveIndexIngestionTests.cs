@@ -28,9 +28,11 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 11),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 500,
-                MinInterval = TimeSpan.FromMilliseconds(50),
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 500,
+                    MinInterval = TimeSpan.FromMilliseconds(50),
+                },
             });
 
         await Assert.That(result.CompletedSuccessfully).IsTrue();
@@ -60,8 +62,7 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 3, delayPerEntry: TimeSpan.FromMilliseconds(1)),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.FixedBatch,
-                FixedBatchSize = 400,
+                Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 400 },
             },
             onPublished: evt =>
             {
@@ -87,9 +88,7 @@ public class ProgressiveIndexIngestionTests
             feed,
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.TimeDebounce,
-                MinInterval = TimeSpan.FromMilliseconds(200),
-                FixedBatchSize = 50_000,
+                Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(200) },
             },
             cancellationToken: cts.Token);
 
@@ -115,9 +114,7 @@ public class ProgressiveIndexIngestionTests
             feed,
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.TimeDebounce,
-                MinInterval = TimeSpan.FromMilliseconds(500),
-                FixedBatchSize = 50_000,
+                Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(500) },
                 FlushOnCancellation = false,
             },
             cancellationToken: cts.Token);
@@ -176,10 +173,12 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 99),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 750,
-                MinInterval = TimeSpan.FromMilliseconds(25),
-                AdaptiveMultiplier = 2.0,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 750,
+                    MinInterval = TimeSpan.FromMilliseconds(25),
+                    RebuildMultiplier = 2.0,
+                },
             });
 
         queryCts.Cancel();
@@ -203,8 +202,7 @@ public class ProgressiveIndexIngestionTests
             FacetedPathFeed.EnumerateAsync(count, seed: 17),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.FixedBatch,
-                FixedBatchSize = 300,
+                Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 300 },
             },
             onPublished: _ =>
             {
@@ -228,12 +226,14 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 42),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 2_000,
-                GrowthAwareBatchCap = true,
-                // Only the batch cap may publish: timer publishes depend on machine load.
-                MaxStaleness = TimeSpan.FromHours(1),
-                MinTimerPublishBatch = int.MaxValue,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 2_000,
+                    GrowthAwareBatchCap = true,
+                    // Only the batch cap may publish: timer publishes depend on machine load.
+                    MaxStaleness = TimeSpan.FromHours(1),
+                    MinTimerPublishBatch = int.MaxValue,
+                },
             });
 
         var (_, _, ingestionFixed) = Create();
@@ -241,12 +241,14 @@ public class ProgressiveIndexIngestionTests
             SyntheticPathFeed.EnumerateAsync(count, seed: 42),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 2_000,
-                GrowthAwareBatchCap = false,
-                // Only the batch cap may publish: timer publishes depend on machine load.
-                MaxStaleness = TimeSpan.FromHours(1),
-                MinTimerPublishBatch = int.MaxValue,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 2_000,
+                    GrowthAwareBatchCap = false,
+                    // Only the batch cap may publish: timer publishes depend on machine load.
+                    MaxStaleness = TimeSpan.FromHours(1),
+                    MinTimerPublishBatch = int.MaxValue,
+                },
             });
 
         await Assert.That(growth.CompletedSuccessfully).IsTrue();
@@ -266,7 +268,7 @@ public class ProgressiveIndexIngestionTests
 
         var result = await ingestion.IngestAsync(
             SyntheticPathFeed.EnumerateAsync(1_000, seed: 5),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 250 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 250 } },
             onPublished: e => rebuildDurations.Enqueue(e.RebuildDuration));
 
         await Assert.That(rebuildDurations.Count).IsEqualTo(4);
@@ -342,12 +344,14 @@ public class ProgressiveIndexIngestionTests
             SlowFeed(count: 600, every: 10, delay: TimeSpan.FromMilliseconds(15)),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 1_000_000,
-                MaxStaleness = TimeSpan.FromMilliseconds(30),
-                MinInterval = TimeSpan.Zero,
-                MinTimerPublishBatch = 1,
-                StrictMaxStaleness = strict,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 1_000_000,
+                    MaxStaleness = TimeSpan.FromMilliseconds(30),
+                    MinInterval = TimeSpan.Zero,
+                    MinTimerPublishBatch = 1,
+                    StrictMaxStaleness = strict,
+                },
             },
             onPublished: e => publishEnds.Add((System.Diagnostics.Stopwatch.GetTimestamp(), e.RebuildDuration)));
 
@@ -395,7 +399,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             feed.EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = batch },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = batch } },
             onPublished: where == PublishFault.OnPublishedCallback ? _ => failOnceScannerIsBlocked() : null);
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<InvalidOperationException>();
@@ -424,7 +428,7 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } });
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
@@ -451,11 +455,217 @@ public class ProgressiveIndexIngestionTests
 
         var ingest = ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 1_000 });
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } });
 
         var thrown = await Assert.That(() => (Task)ingest.WaitAsync(TestTimeout)).ThrowsExactly<IOException>();
 
         await Assert.That(thrown).IsSameReferenceAs(scanFault);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Ingest_ScannerFaultsRightAfterItsEntries_AlwaysPublishesThemBeforeFaulting(bool callerCancelsRightAfter)
+    {
+        // The scan hands over 3 entries and fails at once; in one variant the caller cancels at the same moment.
+        // Each run races the scanner's failure against the publisher's wait, so the loop covers many orderings.
+        const int runs = 200;
+        int lostFlushes = 0;
+        int wrongExceptions = 0;
+
+        for (int run = 0; run < runs; run++)
+        {
+            var updater = new IndexUpdater(new IndexSnapshotProvider());
+            var ingestion = new ProgressiveIndexIngestion(updater);
+            using var cts = new CancellationTokenSource();
+            var scanFault = new IOException("scan failed");
+            var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Feed()
+            {
+                for (int i = 0; i < 3; i++)
+                    yield return new(i, new IndexedEntry($"file-{i}.txt", $"file-{i}.txt"));
+
+                await Task.Yield();
+                failing.SetResult();
+                throw scanFault;
+            }
+
+            var ingest = ingestion.IngestAsync(
+                Feed(),
+                new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } },
+                cancellationToken: cts.Token);
+
+            if (callerCancelsRightAfter)
+            {
+                await failing.Task.WaitAsync(TestTimeout);
+                cts.Cancel();
+            }
+
+            Exception? thrown = null;
+            try
+            {
+                await ingest.WaitAsync(TestTimeout);
+            }
+            catch (Exception ex)
+            {
+                thrown = ex;
+            }
+
+            if (!ReferenceEquals(thrown, scanFault))
+                wrongExceptions++;
+            if (updater.EntryCount != 3)
+                lostFlushes++;
+        }
+
+        await Assert.That(lostFlushes).IsEqualTo(0).Because($"{lostFlushes} of {runs} runs did not publish the 3 accepted entries.");
+        await Assert.That(wrongExceptions).IsEqualTo(0).Because($"{wrongExceptions} of {runs} runs did not fault with the scanner's exception.");
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task WaitForEntry_ReportsEndOfInputWhenTheScannerFailed(bool callerCancelled)
+    {
+        // A failed channel throws the scanner's exception from WaitToReadAsync. That can happen before the
+        // channel's Completion task is complete, and after the caller cancelled; neither may skip the final flush.
+        using var cts = new CancellationTokenSource();
+        if (callerCancelled)
+            cts.Cancel();
+        var completion = callerCancelled ? Task.FromException(new IOException("scan failed")) : new TaskCompletionSource().Task;
+        var reader = new FailedChannelReader(new IOException("scan failed"), completion);
+
+        bool entriesAvailable = await PublishLoop.WaitForEntryAsync(reader, cts.Token);
+
+        await Assert.That(entriesAvailable).IsFalse();
+    }
+
+    [Test]
+    public async Task WaitForEntry_PropagatesTheCallersCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var reader = new FailedChannelReader(new OperationCanceledException(cts.Token), new TaskCompletionSource().Task);
+
+        await Assert.That(() => PublishLoop.WaitForEntryAsync(reader, cts.Token)).ThrowsExactly<OperationCanceledException>();
+    }
+
+    /// <summary>A channel reader whose wait fails with <c>error</c>, as a channel completed with an error does.</summary>
+    private sealed class FailedChannelReader(Exception error, Task completion) : System.Threading.Channels.ChannelReader<int>
+    {
+        public override Task Completion => completion;
+
+        public override bool TryRead(out int item)
+        {
+            item = 0;
+            return false;
+        }
+
+        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromException<bool>(error);
+    }
+
+    [Test]
+    public async Task Ingest_HandlerThrowsCancellationAfterAPublish_PublishesEachEntryOnce()
+    {
+        // The caller cancels inside the second onPublished, and the handler then observes the token. The batch it
+        // reports is already in the index: the flush on cancellation must not publish it again.
+        var (_, updater, ingestion) = Create();
+        using var cts = new CancellationTokenSource();
+        var events = new List<IngestionPublishEvent>();
+
+        var result = await ingestion.IngestAsync(
+            new CountingFeed(1_000).EnumerateAsync(),
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 100 } },
+            onPublished: e =>
+            {
+                events.Add(e);
+                if (e.PublishSequence == 1)
+                {
+                    cts.Cancel();
+                    cts.Token.ThrowIfCancellationRequested();
+                }
+            },
+            cancellationToken: cts.Token).WaitAsync(TestTimeout);
+
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesPublished).IsEqualTo(result.EntriesAccepted);
+        await Assert.That(result.EntriesPublished).IsEqualTo(events.Sum(e => e.EntryCount));
+        await Assert.That(result.PublishCount).IsEqualTo(events.Count);
+        await Assert.That(updater.EntryCount).IsEqualTo(result.EntriesAccepted);
+        await Assert.That(events[1].IndexedDocumentCount).IsEqualTo(200);
+    }
+
+    [Test]
+    public async Task Ingest_Cancelled_PublishesTheBufferWithoutWaitingForTheScannerToStop()
+    {
+        // The scanner ignores the token and stays silent after 5 entries. Cancelling must publish them at once,
+        // not when the scanner stops. The entry it yields after the cancellation is not accepted.
+        var (_, updater, ingestion) = Create();
+        using var cts = new CancellationTokenSource();
+        var scannerSilent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseScanner = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstPublish = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> Feed()
+        {
+            for (int i = 0; i < 5; i++)
+                yield return new(i, new IndexedEntry($"file-{i}.txt", $"file-{i}.txt"));
+
+            scannerSilent.SetResult();
+            await releaseScanner.Task;
+            yield return new(5, new IndexedEntry("file-5.txt", "file-5.txt"));
+        }
+
+        var ingest = ingestion.IngestAsync(
+            Feed(),
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 1_000 } },
+            onPublished: e => firstPublish.TrySetResult(e.IndexedDocumentCount),
+            cancellationToken: cts.Token);
+
+        await scannerSilent.Task.WaitAsync(TestTimeout);
+        cts.Cancel();
+        int indexedAfterCancel = await firstPublish.Task.WaitAsync(TestTimeout);
+        releaseScanner.SetResult();
+        var result = await ingest.WaitAsync(TestTimeout);
+
+        await Assert.That(indexedAfterCancel).IsEqualTo(5);
+        await Assert.That(result.WasCancelled).IsTrue();
+        await Assert.That(result.EntriesAccepted).IsEqualTo(5);
+        await Assert.That(result.EntriesPublished).IsEqualTo(5);
+        await Assert.That(result.PublishCount).IsEqualTo(1);
+        await Assert.That(updater.EntryCount).IsEqualTo(5);
+    }
+
+    [Test]
+    public async Task Ingest_ProgressNeverReportsMorePublishedThanAcceptedEntries()
+    {
+        // A channel of one entry and a publish per entry: the publisher takes each entry the moment the scanner
+        // hands it over. An entry must be counted as accepted before the publisher can publish it.
+        const int count = 20_000;
+        var ingestion = new ProgressiveIndexIngestion(new IdOnlyUpdater());
+        int reports = 0;
+        int publishedAheadOfAccepted = 0;
+        int wrongPendingCounts = 0;
+        var progress = new InlineProgress(p =>
+        {
+            reports++;
+            if (p.EntriesPublished > p.EntriesAccepted)
+                publishedAheadOfAccepted++;
+            if (p.PendingCount != p.EntriesAccepted - p.EntriesPublished)
+                wrongPendingCounts++;
+        });
+
+        var result = await ingestion.IngestAsync(
+            new CountingFeed(count).EnumerateAsync(),
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.PerEntry(), ChannelCapacity = 1 },
+            progress).WaitAsync(TestTimeout);
+
+        await Assert.That(reports).IsEqualTo(count);
+        await Assert.That(publishedAheadOfAccepted).IsEqualTo(0).Because($"{publishedAheadOfAccepted} of {count} reports counted more published than accepted entries.");
+        await Assert.That(wrongPendingCounts).IsEqualTo(0);
+        await Assert.That(result.EntriesAccepted).IsEqualTo(count);
+        await Assert.That(result.EntriesPublished).IsEqualTo(count);
     }
 
     [Test]
@@ -478,7 +688,7 @@ public class ProgressiveIndexIngestionTests
         // this thread: start it on the pool.
         var ingest = Task.Run(() => ingestion.IngestAsync(
             feed.EnumerateAsync(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 10, ChannelCapacity = 50 },
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 10 }, ChannelCapacity = 50 },
             cancellationToken: cts.Token));
 
         feed.WaitUntilYielded(10 + 50 + 1, TestTimeout);
@@ -566,10 +776,12 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 20,
-                GrowthAwareBatchCap = false,
-                MinTimerPublishBatch = 1,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 20,
+                    GrowthAwareBatchCap = false,
+                    MinTimerPublishBatch = 1,
+                },
             },
             onPublished: e => publishes.Enqueue(e.EntryCount));
 
@@ -625,10 +837,12 @@ public class ProgressiveIndexIngestionTests
             Feed(),
             new IngestPublishOptions
             {
-                Policy = IngestPublishPolicy.Adaptive,
-                FixedBatchSize = 20,
-                GrowthAwareBatchCap = false,
-                StrictMaxStaleness = strict,
+                Policy = new IngestPublishPolicy.Adaptive
+                {
+                    BatchCap = 20,
+                    GrowthAwareBatchCap = false,
+                    StrictMaxStaleness = strict,
+                },
             },
             onPublished: e => publishes.Enqueue(e.EntryCount));
 
@@ -639,109 +853,6 @@ public class ProgressiveIndexIngestionTests
 
         await Assert.That(publishes.ToArray()).IsEquivalentTo([20, 5], CollectionOrdering.Matching);
         await Assert.That(result.MaxObservedStaleness).IsEqualTo(TimeSpan.FromMilliseconds(expectedStalenessMs));
-    }
-
-    /// <summary>
-    /// A clock that moves only when a test or a simulated rebuild moves it. Timers fire when a test
-    /// calls <see cref="FireTimersUntilAsync"/>, optionally just before they are due, like a real
-    /// timer that wakes a fraction of a millisecond early.
-    /// </summary>
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private readonly Lock _gate = new();
-        private readonly List<ManualTimer> _timers = [];
-        private long _now;
-
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-        public override long GetTimestamp() => Volatile.Read(ref _now);
-
-        public void Advance(TimeSpan by) => Interlocked.Add(ref _now, by.Ticks);
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            var timer = new ManualTimer(this, callback, state);
-            timer.Change(dueTime, period);
-            return timer;
-        }
-
-        /// <summary>
-        /// Fires the earliest armed timer until <paramref name="done"/> holds. Only the first firing is
-        /// <paramref name="early"/> (before its due time): a timer re-armed for the remaining
-        /// sub-millisecond must fire on time or the clock would never get there.
-        /// </summary>
-        public async Task FireTimersUntilAsync(Func<bool> done, TimeSpan early, TimeSpan timeout)
-        {
-            var elapsed = global::System.Diagnostics.Stopwatch.StartNew();
-            while (!done())
-            {
-                await Assert.That(elapsed.Elapsed).IsLessThan(timeout).Because("Timed out: no timer was armed and the expected publish never happened.");
-                if (TryFireEarliest(early))
-                    early = TimeSpan.Zero;
-                else
-                    await Task.Delay(1);
-            }
-        }
-
-        private bool TryFireEarliest(TimeSpan early)
-        {
-            ManualTimer? next;
-            lock (_gate)
-            {
-                next = _timers.MinBy(static t => t.DueTimestamp);
-                if (next is null)
-                    return false;
-
-                _timers.Remove(next);
-                Volatile.Write(ref _now, Math.Max(Volatile.Read(ref _now), next.DueTimestamp - early.Ticks));
-            }
-
-            next.Fire(); // outside the lock: the publisher continues inline and may arm or dispose timers
-            return true;
-        }
-
-        private void Register(ManualTimer timer)
-        {
-            lock (_gate)
-            {
-                if (!_timers.Contains(timer))
-                    _timers.Add(timer);
-            }
-        }
-
-        private void Unregister(ManualTimer timer)
-        {
-            lock (_gate)
-                _timers.Remove(timer);
-        }
-
-        private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state) : ITimer
-        {
-            public long DueTimestamp { get; private set; }
-
-            public bool Change(TimeSpan dueTime, TimeSpan period)
-            {
-                if (dueTime == Timeout.InfiniteTimeSpan)
-                {
-                    owner.Unregister(this);
-                    return true;
-                }
-
-                DueTimestamp = owner.GetTimestamp() + dueTime.Ticks;
-                owner.Register(this);
-                return true;
-            }
-
-            public void Fire() => callback(state);
-
-            public void Dispose() => owner.Unregister(this);
-
-            public ValueTask DisposeAsync()
-            {
-                Dispose();
-                return ValueTask.CompletedTask;
-            }
-        }
     }
 
     private static async IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> SlowFeed(int count, int every, TimeSpan delay)
@@ -772,5 +883,38 @@ public class ProgressiveIndexIngestionTests
         public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries) { beforeAddOrUpdate(); inner.AddOrUpdateEntries(entries); }
         public int RemoveEntries(IEnumerable<int> ids) => inner.RemoveEntries(ids);
         public void Clear() => inner.Clear();
+    }
+
+    /// <summary>An updater that only records the ids it receives, for tests that publish very often.</summary>
+    private sealed class IdOnlyUpdater : IIndexUpdater
+    {
+        private readonly HashSet<int> _ids = [];
+
+        public int EntryCount => _ids.Count;
+        public bool ContainsEntry(int id) => _ids.Contains(id);
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
+        {
+            foreach (var pair in entries)
+                _ids.Add(pair.Key);
+        }
+
+        public void RebuildFrom(IDictionary<int, string> entries) => throw new NotSupportedException();
+        public void RebuildFrom(IDictionary<int, IndexedEntry> entries) => throw new NotSupportedException();
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void AddEntry(int id, string text) => throw new NotSupportedException();
+        public void AddEntry(int id, IndexedEntry entry) => throw new NotSupportedException();
+        public bool RemoveEntry(int id) => throw new NotSupportedException();
+        public bool RefreshEntry(int id, string text) => throw new NotSupportedException();
+        public bool RefreshEntry(int id, IndexedEntry entry) => throw new NotSupportedException();
+        public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries) => throw new NotSupportedException();
+        public int RemoveEntries(IEnumerable<int> ids) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+    }
+
+    /// <summary>Receives progress reports on the publisher task, without posting them anywhere.</summary>
+    private sealed class InlineProgress(Action<IngestionProgress> report) : IProgress<IngestionProgress>
+    {
+        public void Report(IngestionProgress value) => report(value);
     }
 }

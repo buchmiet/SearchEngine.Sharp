@@ -136,7 +136,7 @@ public class FileMaskTokenizationTests
 
         var result = await ingestion.IngestAsync(
             Feed(),
-            new IngestPublishOptions { Policy = IngestPublishPolicy.FixedBatch, FixedBatchSize = 2 });
+            new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 2 } });
 
         await Assert.That(result.CompletedSuccessfully).IsTrue();
         await Assert.That(provider.Current.Tokenization).IsEqualTo(SearchTokenization.FileMask);

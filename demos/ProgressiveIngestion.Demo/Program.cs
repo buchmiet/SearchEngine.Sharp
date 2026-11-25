@@ -15,10 +15,12 @@ var ingestion = new ProgressiveIndexIngestion(updater);
 
 var options = new IngestPublishOptions
 {
-    Policy = IngestPublishPolicy.Adaptive,
-    FixedBatchSize = 2_000,
-    MinInterval = TimeSpan.FromMilliseconds(100),
-    AdaptiveMultiplier = 2.0,
+    Policy = new IngestPublishPolicy.Adaptive
+    {
+        BatchCap = 2_000,
+        MinInterval = TimeSpan.FromMilliseconds(100),
+        RebuildMultiplier = 2.0,
+    },
 };
 
 Console.WriteLine("Progressive ingestion demo — match count during scan");
