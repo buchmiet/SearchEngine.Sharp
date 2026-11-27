@@ -36,7 +36,7 @@ internal sealed class IngestionCounters(TimeProvider timeProvider)
     public IngestionProgress ToProgress()
     {
         int accepted = EntriesAccepted;
-        return new IngestionProgress
+        return new()
         {
             EntriesAccepted = accepted,
             EntriesPublished = EntriesPublished,

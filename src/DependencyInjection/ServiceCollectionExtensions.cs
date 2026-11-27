@@ -127,7 +127,7 @@ public static class ServiceCollectionExtensions
         return AddIndexServices(
             services,
             key: null,
-            sp => new InitialIndex(CopyEntries(
+            sp => new(CopyEntries(
                 entriesFactory(sp) ?? throw new InvalidOperationException("The entries factory returned null."),
                 tokenization,
                 nameof(entriesFactory))),

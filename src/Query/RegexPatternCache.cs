@@ -63,14 +63,14 @@ internal static class RegexPatternCache
     {
         try
         {
-            regex = new Regex(pattern, NonBacktrackingOptions, MatchTimeout);
+            regex = new(pattern, NonBacktrackingOptions, MatchTimeout);
             return true;
         }
         catch (NotSupportedException)
         {
             try
             {
-                regex = new Regex(pattern, BaseOptions, MatchTimeout);
+                regex = new(pattern, BaseOptions, MatchTimeout);
                 return true;
             }
             catch (Exception ex) when (ex is RegexParseException or ArgumentException)

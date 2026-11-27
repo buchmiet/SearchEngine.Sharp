@@ -192,7 +192,7 @@ internal static class FacetFilterEvaluator
                 throw new ArgumentException($"Unknown facet '{predicate.Facet}'.");
             }
 
-            resolved[i] = new ResolvedPredicate(predicate, column);
+            resolved[i] = new(predicate, column);
         }
 
         return resolved;

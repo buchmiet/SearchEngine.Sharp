@@ -85,7 +85,7 @@ public class NaturalSortTieBreakTests
 
         var results = engine.Find("odd", WordMatchMethod.Within, false, SearchSortMode.NaturalSortAscending, FacetFilter.Range("n", 20, 170));
 
-        await Assert.That(results).IsEquivalentTo(Expected(snapshot, id => id % 2 == 1 && id >= 20 && id <= 170), CollectionOrdering.Matching);
+        await Assert.That(results).IsEquivalentTo(Expected(snapshot, id => id % 2 == 1 && id is >= 20 and <= 170), CollectionOrdering.Matching);
     }
 
     [Test]

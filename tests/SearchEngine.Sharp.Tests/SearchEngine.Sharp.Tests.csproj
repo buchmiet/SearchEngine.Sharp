@@ -20,8 +20,4 @@
     <Using Include="TUnit.Assertions.Enums" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
-  </ItemGroup>
-
 </Project>

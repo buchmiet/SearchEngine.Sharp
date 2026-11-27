@@ -97,7 +97,7 @@ public static class NaturalSortKeyBuilder
             }
         }
 
-        return new string(buffer[..pos]);
+        return new(buffer[..pos]);
     }
 
     private static int AppendNumber(ReadOnlySpan<char> digits, Span<char> buffer, int pos)

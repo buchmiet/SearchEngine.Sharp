@@ -94,7 +94,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        options ??= new IngestPublishOptions();
+        options ??= new();
         return IngestCoreAsync(
             new ScanProducer<string>(
                 entries,
@@ -133,7 +133,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        options ??= new IngestPublishOptions();
+        options ??= new();
         return IngestCoreAsync(
             new ScanProducer<IndexedEntry>(
                 entries,
@@ -166,7 +166,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
             var counters = new IngestionCounters(_timeProvider);
             var schedule = new PublishSchedule(options.Policy, _timeProvider);
             var publisher = new BatchPublisher(
-                _updater, _timeProvider, schedule, counters, new PublishObservers(RaisePublished, onPublished, progress));
+                _updater, _timeProvider, schedule, counters, new(RaisePublished, onPublished, progress));
             var loop = new PublishLoop(channel.Reader, schedule, publisher, _timeProvider);
 
             // The publisher cancels the scanner when it fails, so a scanner blocked on a full channel

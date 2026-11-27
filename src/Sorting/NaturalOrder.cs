@@ -19,7 +19,7 @@ internal static class NaturalOrder
             for (int i = 0; i < span.Length; i++)
             {
                 int ordinal = ordinals[i];
-                span[i] = new Item(NaturalSortKeyBuilder.Build(sortTexts[ordinal]), recordIds[ordinal], ordinal);
+                span[i] = new(NaturalSortKeyBuilder.Build(sortTexts[ordinal]), recordIds[ordinal], ordinal);
             }
 
             span.Sort(new ItemComparer());

@@ -97,7 +97,7 @@ public sealed class FacetFilter
             offset += filter._predicates.Length;
         }
 
-        return new FacetFilter(merged);
+        return new(merged);
     }
 }
 

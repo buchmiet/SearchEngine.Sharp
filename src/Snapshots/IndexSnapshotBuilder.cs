@@ -295,7 +295,7 @@ public static class IndexSnapshotBuilder
                     }
 
                     facetKeys.Add(facetName);
-                    pendingFacetValues.Add(new PendingFacetValue(documentIndex, facetName, facets.ValueAt(f)));
+                    pendingFacetValues.Add(new(documentIndex, facetName, facets.ValueAt(f)));
                 }
             }
 
@@ -314,7 +314,7 @@ public static class IndexSnapshotBuilder
 
         List<WordDescription> wordDescriptions = [with(capacity: invertedIndex.Count)];
         foreach (var (word, docIds) in invertedIndex)
-            wordDescriptions.Add(new WordDescription(word, docIds));
+            wordDescriptions.Add(new(word, docIds));
 
         // Phase 2: sort descending by word length.
         // QueryMatcher.MatchWithin breaks as soon as it sees a word shorter than the
@@ -347,7 +347,7 @@ public static class IndexSnapshotBuilder
 
             postingCounts[i] = docIds.Count;
             postingOffsets[i] = postingOffset;
-            exactPostings[word] = new WordPostings(postingOffset, docIds.Count);
+            exactPostings[word] = new(postingOffset, docIds.Count);
 
             foreach (var docId in docIds)
                 postingsSpan[postingOffset++] = docId;

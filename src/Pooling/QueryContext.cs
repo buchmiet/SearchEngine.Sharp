@@ -30,7 +30,7 @@ internal sealed class QueryContext(int recordCount) : IDisposable
         var bits = _pool.Rent(wordCount);
         _leasedBuffers.Add(bits);
         Array.Clear(bits, 0, wordCount);
-        return new FastBitSet(bits, recordCount);
+        return new(bits, recordCount);
     }
 
     public FastBitSet RentAllTrueBitSet()

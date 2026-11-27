@@ -150,11 +150,11 @@ public sealed class IndexUpdater : IIndexUpdater
     public void AddEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        Apply([new Change(id, _tokenization.FoldEntry(entry))]);
+        Apply([new(id, _tokenization.FoldEntry(entry))]);
     }
 
     /// <inheritdoc />
-    public bool RemoveEntry(int id) => Apply([new Change(id, null)]).Count > 0;
+    public bool RemoveEntry(int id) => Apply([new(id, null)]).Count > 0;
 
     /// <inheritdoc />
     public bool RefreshEntry(int id, string text)
@@ -167,7 +167,7 @@ public sealed class IndexUpdater : IIndexUpdater
     public bool RefreshEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return Apply([new Change(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
+        return Apply([new(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
     }
 
     // ── Batch operations (single rebuild) ──
@@ -178,7 +178,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         List<Change> changes = [];
         foreach (var (key, value) in entries)
-            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)))));
+            changes.Add(new(key, _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)))));
 
         Apply(CollectionsMarshal.AsSpan(changes));
     }
@@ -189,7 +189,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         List<Change> changes = [];
         foreach (var (key, value) in entries)
-            changes.Add(new Change(key, _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)))));
+            changes.Add(new(key, _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)))));
 
         Apply(CollectionsMarshal.AsSpan(changes));
     }
@@ -200,7 +200,7 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(ids);
         List<Change> changes = [];
         foreach (int id in ids)
-            changes.Add(new Change(id, null));
+            changes.Add(new(id, null));
 
         return Apply(CollectionsMarshal.AsSpan(changes)).Count;
     }
@@ -244,12 +244,12 @@ public sealed class IndexUpdater : IIndexUpdater
                 {
                     if (entry is not null)
                     {
-                        undo.Add(new Undo(id, _entries.GetValueOrDefault(id)));
+                        undo.Add(new(id, _entries.GetValueOrDefault(id)));
                         _entries[id] = entry;
                     }
                     else if (_entries.Remove(id, out var removed))
                     {
-                        undo.Add(new Undo(id, removed));
+                        undo.Add(new(id, removed));
                     }
                 }
 

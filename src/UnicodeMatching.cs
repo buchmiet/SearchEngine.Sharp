@@ -102,7 +102,7 @@ internal static class TextFolder
             if (folded.AsSpan().SequenceEqual(run))
                 continue;
 
-            sb ??= new StringBuilder(text.Length + 8);
+            sb ??= new(text.Length + 8);
             sb.Append(text, copied, start - copied).Append(folded);
             copied = position;
         }
@@ -306,7 +306,7 @@ internal static class TextFolder
             else
             {
                 Rune simple = Rune.ToLowerInvariant(Rune.ToUpperInvariant(rune));
-                Rune lowered = rune.IsBmp ? new Rune(char.ToLowerInvariant((char)rune.Value)) : rune;
+                Rune lowered = rune.IsBmp ? new(char.ToLowerInvariant((char)rune.Value)) : rune;
                 if (simple == lowered)
                 {
                     sb?.Append(text, start, length);

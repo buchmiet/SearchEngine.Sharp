@@ -97,7 +97,7 @@ public closed record class IngestPublishPolicy
             get;
             init
             {
-                if (!(value > 0 && value <= MaxRebuildMultiplier))
+                if (!(value is > 0 and <= MaxRebuildMultiplier))
                     throw new ArgumentOutOfRangeException(nameof(RebuildMultiplier), value, $"Must be positive and at most {MaxRebuildMultiplier}.");
 
                 field = value;

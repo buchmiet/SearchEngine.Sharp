@@ -207,7 +207,7 @@ public class ProgressiveIndexIngestionTests
             onPublished: _ =>
             {
                 int hits = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder, filter).Count;
-                if (hits > 0 && hits < count - 500)
+                if (hits is > 0 and < count - 500)
                     sawPartialHits = true;
             });
 

@@ -13,7 +13,7 @@ internal static class QueryMatcher
         QueryContext qc,
         IndexSnapshot snapshot)
     {
-        if (word.Length == 1 && word[0] == '*')
+        if (word is ['*'])
             return qc.RentAllTrueBitSet();
 
         if (GlobMatcher.ContainsMetacharacters(word))

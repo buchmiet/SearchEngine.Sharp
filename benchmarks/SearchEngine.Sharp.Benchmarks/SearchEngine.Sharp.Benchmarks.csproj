@@ -8,10 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+    <InternalsVisibleTo Include="SearchEngine.Sharp.MicroBenchmarks" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="SearchEngine.Sharp.MicroBenchmarks" />
+    <ProjectReference Include="..\..\src\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 </Project>

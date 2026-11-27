@@ -52,7 +52,7 @@ public static class SyntheticPathFeed
             if (delayPerEntry > TimeSpan.Zero)
                 await Task.Delay(delayPerEntry, cancellationToken).ConfigureAwait(false);
 
-            yield return new KeyValuePair<int, string>(id, TokenizePath(rng, id));
+            yield return new(id, TokenizePath(rng, id));
         }
     }
 

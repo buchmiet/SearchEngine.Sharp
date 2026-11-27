@@ -110,7 +110,7 @@ public sealed class FacetValues
             longs[i] = values[i].Value;
         }
 
-        return new FacetValues(names, longs);
+        return new(names, longs);
     }
 
     /// <summary>Number of facet pairs.</summary>

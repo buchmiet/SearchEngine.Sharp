@@ -59,16 +59,16 @@ public sealed class NameMatcher
         ArgumentNullException.ThrowIfNull(expression);
         tokenization ??= SearchTokenization.Default;
         if (string.IsNullOrWhiteSpace(expression))
-            return new NameMatcher(tokenization, method, null, null);
+            return new(tokenization, method, null, null);
 
         if (method == WordMatchMethod.Regex)
         {
             RegexPatternCache.TryGet(expression, out var regex); // invalid pattern: null, never matches
-            return new NameMatcher(tokenization, method, null, regex);
+            return new(tokenization, method, null, regex);
         }
 
         var postfix = QueryExpressionEvaluator.ToPostfix(expression, enableOperators, tokenization);
-        return new NameMatcher(tokenization, method, postfix?.ToArray(), null);
+        return new(tokenization, method, postfix?.ToArray(), null);
     }
 
     /// <summary>Returns whether an index that holds only <paramref name="text"/> would return it for this
@@ -84,10 +84,9 @@ public sealed class NameMatcher
         if (_postfix is null && _regex is null)
             return false;
 
-        string? folded = null;
         if ((_tokenization.UnicodeMatching & TextFolder.FoldingOptions) != 0 && !System.Text.Ascii.IsValid(text))
         {
-            folded = _tokenization.FoldIndexText(text.ToString());
+            var folded = _tokenization.FoldIndexText(text.ToString());
             text = folded;
         }
 
@@ -149,7 +148,7 @@ public sealed class NameMatcher
 
     private bool MatchTerm(int position, string word, ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
-        if (word.Length == 1 && word[0] == '*')
+        if (word is ['*'])
             return true;
 
         var compiled = _globs![position];

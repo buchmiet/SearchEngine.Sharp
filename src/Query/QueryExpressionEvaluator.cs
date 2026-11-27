@@ -249,7 +249,7 @@ internal static class QueryExpressionEvaluator
             case WordOperations.OpenParenthesis:
             case WordOperations.Not:
                 if (afterOperand)
-                    tokens.Add(new QueryToken(string.Empty, WordOperations.And, Implicit: token.Operation == WordOperations.OpenParenthesis));
+                    tokens.Add(new(string.Empty, WordOperations.And, Implicit: token.Operation == WordOperations.OpenParenthesis));
                 else if (token.Operation == WordOperations.Not && last == WordOperations.Not)
                     return;
 

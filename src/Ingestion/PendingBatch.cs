@@ -20,7 +20,7 @@ internal sealed class PendingBatch
         if (Entries.Count == 0)
             OldestTimestamp = entry.BufferedAtTimestamp;
 
-        Entries.Add(new KeyValuePair<int, IndexedEntry>(entry.Id, entry.Entry));
+        Entries.Add(new(entry.Id, entry.Entry));
     }
 
     public void Clear() => Entries.Clear();
