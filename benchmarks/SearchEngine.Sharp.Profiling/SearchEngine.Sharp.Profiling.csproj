@@ -15,6 +15,6 @@
     <Compile Include="..\..\tests\SearchEngine.Sharp.Tests\FixedSnapshotProvider.cs" Link="FixedSnapshotProvider.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+    <ProjectReference Include="..\..\src\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 </Project>

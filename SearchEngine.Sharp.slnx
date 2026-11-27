@@ -6,6 +6,7 @@
   </Configurations>
   <Project Path="benchmarks/SearchEngine.Sharp.Benchmarks/SearchEngine.Sharp.Benchmarks.csproj" />
   <Project Path="benchmarks/SearchEngine.Sharp.MicroBenchmarks/SearchEngine.Sharp.MicroBenchmarks.csproj" />
+  <Project Path="benchmarks/SearchEngine.Sharp.Profiling/SearchEngine.Sharp.Profiling.csproj" />
   <Project Path="src/SearchEngine.Sharp.csproj" />
   <Project Path="tests/SearchEngine.Sharp.Tests/SearchEngine.Sharp.Tests.csproj" />
 </Solution>

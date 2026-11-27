@@ -262,12 +262,13 @@ internal static class TextFolder
         => ch is (>= '\u0300' and <= '\u036F') or (>= '\u1AB0' and <= '\u1AFF') or (>= '\u1DC0' and <= '\u1DFF') or (>= '\uFE20' and <= '\uFE2F')
             && CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark;
 
-    // Simple case folding through the BCL: case variants of one letter (σ/ς/Σ, μ/µ, β/ϐ, ι/U+0345/U+1FBE, в/ᲀ,
-    // Deseret 𐐨/𐐀) share their uppercase, and the lowercase of that is their folded form. Per-character lowercase
-    // alone misses the lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. On top
-    // of that: the full foldings ß/ẞ→ss and the Latin ligatures U+FB00–U+FB06; İ→i (the Turkic mapping, because the
-    // default full folding i + U+0307 would not match i); ſ→s, which the casing tables of globalization-invariant mode
-    // do not uppercase. A text where folding differs from per-character lowercase nowhere is returned unchanged.
+    // Simple case folding from the Unicode 17.0.0 table in UnicodeCaseFolding.g.cs (CaseFolding.txt, statuses C and
+    // S), so the result is the same on every platform and globalization mode: case variants of one letter (σ/ς/Σ, μ/µ,
+    // β/ϐ, ι/U+0345/U+1FBE, в/ᲀ, ſ/s, Deseret 𐐨/𐐀) map to one code point. Per-character lowercase alone misses the
+    // lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. On top of that: the full
+    // foldings ß/ẞ→ss and the Latin ligatures U+FB00–U+FB06; İ→i (the Turkic mapping, because the default full folding
+    // i + U+0307 would not match i, and U+0130 has no simple folding). A text where folding differs from per-character
+    // lowercase nowhere is returned unchanged.
     private static string ApplyCaseFolding(string text)
     {
         StringBuilder? sb = null;
@@ -288,7 +289,6 @@ internal static class TextFolder
             {
                 'ß' or 'ẞ' => "ss",
                 'İ' => "i",
-                'ſ' => "s",
                 'ﬀ' => "ff",
                 'ﬁ' => "fi",
                 'ﬂ' => "fl",
@@ -305,15 +305,15 @@ internal static class TextFolder
             }
             else
             {
-                Rune simple = Rune.ToLowerInvariant(Rune.ToUpperInvariant(rune));
-                Rune lowered = rune.IsBmp ? new(char.ToLowerInvariant((char)rune.Value)) : rune;
+                int simple = UnicodeCaseFolding.Fold(rune.Value);
+                int lowered = rune.IsBmp ? char.ToLowerInvariant((char)rune.Value) : rune.Value;
                 if (simple == lowered)
                 {
                     sb?.Append(text, start, length);
                     continue;
                 }
 
-                folded = buffer[..simple.EncodeToUtf16(buffer)];
+                folded = buffer[..new Rune(simple).EncodeToUtf16(buffer)];
             }
 
             sb ??= new StringBuilder(text.Length + 4).Append(text, 0, start);
