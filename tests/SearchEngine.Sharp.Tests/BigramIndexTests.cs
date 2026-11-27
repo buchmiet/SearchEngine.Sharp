@@ -21,8 +21,8 @@ public class BigramIndexTests
         int bigramAn = ('a' << 16) | 'n';
         int bigramNa = ('n' << 16) | 'a';
 
-        await Assert.That(snapshot.BigramWordIndices.TryGetValue(bigramAn, out int[]? anList)).IsTrue();
-        await Assert.That(snapshot.BigramWordIndices.TryGetValue(bigramNa, out int[]? naList)).IsTrue();
+        await Assert.That(snapshot.Base.BigramWordIndices.TryGetValue(bigramAn, out int[]? anList)).IsTrue();
+        await Assert.That(snapshot.Base.BigramWordIndices.TryGetValue(bigramNa, out int[]? naList)).IsTrue();
 
         await Assert.That(anList!.Count(i => i == wordIndex)).IsEqualTo(1);
         await Assert.That(naList!.Count(i => i == wordIndex)).IsEqualTo(1);
@@ -59,7 +59,7 @@ public class BigramIndexTests
             await Assert.That(results[q].Order().ToList()).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
 
-        await Assert.That(provider.Current.BigramWordIndices).IsSameReferenceAs(provider.Current.BigramWordIndices);
+        await Assert.That(provider.Current.Base.BigramWordIndices).IsSameReferenceAs(provider.Current.Base.BigramWordIndices);
     }
 
     // The packed bigram of U+FFFF U+FFFF is all ones, the same bits as -1: a word that starts with it must still be

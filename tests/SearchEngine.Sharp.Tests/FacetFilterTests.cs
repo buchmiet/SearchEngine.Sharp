@@ -60,15 +60,33 @@ public class FacetFilterTests
     }
 
     [Test]
-    public async Task UnknownFacet_ThrowsArgumentException()
+    public async Task UnknownFacet_ReadsAsZero()
     {
         var (engine, _) = CreateFacetIndex();
-        var filter = FacetFilter.Range("missing", 0, 100);
 
-        var ex = await Assert.That(() =>
-            engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter)).ThrowsExactly<ArgumentException>();
+        var zeroIncluded = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("missing", 0, 100));
+        var zeroExcluded = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("missing", 1, 100));
+        var filterOnly = engine.CountMatches("", WordMatchMethod.Exact, false, FacetFilter.Mask("missing", mustHave: 0, mustNot: 0x1));
 
-        await Assert.That(ex!.Message).Contains("missing", StringComparison.Ordinal);
+        await Assert.That(zeroIncluded).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
+        await Assert.That(zeroExcluded).IsEmpty();
+        await Assert.That(filterOnly).IsEqualTo(6);
+    }
+
+    [Test]
+    public async Task Facet_carried_only_by_later_entries_reads_as_zero_on_the_others()
+    {
+        var (engine, updater) = CreateFacetIndex();
+        updater.AddEntry(7, new IndexedEntry("report-new.pdf", "report-new.pdf", FacetValues.Create("rating", 5)));
+
+        var unrated = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("rating", 0, 0));
+        var rated = engine.Find("report", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, FacetFilter.Range("rating", 1, 10));
+        var largeUnrated = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending,
+            FacetFilter.Combine(FacetFilter.Range("rating", 0, 0), FacetFilter.Range("size", 2000, long.MaxValue)));
+
+        await Assert.That(unrated).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
+        await Assert.That(rated).IsEquivalentTo(new[] { 7 }, CollectionOrdering.Matching);
+        await Assert.That(largeUnrated).IsEquivalentTo(new[] { 5, 4, 2 }, CollectionOrdering.Matching);
     }
 
     [Test]

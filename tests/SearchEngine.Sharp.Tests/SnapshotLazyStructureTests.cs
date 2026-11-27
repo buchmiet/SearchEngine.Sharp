@@ -19,7 +19,7 @@ public class SnapshotLazyStructureTests
 
         int[] counts = await RunConcurrently(() => engine.Find("ab", WordMatchMethod.Within).Count);
 
-        await Assert.That(snapshot.BigramBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Base.BigramBuildCount).IsEqualTo(1);
         foreach (int count in counts)
             await Assert.That(count).IsEqualTo(counts[0]);
     }
@@ -33,7 +33,7 @@ public class SnapshotLazyStructureTests
         int[] firstIds = await RunConcurrently(
             () => engine.Find("*", WordMatchMethod.Exact, enableOperators: false, SearchSortMode.NaturalSortAscending)[0]);
 
-        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(1);
         foreach (int id in firstIds)
             await Assert.That(id).IsEqualTo(firstIds[0]);
     }
@@ -44,10 +44,10 @@ public class SnapshotLazyStructureTests
         var (provider, _) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
 
-        await Assert.That(snapshot.BigramWordIndices).IsSameReferenceAs(snapshot.BigramWordIndices);
-        await Assert.That(snapshot.GetSortedPermutation()).IsSameReferenceAs(snapshot.GetSortedPermutation());
-        await Assert.That(snapshot.BigramBuildCount).IsEqualTo(1);
-        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Base.BigramWordIndices).IsSameReferenceAs(snapshot.Base.BigramWordIndices);
+        await Assert.That(snapshot.Base.GetSortedPermutation()).IsSameReferenceAs(snapshot.Base.GetSortedPermutation());
+        await Assert.That(snapshot.Base.BigramBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(1);
     }
 
     // 30,000 distinct names: every build takes milliseconds, so callers released together

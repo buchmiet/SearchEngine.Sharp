@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.Json;
 using SearchEngine.Filters;
@@ -66,70 +65,7 @@ static class Scale
     }
 }
 
-/// <summary>
-/// Prototype of an incremental index built from the package's own immutable snapshots:
-/// a large base snapshot (rebuilt only on merge), a small delta snapshot (rebuilt on every mutation,
-/// O(delta)), and an immutable tombstone set for ids removed or replaced since the base was built.
-/// Readers take one volatile read of an immutable state object, so they stay lock-free.
-/// </summary>
-sealed class TieredIndex
-{
-    sealed record State(SearchEngineSharp Base, SearchEngineSharp? Delta, ImmutableHashSet<int> Tombstones, int DeltaCount);
-
-    readonly SearchTokenization _tok;
-    readonly Lock _gate = new();
-    readonly Dictionary<int, IndexedEntry> _all;          // source of truth (as IndexUpdater)
-    readonly Dictionary<int, IndexedEntry> _delta = [];    // entries added/replaced since last merge
-    readonly int _mergeThreshold;
-    State _state;
-    public int Merges;
-
-    public TieredIndex(Dictionary<int, IndexedEntry> entries, SearchTokenization tok, int mergeThreshold)
-    {
-        _tok = tok;
-        _all = new(entries);
-        _mergeThreshold = mergeThreshold;
-        _state = new(Engine(IndexSnapshotBuilder.Build(_all, tok)), null, [], 0);
-    }
-
-    static SearchEngineSharp Engine(IndexSnapshot s) => new(new FixedSnapshotProvider(s));
-
-    public void Upsert(int id, IndexedEntry e) { lock (_gate) { _all[id] = e; _delta[id] = e; Publish(tombstone: id); } }
-
-    public void Remove(int id) { lock (_gate) { _all.Remove(id); _delta.Remove(id); Publish(tombstone: id); } }
-
-    void Publish(int tombstone)
-    {
-        var s = _state;
-        if (_delta.Count + s.Tombstones.Count >= _mergeThreshold)
-        {
-            // Merge: full rebuild (could run in the background; measured synchronously here).
-            _delta.Clear();
-            Merges++;
-            Volatile.Write(ref _state, new State(Engine(IndexSnapshotBuilder.Build(_all, _tok)), null, [], 0));
-            return;
-        }
-        var delta = _delta.Count == 0 ? null : Engine(IndexSnapshotBuilder.Build(_delta, _tok));
-        Volatile.Write(ref _state, new State(s.Base, delta, s.Tombstones.Add(tombstone), _delta.Count));
-    }
-
-    public List<int> Find(string expr, WordMatchMethod m, bool ops, FacetFilter? f)
-    {
-        var s = Volatile.Read(ref _state);
-        var baseIds = s.Base.Find(expr, m, ops, SearchSortMode.SnapshotOrder, f);
-        if (s.Tombstones.IsEmpty && s.Delta is null) return baseIds;
-        var result = new List<int>(baseIds.Count);
-        foreach (var id in baseIds) if (!s.Tombstones.Contains(id)) result.Add(id);
-        if (s.Delta is not null)
-        {
-            try { result.AddRange(s.Delta.Find(expr, m, ops, SearchSortMode.SnapshotOrder, f)); }
-            catch (ArgumentException) { } // facet absent from a tiny delta: no match there
-        }
-        return result;
-    }
-}
-
-/// <summary>Persistent index: build, query, cost of keeping it current; tiered prototype vs full rebuild.</summary>
+/// <summary>Persistent index: build, query and the cost of keeping it current through IndexUpdater.</summary>
 static class Persistent
 {
     public static void Run(Args a)
@@ -142,7 +78,6 @@ static class Persistent
         var rng = new Random(7);
         var res = new Dictionary<string, object?> { ["mode"] = "persistent", ["label"] = a.Opt("label"), ["n"] = n };
 
-        // Full-rebuild updater (the package today).
         var provider = new IndexSnapshotProvider();
         var updater = new IndexUpdater(provider, tok);
         var sw = Stopwatch.StartNew();
@@ -154,54 +89,30 @@ static class Persistent
         res["query_infix_us"] = Bench.Measure(() => engine.Find("*report*", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter).Count).MedUs;
 
         var one = new IndexedEntry("brand-new-file.pdf", "brand-new-file.pdf", FacetValues.Create("attrs", 0));
-        res["full_addEntry_ms"] = MedianMs(3, i => updater.AddEntry(n + 10 + i, one));
-        res["full_refreshEntry_ms"] = MedianMs(3, i => updater.RefreshEntry(i, one));
-        res["full_removeEntry_ms"] = MedianMs(3, i => updater.RemoveEntry(n + 10 + i));
-        res["full_batch100_ms"] = MedianMs(3, i => updater.AddOrUpdateEntries(Enumerable.Range(n + 1000 + i * 100, 100).Select(id => KeyValuePair.Create(id, one))));
+        res["addEntry_ms"] = MedianMs(3, i => updater.AddEntry(n + 10 + i, one));
+        res["refreshEntry_ms"] = MedianMs(3, i => updater.RefreshEntry(i, one));
+        res["removeEntry_ms"] = MedianMs(3, i => updater.RemoveEntry(n + 10 + i));
+        res["batch100_ms"] = MedianMs(3, i => updater.AddOrUpdateEntries(Enumerable.Range(n + 1000 + i * 100, 100).Select(id => KeyValuePair.Create(id, one))));
 
-        // Tiered prototype: same mutation stream, merge when delta + tombstones reach the threshold.
-        foreach (int threshold in new[] { 1_000, 10_000 })
+        // A stream of single changes (add, replace, remove), merges included: the updater rebuilds the base when its
+        // delta and dead ordinals pass IndexUpdater.MergeThreshold.
+        var times = new List<double>();
+        var total = Stopwatch.StartNew();
+        for (int i = 0; i < mutations; i++)
         {
-            var tiered = new TieredIndex(entries, tok, threshold);
-            var times = new List<double>();
-            var total = Stopwatch.StartNew();
-            for (int i = 0; i < mutations; i++)
-            {
-                var t0 = Stopwatch.GetTimestamp();
-                int kind = rng.Next(3);
-                if (kind == 0) tiered.Upsert(n + 100_000 + i, one);
-                else if (kind == 1) tiered.Upsert(rng.Next(n), one);
-                else tiered.Remove(rng.Next(n));
-                times.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
-            }
-            times.Sort();
-            res[$"tiered{threshold}_mutation_median_ms"] = Math.Round(times[times.Count / 2], 3);
-            res[$"tiered{threshold}_mutation_p99_ms"] = Math.Round(times[(int)(times.Count * 0.99)], 2);
-            res[$"tiered{threshold}_mutation_mean_ms"] = Math.Round(total.Elapsed.TotalMilliseconds / mutations, 3);
-            res[$"tiered{threshold}_merges"] = tiered.Merges;
-            res[$"tiered{threshold}_query_suffix_us"] = Bench.Measure(() => tiered.Find("*.pdf", WordMatchMethod.Exact, true, filter).Count).MedUs;
-            res[$"tiered{threshold}_query_exact_us"] = Bench.Measure(() => tiered.Find("package.json", WordMatchMethod.Exact, true, filter).Count).MedUs;
+            var t0 = Stopwatch.GetTimestamp();
+            int kind = rng.Next(3);
+            if (kind == 0) updater.AddEntry(n + 100_000 + i, one);
+            else if (kind == 1) updater.RefreshEntry(rng.Next(n), one);
+            else updater.RemoveEntry(rng.Next(n));
+            times.Add(Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
         }
-
-        // Correctness check of the prototype against a full rebuild with the same final content.
-        var check = new TieredIndex(entries, tok, int.MaxValue);
-        var reference = new Dictionary<int, IndexedEntry>(entries);
-        var rng2 = new Random(11);
-        for (int i = 0; i < 300; i++)
-        {
-            int id = rng2.Next(n + 50);
-            if (rng2.Next(3) == 0) { check.Remove(id); reference.Remove(id); }
-            else { var e = new IndexedEntry($"changed-{i}.pdf", $"changed-{i}.pdf", FacetValues.Create("attrs", 0)); check.Upsert(id, e); reference[id] = e; }
-        }
-        var refEngine = new SearchEngineSharp(new FixedSnapshotProvider(IndexSnapshotBuilder.Build(reference, tok)));
-        bool same = true;
-        foreach (var q in new[] { "*.pdf", "*report*", "changed-1*", "*" })
-        {
-            var x = check.Find(q, WordMatchMethod.Exact, true, filter); x.Sort();
-            var y = refEngine.Find(q, WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter); y.Sort();
-            same &= x.SequenceEqual(y);
-        }
-        res["tiered_matches_full_rebuild"] = same;
+        times.Sort();
+        res["mutation_median_ms"] = Math.Round(times[times.Count / 2], 3);
+        res["mutation_p99_ms"] = Math.Round(times[(int)(times.Count * 0.99)], 2);
+        res["mutation_mean_ms"] = Math.Round(total.Elapsed.TotalMilliseconds / mutations, 3);
+        res["mutation_query_suffix_us"] = Bench.Measure(() => engine.Find("*.pdf", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter).Count).MedUs;
+        res["mutation_query_exact_us"] = Bench.Measure(() => engine.Find("package.json", WordMatchMethod.Exact, true, SearchSortMode.SnapshotOrder, filter).Count).MedUs;
         Console.WriteLine(JsonSerializer.Serialize(res));
     }
 

@@ -31,8 +31,8 @@ public class NaturalSortTieBreakTests
 
     private static List<int> Expected(IndexSnapshot snapshot, Func<int, bool> isHit)
     {
-        var ids = snapshot.RecordIds;
-        var sortTexts = snapshot.SortTextArray;
+        var ids = snapshot.Base.RecordIds;
+        var sortTexts = snapshot.Base.SortTexts;
         return Enumerable.Range(0, ids.Length)
             .Where(ordinal => isHit(ids[ordinal]))
             .OrderBy(ordinal => NaturalSortKeyBuilder.Build(sortTexts[ordinal]), StringComparer.Ordinal)
@@ -63,7 +63,7 @@ public class NaturalSortTieBreakTests
 
         await Assert.That(first).IsEquivalentTo(Expected(snapshot, _ => true), CollectionOrdering.Matching);
         await Assert.That(second).IsEquivalentTo(first, CollectionOrdering.Matching);
-        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(1);
     }
 
     [Test]
@@ -101,8 +101,8 @@ public class NaturalSortTieBreakTests
         for (int ordinal = 0; ordinal < hitCount; ordinal++)
             hits.Add(ordinal * snapshot.DocumentCount / hitCount);
 
-        var sortedHits = ResultMaterializer.MaterializeNaturalSortKOnly(snapshot, hits, hitCount, snapshot.RecordIds);
-        var permutation = ResultMaterializer.MaterializeNaturalSortFullPermutation(snapshot, hits, hitCount, snapshot.RecordIds);
+        var sortedHits = ResultMaterializer.MaterializeNaturalSortKOnly(snapshot, hits, hitCount);
+        var permutation = ResultMaterializer.MaterializeNaturalSortFullPermutation(snapshot, hits, hitCount);
 
         await Assert.That(sortedHits).IsEquivalentTo(permutation, CollectionOrdering.Matching);
         var hitIds = new HashSet<int>(sortedHits);
@@ -150,7 +150,7 @@ public class NaturalSortTieBreakTests
     {
         var cold = BuildStrategySnapshot();
         var warm = BuildStrategySnapshot();
-        _ = warm.GetSortedPermutation();
+        _ = warm.Base.GetSortedPermutation();
         FacetFilter? filter = filtered ? FacetFilter.Range("n", 1, 3_000) : null;
         var expected = Expected(cold, id => id % period == 0 && (!filtered || id <= 3_000));
 
@@ -171,8 +171,8 @@ public class NaturalSortTieBreakTests
 
         _ = engine.Find("p10", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
-        await Assert.That(snapshot.IsSortedPermutationBuilt).IsFalse();
-        await Assert.That(snapshot.SortedPermutationBuildCount).IsEqualTo(0);
+        await Assert.That(snapshot.Base.IsSortedPermutationBuilt).IsFalse();
+        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(0);
     }
 
     [Test]
@@ -182,9 +182,9 @@ public class NaturalSortTieBreakTests
         int aboveLimit = (int)(StrategyDocumentCount * SelectivityThresholds.NaturalSortBuiltPermutationSortKMaxFraction) + 1;
 
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsTrue();
-        _ = snapshot.GetSortedPermutation();
+        _ = snapshot.Base.GetSortedPermutation();
 
-        await Assert.That(snapshot.IsSortedPermutationBuilt).IsTrue();
+        await Assert.That(snapshot.Base.IsSortedPermutationBuilt).IsTrue();
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsFalse();
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit - 1)).IsTrue();
     }

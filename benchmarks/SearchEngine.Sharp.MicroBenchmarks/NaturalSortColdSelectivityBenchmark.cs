@@ -45,9 +45,9 @@ public class NaturalSortColdSelectivityBenchmark
 
     [Benchmark(Baseline = true, Description = "Full permutation (cold): build it, walk it, keep the hits")]
     public int FullPermutation()
-        => ResultMaterializer.MaterializeNaturalSortFullPermutation(_snapshot, _hits, _hitCount, _snapshot.RecordIds).Count;
+        => ResultMaterializer.MaterializeNaturalSortFullPermutation(_snapshot, _hits, _hitCount).Count;
 
     [Benchmark(Description = "K only: sort the hits")]
     public int SortHitsOnly()
-        => ResultMaterializer.MaterializeNaturalSortKOnly(_snapshot, _hits, _hitCount, _snapshot.RecordIds).Count;
+        => ResultMaterializer.MaterializeNaturalSortKOnly(_snapshot, _hits, _hitCount).Count;
 }

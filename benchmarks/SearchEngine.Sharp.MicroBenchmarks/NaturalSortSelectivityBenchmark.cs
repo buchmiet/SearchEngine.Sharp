@@ -33,16 +33,16 @@ public class NaturalSortSelectivityBenchmark
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(SelectivityCorpus.Create(documentCount).Entries);
         _snapshot = provider.Current;
-        _ = _snapshot.GetSortedPermutation();
+        _ = _snapshot.Base.GetSortedPermutation();
         _hitCount = HitSets.CountFor(Density, documentCount);
         _hits = HitSets.Random(documentCount, _hitCount, seed: 1);
     }
 
     [Benchmark(Baseline = true, Description = "Full permutation (built): walk it, keep the hits")]
     public int FullPermutation()
-        => ResultMaterializer.MaterializeNaturalSortFullPermutation(_snapshot, _hits, _hitCount, _snapshot.RecordIds).Count;
+        => ResultMaterializer.MaterializeNaturalSortFullPermutation(_snapshot, _hits, _hitCount).Count;
 
     [Benchmark(Description = "K only: sort the hits")]
     public int SortHitsOnly()
-        => ResultMaterializer.MaterializeNaturalSortKOnly(_snapshot, _hits, _hitCount, _snapshot.RecordIds).Count;
+        => ResultMaterializer.MaterializeNaturalSortKOnly(_snapshot, _hits, _hitCount).Count;
 }

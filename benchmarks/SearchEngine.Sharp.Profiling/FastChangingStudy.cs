@@ -306,16 +306,27 @@ public sealed class TrigramNameIndex : IStudyEngine
     }
 }
 
-/// <summary>(a) The package's layered prototype (TieredIndex) behind the same surface.</summary>
-public sealed class TieredStudyEngine(Dictionary<int, IndexedEntry> entries) : IStudyEngine
+/// <summary>(a) The package's IndexUpdater behind the same surface.</summary>
+public sealed class UpdaterStudyEngine : IStudyEngine
 {
-    readonly TieredIndex _index = new(entries, SearchTokenization.FileMask, 10_000);
-    int _next = entries.Count == 0 ? 0 : entries.Keys.Max() + 1;
-    public string Kind => "tiered";
+    readonly IndexUpdater _updater;
+    readonly SearchEngineSharp _engine;
+    int _next;
+
+    public UpdaterStudyEngine(Dictionary<int, IndexedEntry> entries)
+    {
+        var provider = new IndexSnapshotProvider();
+        _updater = new IndexUpdater(provider, SearchTokenization.FileMask);
+        _updater.RebuildFrom(entries);
+        _engine = new SearchEngineSharp(provider);
+        _next = entries.Count == 0 ? 0 : entries.Keys.Max() + 1;
+    }
+
+    public string Kind => "updater";
     static IndexedEntry E(string n, NameFacets f) => new(n, n, FacetValues.Create([new("size", f.Size), new("modified", f.Modified), new("attrs", f.Attrs)]));
-    public int Add(string name, NameFacets facets) { int id = _next++; _index.Upsert(id, E(name, facets)); return id; }
-    public void Remove(int id) => _index.Remove(id);
-    public int Rename(int id, string newName) { _index.Upsert(id, E(newName, default)); return id; }
+    public int Add(string name, NameFacets facets) { int id = _next++; _updater.AddEntry(id, E(name, facets)); return id; }
+    public void Remove(int id) => _updater.RemoveEntry(id);
+    public int Rename(int id, string newName) { _updater.AddEntry(id, E(newName, default)); return id; }
     public int Count(StudyQuery q, int threads)
     {
         FacetFilter? f = q.Name switch
@@ -323,7 +334,7 @@ public sealed class TieredStudyEngine(Dictionary<int, IndexedEntry> entries) : I
             "pdf+size>1MB" => FacetFilter.Range("size", 1 << 20, long.MaxValue),
             _ => null,
         };
-        return _index.Find(q.Expression, q.Method, q.Method != WordMatchMethod.Regex, f).Count;
+        return _engine.CountMatches(q.Expression, q.Method, q.Method != WordMatchMethod.Regex, f);
     }
 }
 
@@ -355,11 +366,11 @@ static class FastChangingStudy
         var g0 = Proc.GcNow();
         var sw = Stopwatch.StartNew();
         IStudyEngine engine;
-        if (kind == "tiered")
+        if (kind == "updater")
         {
             var d = new Dictionary<int, IndexedEntry>(n);
             for (int i = 0; i < n; i++) d[i] = new(files[i].Name, files[i].Name, FacetValues.Create([new("size", files[i].Size), new("modified", files[i].ModifiedTicks), new("attrs", F(files[i]).Attrs)]));
-            engine = new TieredStudyEngine(d);
+            engine = new UpdaterStudyEngine(d);
         }
         else
         {

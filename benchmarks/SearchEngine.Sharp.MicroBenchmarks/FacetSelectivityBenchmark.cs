@@ -48,7 +48,7 @@ public class FacetSelectivityBenchmark
     [Benchmark(Baseline = true, Description = "Full scan: test every document, then AND")]
     public int FullScan()
     {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
+        using var qc = new QueryContext(_snapshot.OrdinalCount);
         var results = qc.RentCopyOf(_textHits);
         FacetFilterEvaluator.ApplyFullScan(results, _filter, _snapshot, qc);
         return results.GetTrueCount();
@@ -57,7 +57,7 @@ public class FacetSelectivityBenchmark
     [Benchmark(Description = "On hits: test the text hits only")]
     public int OnHits()
     {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
+        using var qc = new QueryContext(_snapshot.OrdinalCount);
         var results = qc.RentCopyOf(_textHits);
         FacetFilterEvaluator.ApplyOnHitsInPlace(results, _filter, _snapshot, _hitCount);
         return results.GetTrueCount();

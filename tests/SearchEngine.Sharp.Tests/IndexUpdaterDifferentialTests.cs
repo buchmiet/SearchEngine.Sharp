@@ -35,6 +35,10 @@ public class IndexUpdaterDifferentialTests
         FacetFilter.Range("missing", 1, 1),
     ];
 
+    // Large enough for the delta and the dead ordinals to pass IndexUpdater.MergeThreshold (at least 256) between
+    // two calls of RebuildFrom or Clear.
+    private const int InitialCount = 400;
+
     public static IEnumerable<(string Preset, int Seed)> Cases()
     {
         foreach (string preset in new[] { "Default", "FileMask", "DefaultCaseFold" })
@@ -62,22 +66,52 @@ public class IndexUpdaterDifferentialTests
         bool orderSpecified = true;
 
         var initial = new Dictionary<int, IndexedEntry>();
-        for (int i = 0; i < 60; i++)
+        for (int i = 0; i < InitialCount; i++)
             initial[nextId++] = RandomEntry(random);
         updater.RebuildFrom(initial);
         foreach (var (id, entry) in initial)
             expected[id] = entry;
 
         string? mismatch = null;
+        int merges = 0;
         for (int step = 0; step < 700 && mismatch is null; step++)
         {
+            var before = provider.Current;
             string operation = ApplyRandomChange(random, updater, expected, ref nextId, ref orderSpecified);
-            mismatch = Compare(engine, provider.Current, expected, tokenization, orderSpecified);
+            var after = provider.Current;
+            if (IsMerge(operation, before, after))
+                merges++;
+            mismatch = CheckSegments(after) ?? Compare(engine, after, expected, tokenization, orderSpecified);
             if (mismatch is not null)
                 mismatch = $"step {step} ({operation}): {mismatch}";
         }
 
         await Assert.That(mismatch).IsNull();
+        await Assert.That(merges).IsPositive();
+    }
+
+    // A change that rebuilt the base from all entries although the previous snapshot had a delta or dead ordinals.
+    private static bool IsMerge(string operation, IndexSnapshot before, IndexSnapshot after)
+        => !operation.StartsWith("rebuild", StringComparison.Ordinal) && operation != "clear"
+           && !ReferenceEquals(before.Base, after.Base)
+           && after.Delta is null && after.DeadOrdinals.Length == 0 && after.DocumentCount > 0
+           && (before.Delta is not null || before.DeadOrdinals.Length > 0);
+
+    // The layout every snapshot keeps: the delta starts right after the base, and the dead ordinals are distinct
+    // base ordinals in ascending order.
+    private static string? CheckSegments(IndexSnapshot snapshot)
+    {
+        if (snapshot.Delta is { } delta && delta.FirstOrdinal != snapshot.Base.DocumentCount)
+            return $"delta starts at {delta.FirstOrdinal}, base has {snapshot.Base.DocumentCount} documents";
+
+        var dead = snapshot.DeadOrdinals;
+        for (int i = 0; i < dead.Length; i++)
+        {
+            if (dead[i] < 0 || dead[i] >= snapshot.Base.DocumentCount || i > 0 && dead[i] <= dead[i - 1])
+                return $"dead ordinals not ascending base ordinals: [{string.Join(", ", dead)}]";
+        }
+
+        return null;
     }
 
     private static string ApplyRandomChange(
@@ -140,7 +174,7 @@ public class IndexUpdaterDifferentialTests
             return $"batch of {count}";
         }
 
-        if (roll < 980)
+        if (roll < 994)
         {
             var ids = new List<int>();
             int count = random.Next(1, 20);
@@ -153,10 +187,10 @@ public class IndexUpdaterDifferentialTests
             return $"remove {count} ids";
         }
 
-        if (roll < 993)
+        if (roll < 997)
         {
             var next = new Dictionary<int, IndexedEntry>();
-            int count = random.Next(0, 80);
+            int count = random.Next(0, InitialCount);
             for (int i = 0; i < count; i++)
                 next[nextId++] = RandomEntry(random);
 

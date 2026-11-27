@@ -5,6 +5,9 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Query;
 
+// Every matcher scans the words of each segment of the snapshot and adds the postings of the matching words. The
+// result can hold dead ordinals; the caller clears them once the whole query is evaluated
+// (IndexSnapshot.RemoveDeadOrdinals).
 internal static class QueryMatcher
 {
     internal static FastBitSet Match(
@@ -27,7 +30,8 @@ internal static class QueryMatcher
     internal static FastBitSet MatchExact(string word, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
-        result.AddAll(snapshot.PostingsOf(word));
+        foreach (var segment in snapshot.Segments)
+            result.AddAll(segment.PostingsOf(word));
         return result;
     }
 
@@ -35,43 +39,48 @@ internal static class QueryMatcher
     // per indexed word is enough.
     internal static FastBitSet MatchWithin(string word, QueryContext qc, IndexSnapshot snapshot)
     {
-        int wordLength = word.Length;
         var result = qc.RentEmptyBitSet();
-        var wordLengths = snapshot.WordLengths.AsSpan();
+        bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
+        foreach (var segment in snapshot.Segments)
+            MatchWithin(word, segment, graphemeBoundaries, result);
+        return result;
+    }
+
+    private static void MatchWithin(string word, IndexSegment segment, bool graphemeBoundaries, FastBitSet result)
+    {
+        int wordLength = word.Length;
+        var wordLengths = segment.WordLengths.AsSpan();
 
         // Infix matching runs on the calling thread.
 
         // For queries of length >= 2 use the bigram index to prune candidates.
         // The bigram maps to word indices already in length-descending order,
         // so the early-exit on length is preserved exactly as in the linear scan.
-        bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
-        var bigramWordIndices = wordLength >= 2 ? snapshot.BigramWordIndices : null;
+        var bigramWordIndices = wordLength >= 2 ? segment.BigramWordIndices : null;
         if (bigramWordIndices is { Count: > 0 })
         {
             int firstBigram = (word[0] << 16) | word[1];
             if (!bigramWordIndices.TryGetValue(firstBigram, out var candidates))
-                return result;
+                return;
 
             foreach (int wordIndex in candidates)
             {
                 if (wordLengths[wordIndex] < wordLength)
                     break;
 
-                if (ContainsWithin(snapshot.WordAt(wordIndex), word, graphemeBoundaries))
-                    result.AddAll(snapshot.PostingsAt(wordIndex));
+                if (ContainsWithin(segment.WordAt(wordIndex), word, graphemeBoundaries))
+                    result.AddAll(segment.PostingsAt(wordIndex));
             }
 
-            return result;
+            return;
         }
 
         // Fallback: linear scan (handles length-1 queries and empty bigram index).
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= wordLength; wordIndex++)
         {
-            if (ContainsWithin(snapshot.WordAt(wordIndex), word, graphemeBoundaries))
-                result.AddAll(snapshot.PostingsAt(wordIndex));
+            if (ContainsWithin(segment.WordAt(wordIndex), word, graphemeBoundaries))
+                result.AddAll(segment.PostingsAt(wordIndex));
         }
-
-        return result;
     }
 
     // The pattern is classified once (GlobMatcher.Shape); its general form is matched by GlobMatcher.IsWholeWordMatch.
@@ -81,33 +90,40 @@ internal static class QueryMatcher
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
         int maxLength = GlobMatcher.MaxMatchLength(pattern, graphemeBoundaries);
         var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
-        if (!shape.IsSpecialized)
-            return MatchGlobGeneral(pattern, minLength, maxLength, graphemeBoundaries, qc, snapshot);
-
         var result = qc.RentEmptyBitSet();
-        var wordLengths = snapshot.WordLengths.AsSpan();
-        for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
+        foreach (var segment in snapshot.Segments)
         {
-            if (wordLengths[wordIndex] > maxLength)
-                continue;
-
-            if (shape.IsMatch(snapshot.WordAt(wordIndex)))
-                result.AddAll(snapshot.PostingsAt(wordIndex));
+            if (shape.IsSpecialized)
+                MatchGlobSpecialized(shape, minLength, maxLength, segment, result);
+            else
+                MatchGlobGeneral(pattern, minLength, maxLength, graphemeBoundaries, segment, result);
         }
 
         return result;
     }
 
+    private static void MatchGlobSpecialized(GlobMatcher.Shape shape, int minLength, int maxLength, IndexSegment segment, FastBitSet result)
+    {
+        var wordLengths = segment.WordLengths.AsSpan();
+        for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
+        {
+            if (wordLengths[wordIndex] > maxLength)
+                continue;
+
+            if (shape.IsMatch(segment.WordAt(wordIndex)))
+                result.AddAll(segment.PostingsAt(wordIndex));
+        }
+    }
+
     // Kept apart from the specialized scan on purpose: one loop that picks either matcher per word measured about 30%
     // slower for general patterns (BenchmarkDotNet, 100k documents, "p?rt*on"). Most words are rejected after one
     // character here, so the words are sliced from spans hoisted out of the loop rather than through
-    // IndexSnapshot.WordAt, which measured about 10% slower on this loop.
-    private static FastBitSet MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, QueryContext qc, IndexSnapshot snapshot)
+    // IndexSegment.WordAt, which measured about 10% slower on this loop.
+    private static void MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, IndexSegment segment, FastBitSet result)
     {
-        var result = qc.RentEmptyBitSet();
-        var wordLengths = snapshot.WordLengths.AsSpan();
-        var wordEnds = snapshot.WordEnds.AsSpan();
-        var words = snapshot.WordsArray.AsSpan();
+        var wordLengths = segment.WordLengths.AsSpan();
+        var wordEnds = segment.WordEnds.AsSpan();
+        var words = segment.WordsArray.AsSpan();
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
         {
             int wordLength = wordLengths[wordIndex];
@@ -115,10 +131,8 @@ internal static class QueryMatcher
                 continue;
 
             if (GlobMatcher.IsWholeWordMatch(pattern, words.Slice(wordEnds[wordIndex] - wordLength, wordLength), graphemeBoundaries))
-                result.AddAll(snapshot.PostingsAt(wordIndex));
+                result.AddAll(segment.PostingsAt(wordIndex));
         }
-
-        return result;
     }
 
     // Finds target inside word with a vectorized IndexOf; the match starts and ends on unit boundaries: code points, or

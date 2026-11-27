@@ -19,9 +19,9 @@ into the output so several runs can share one log file. Run without arguments to
 | `decompose --root DIR --query Q [--reps N] [--label L]` | the same search split into sequential phases, plus one full FileMask build through the real `IndexSnapshotBuilder` (`full_buildMs`, `full_allocMB`, tokenization alone, and the first and second `Within` query, whose difference is the lazy bigram index) |
 | `querypaths [--sizes 10000,100000,1000000] [--preset Default\|FileMask] [--only NAME] [--unicode FLAGS] [--seed S] [--label L]` | latency and allocation of every query path, both presets unless `--preset` is given; `--unicode` adds `UnicodeMatching` flags to the preset |
 | `scale --n N [--preset FileMask\|Default] [--facets] [--unicode FLAGS] [--seed S] [--label L]` | build time, heap bytes per entry, GC, peak RSS (run one process per N) |
-| `persistent --n N [--mutations M] [--label L]` | build, query, full-rebuild mutation cost, tiered base+delta+tombstone prototype |
+| `persistent --n N [--mutations M] [--label L]` | build, query, the cost of single changes through `IndexUpdater` (merges included) and query cost after them |
 | `unicode --dir DIR` | NFC/NFD and case-folding behaviour on the local file system. It writes its probe files into the new subdirectory `DIR/leith-unicode-probe`, refuses to run when that subdirectory already exists and is not empty, and deletes it when done; nothing else in `DIR` is touched. |
-| `study --engine flat\|trigram\|tiered [--n N] [--threads T] [--seed S] [--label L]` | fast-changing-data study: build and query cost of the flat name buffer, the trigram index and the tiered engine |
+| `study --engine flat\|trigram\|updater [--n N] [--threads T] [--seed S] [--label L]` | fast-changing-data study: build and query cost of the flat name buffer, the trigram index and `IndexUpdater` |
 | `concurrency [--n N] [--readers R] [--seconds S]` | readers during rebuilds, regex cache, ingestion cancellation, DI start-up |
 
 Peak RSS comes from `getrusage` on Linux and macOS and from the peak working set on Windows.

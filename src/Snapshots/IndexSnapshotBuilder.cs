@@ -30,12 +30,12 @@ namespace SearchEngine.Snapshots;
 //   let the query engine navigate both flat arrays without pointer indirection,
 //   which keeps the data contiguous in memory.
 //
-// Phase 4: Bigram index (lazy, see IndexSnapshot.BigramWordIndices).
+// Phase 4: Bigram index (lazy, see IndexSegment.BigramWordIndices).
 //   For every pair of consecutive characters in each word, record the word's
 //   ordinal under that bigram key. At query time, MatchWithin looks up only
 //   the candidate words that share the query's first bigram, cutting the
 //   search space from O(vocab) to O(avg bigram list length). Built on the first
-//   Within query against a snapshot, not during Build.
+//   Within query against a segment, not during Build.
 
 /// <summary>
 /// Builds an <see cref="IndexSnapshot"/> from a set of entries without an <see cref="IndexUpdater"/>.
@@ -119,7 +119,7 @@ public static class IndexSnapshotBuilder
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(tokenization);
-        return BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, progress);
+        return Snapshot(BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, firstOrdinal: 0, progress), tokenization);
     }
 
     /// <summary>
@@ -181,26 +181,43 @@ public static class IndexSnapshotBuilder
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(tokenization);
-        return BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, progress);
+        return Snapshot(BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, firstOrdinal: 0, progress), tokenization);
     }
 
-    // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry): IndexUpdater folds
-    // each entry once when it comes in, so a rebuild after a change does not fold every stored text again.
+    // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry): dependency
+    // injection and IndexUpdater fold each entry once when it comes in, so a build does not fold it again.
     internal static IndexSnapshot BuildFolded(
         IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         SearchTokenization tokenization,
         IProgress<float>? progress = null)
     {
-        return BuildCore(entries, static entry => entry.SearchText, static entry => entry.SortText, static entry => entry.Facets, tokenization, progress);
+        return Snapshot(BuildFoldedSegment(entries, static entry => entry, tokenization, firstOrdinal: 0, progress), tokenization);
     }
 
-    // getSearchText returns the folded search text of an entry.
-    private static IndexSnapshot BuildCore<TEntry>(
+    // A segment whose documents get the ordinals from firstOrdinal on (see IndexSnapshot), from entries that hold a
+    // folded IndexedEntry (entryOf). No entries give IndexSegment.Empty.
+    internal static IndexSegment BuildFoldedSegment<TEntry>(
+        IEnumerable<KeyValuePair<int, TEntry>> entries,
+        Func<TEntry, IndexedEntry> entryOf,
+        SearchTokenization tokenization,
+        int firstOrdinal,
+        IProgress<float>? progress = null)
+    {
+        return BuildCore(entries, entry => entryOf(entry).SearchText, entry => entryOf(entry).SortText, entry => entryOf(entry).Facets, tokenization, firstOrdinal, progress);
+    }
+
+    private static IndexSnapshot Snapshot(IndexSegment segment, SearchTokenization tokenization)
+        => segment.DocumentCount == 0 ? IndexSnapshot.EmptyFor(tokenization) : new IndexSnapshot(segment, null, [], tokenization);
+
+    // getSearchText returns the folded search text of an entry. The documents get the ordinals from firstOrdinal on,
+    // in the order of entries.
+    private static IndexSegment BuildCore<TEntry>(
         IEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<TEntry, string> getSearchText,
         Func<TEntry, string> getSortText,
         Func<TEntry, FacetValues?> getFacets,
         SearchTokenization tokenization,
+        int firstOrdinal,
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -242,7 +259,7 @@ public static class IndexSnapshotBuilder
             // can accumulate running totals (TotalWordsLength, TotalPostings)
             // without boxing or heap allocation.
             var buildState = new BuildWordState(
-                documentIndex,
+                firstOrdinal + documentIndex,
                 stringPool,
                 invertedIndex,
                 totalWordsLength,
@@ -262,12 +279,12 @@ public static class IndexSnapshotBuilder
                     ref var docIds = ref CollectionsMarshal.GetValueRefOrAddDefault(state.InvertedIndex, word, out bool exists);
                     if (!exists)
                     {
-                        docIds = [state.DocumentIndex];
+                        docIds = [state.DocumentOrdinal];
                         state.TotalWordsLength += word.Length;
                     }
                     else
                     {
-                        docIds!.Add(state.DocumentIndex);
+                        docIds!.Add(state.DocumentOrdinal);
                     }
 
                     state.TotalPostings++;
@@ -307,7 +324,7 @@ public static class IndexSnapshotBuilder
         if (recordIds.Count == 0)
         {
             reporter.Complete();
-            return IndexSnapshot.EmptyFor(tokenization);
+            return IndexSegment.Empty;
         }
 
         reporter.Report(50.0f);
@@ -359,13 +376,14 @@ public static class IndexSnapshotBuilder
             reporter.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
         }
 
-        // Phase 4 (bigram index) is built lazily by IndexSnapshot on the first Within query:
+        // Phase 4 (bigram index) is built lazily by IndexSegment on the first Within query:
         // Exact, glob and regex queries never read it, and it is the largest build phase.
 
         var recordIdsArr = recordIds.ToArray();
         var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues, directFacetColumns);
 
-        var snapshot = new IndexSnapshot(
+        var segment = new IndexSegment(
+            firstOrdinal: firstOrdinal,
             recordIds: recordIdsArr,
             exactPostings: exactPostings,
             wordsArray: wordsArray,
@@ -375,14 +393,11 @@ public static class IndexSnapshotBuilder
             wordLengths: wordLengths,
             postingCounts: postingCounts,
             sortTexts: [.. sortTexts],
-            facetColumns: facetColumns,
-            tokenization: tokenization,
-            documentCount: recordIdsArr.Length,
-            uniqueWordCount: stringPool.Count
+            facetColumns: facetColumns
         );
 
         reporter.Complete();
-        return snapshot;
+        return segment;
     }
 
     // Passes a percentage on only when it reaches the next whole percent, so the number of reports does not grow
@@ -443,13 +458,13 @@ public static class IndexSnapshotBuilder
     }
 
     private struct BuildWordState(
-        int documentIndex,
+        int documentOrdinal,
         WordStringPool stringPool,
         Dictionary<string, List<int>> invertedIndex,
         int totalWordsLength,
         int totalPostings)
     {
-        public int DocumentIndex { get; } = documentIndex;
+        public int DocumentOrdinal { get; } = documentOrdinal;
         public WordStringPool StringPool { get; } = stringPool;
         public Dictionary<string, List<int>> InvertedIndex { get; } = invertedIndex;
         public int TotalWordsLength { get; set; } = totalWordsLength;

@@ -33,7 +33,7 @@ public class SelectivityPipelineBenchmark
         var corpus = SelectivityCorpus.Create(100_000);
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(corpus.Entries);
-        _ = provider.Current.GetSortedPermutation();
+        _ = provider.Current.Base.GetSortedPermutation();
         _engine = new SearchEngineSharp(provider);
         _filter = corpus.Filter;
         _word = SelectivityCorpus.WordFor(Density);

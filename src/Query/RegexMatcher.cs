@@ -16,10 +16,13 @@ internal static class RegexMatcher
 
         try
         {
-            for (int wordIndex = 0; wordIndex < snapshot.WordLengths.Length; wordIndex++)
+            foreach (var segment in snapshot.Segments)
             {
-                if (regex.IsMatch(snapshot.WordAt(wordIndex)))
-                    result.AddAll(snapshot.PostingsAt(wordIndex));
+                for (int wordIndex = 0; wordIndex < segment.WordCount; wordIndex++)
+                {
+                    if (regex.IsMatch(segment.WordAt(wordIndex)))
+                        result.AddAll(segment.PostingsAt(wordIndex));
+                }
             }
         }
         catch (RegexMatchTimeoutException)

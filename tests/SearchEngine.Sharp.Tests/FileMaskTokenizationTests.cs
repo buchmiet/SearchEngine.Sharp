@@ -57,7 +57,7 @@ public class FileMaskTokenizationTests
     {
         var (engine, provider, _) = CreateEngineWithProvider();
         engine.Find("system", WordMatchMethod.Exact);
-        await Assert.That(provider.Current.ExactPostings.ContainsKey("system")).IsTrue();
+        await Assert.That(provider.Current.Base.ExactPostings.ContainsKey("system")).IsTrue();
         await Assert.That(engine.Find("system", WordMatchMethod.Exact)).IsEquivalentTo(new[] { 2 }, CollectionOrdering.Matching);
         await Assert.That(engine.CountMatches("system", WordMatchMethod.Exact)).IsEqualTo(1);
     }
@@ -181,8 +181,8 @@ public class FileMaskTokenizationTests
             new Dictionary<int, string> { [1] = lower, [2] = mixed },
             SearchTokenization.FileMask);
 
-        await Assert.That(snapshot.ExactPostings.Keys).Contains(key => ReferenceEquals(key, lower));
-        await Assert.That(snapshot.ExactPostings.Keys).Contains("report-final.pdf"); // lowercased copy of the mixed-case name
-        await Assert.That(snapshot.ExactPostings.Keys).DoesNotContain(key => ReferenceEquals(key, mixed));
+        await Assert.That(snapshot.Base.ExactPostings.Keys).Contains(key => ReferenceEquals(key, lower));
+        await Assert.That(snapshot.Base.ExactPostings.Keys).Contains("report-final.pdf"); // lowercased copy of the mixed-case name
+        await Assert.That(snapshot.Base.ExactPostings.Keys).DoesNotContain(key => ReferenceEquals(key, mixed));
     }
 }

@@ -198,8 +198,9 @@ public static class ServiceCollectionExtensions
 
     // The one registration of an index, keyed or not: a null key registers ordinary (non-keyed) services, and a
     // keyed lookup with a null key resolves them. The provider starts with a snapshot of the registered preset: empty
-    // when initialIndex is null, otherwise built from the same InitialIndex the updater starts from (built once per
-    // container). The updater then publishes nothing until its first change.
+    // when initialIndex is null, otherwise built from the entries of initialIndex once per container (StartingIndex),
+    // and the updater starts from the same entries and the same snapshot. The updater then publishes nothing until its
+    // first change.
     private static IServiceCollection AddIndexServices(
         IServiceCollection services,
         string? key,
@@ -207,22 +208,16 @@ public static class ServiceCollectionExtensions
         SearchTokenization tokenization,
         ServiceLifetime engineLifetime)
     {
-        if (initialIndex is null)
+        services.AddKeyedSingleton(key, (sp, _) => initialIndex is null
+            ? new StartingIndex(new Dictionary<int, IndexedEntry>(), IndexSnapshot.EmptyFor(tokenization))
+            : StartingIndex.Build(initialIndex(sp).Entries, tokenization));
+        services.AddKeyedSingleton(key, (sp, k) =>
+            new IndexSnapshotProvider(sp.GetRequiredKeyedService<StartingIndex>(k).Snapshot));
+        services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
         {
-            services.AddKeyedSingleton(key, (_, _) => new IndexSnapshotProvider(IndexSnapshot.EmptyFor(tokenization)));
-            services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
-                new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, seed: null));
-        }
-        else
-        {
-            services.AddKeyedSingleton(key, (sp, _) => initialIndex(sp));
-            services.AddKeyedSingleton(key, (sp, k) => new IndexSnapshotProvider(
-                IndexSnapshotBuilder.BuildFolded(sp.GetRequiredKeyedService<InitialIndex>(k).Entries, tokenization)));
-            services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) => new IndexUpdater(
-                sp.GetRequiredKeyedService<IndexSnapshotProvider>(k),
-                tokenization,
-                sp.GetRequiredKeyedService<InitialIndex>(k).Entries));
-        }
+            var start = sp.GetRequiredKeyedService<StartingIndex>(k);
+            return new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, start.Entries, start.Snapshot);
+        });
 
         services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>
             sp.GetRequiredKeyedService<IndexSnapshotProvider>(k));
@@ -237,6 +232,14 @@ public static class ServiceCollectionExtensions
     // The entries an index starts with, folded once: the first snapshot is built from them and the updater starts
     // from them.
     private sealed record InitialIndex(IReadOnlyDictionary<int, IndexedEntry> Entries);
+
+    // The entries and the first snapshot of an index in one container: the provider publishes Snapshot and the
+    // updater keeps its base.
+    private sealed record StartingIndex(IReadOnlyDictionary<int, IndexedEntry> Entries, IndexSnapshot Snapshot)
+    {
+        internal static StartingIndex Build(IReadOnlyDictionary<int, IndexedEntry> entries, SearchTokenization tokenization)
+            => new(entries, IndexSnapshotBuilder.BuildFolded(entries, tokenization));
+    }
 
     // Copies the entries at registration, so later changes to the caller's dictionary do not reach the index.
     private static Func<IServiceProvider, InitialIndex> CopiedNow(IDictionary<int, string> initialEntries, SearchTokenization tokenization)

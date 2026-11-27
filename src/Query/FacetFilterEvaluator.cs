@@ -6,6 +6,9 @@ using System.Buffers;
 
 namespace SearchEngine.Query;
 
+// A document without a value for a facet has the value 0, whether no document of its segment carries the facet or no
+// document at all: the filter is bound to each segment on its own (SegmentFilter), and a predicate on a facet the
+// segment has no column for is decided once for the whole segment.
 internal static class FacetFilterEvaluator
 {
     internal static void Apply(
@@ -46,12 +49,12 @@ internal static class FacetFilterEvaluator
         try
         {
             int count = results.CopySetBitOrdinals(ordinals.AsSpan(0, hitCount));
-            var resolved = ResolvePredicates(filter.Predicates, snapshot);
+            var bound = new SnapshotFilter(filter, snapshot);
             results.Clear();
             for (int i = 0; i < count; i++)
             {
                 int ordinal = ordinals[i];
-                if (MatchesAll(resolved, ordinal))
+                if (bound.Matches(ordinal))
                     results.Add(ordinal);
             }
         }
@@ -61,23 +64,28 @@ internal static class FacetFilterEvaluator
         }
     }
 
+    // The ordinals whose documents match the filter. Dead ordinals can be set; the caller clears them.
     internal static FastBitSet BuildMatchingBitSet(
         FacetFilter filter,
         IndexSnapshot snapshot,
         QueryContext qc)
     {
-        var matching = qc.RentEmptyBitSet();
         if (filter.IsEmpty)
-        {
-            matching.FillAllTrue();
-            return matching;
-        }
+            return qc.RentAllTrueBitSet();
 
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
-        for (int ordinal = 0; ordinal < matching.Length; ordinal++)
+        var matching = qc.RentEmptyBitSet();
+        foreach (var segment in snapshot.Segments)
         {
-            if (MatchesAll(resolved, ordinal))
-                matching.Add(ordinal);
+            var bound = SegmentFilter.Bind(filter, segment);
+            if (bound.MatchesNothing)
+                continue;
+
+            int first = segment.FirstOrdinal;
+            for (int local = 0; local < segment.DocumentCount; local++)
+            {
+                if (bound.Matches(local))
+                    matching.Add(first + local);
+            }
         }
 
         return matching;
@@ -86,19 +94,16 @@ internal static class FacetFilterEvaluator
     internal static int CountMatchingOrdinals(
         FacetFilter filter,
         IndexSnapshot snapshot,
-        ReadOnlySpan<int> ordinals)
+        LivePostings ordinals)
     {
-        if (ordinals.Length == 0)
-            return 0;
-
         if (filter.IsEmpty)
-            return ordinals.Length;
+            return ordinals.Count;
 
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        var bound = new SnapshotFilter(filter, snapshot);
         int count = 0;
-        for (int i = 0; i < ordinals.Length; i++)
+        foreach (int ordinal in ordinals)
         {
-            if (MatchesAll(resolved, ordinals[i]))
+            if (bound.Matches(ordinal))
                 count++;
         }
 
@@ -108,105 +113,20 @@ internal static class FacetFilterEvaluator
     internal static List<int> MaterializeMatchingRecordIds(
         FacetFilter filter,
         IndexSnapshot snapshot,
-        ReadOnlySpan<int> ordinals)
-    {
-        if (ordinals.Length == 0)
-            return [];
-
-        if (filter.IsEmpty)
-            return PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, ordinals);
-
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
-        var results = new List<int>(ordinals.Length);
-        var recordIds = snapshot.RecordIds.AsSpan();
-        for (int i = 0; i < ordinals.Length; i++)
-        {
-            int ordinal = ordinals[i];
-            if (MatchesAll(resolved, ordinal))
-                results.Add(recordIds[ordinal]);
-        }
-
-        return results;
-    }
-
-    internal static int CountFilterOnly(FacetFilter filter, IndexSnapshot snapshot)
+        LivePostings ordinals)
     {
         if (filter.IsEmpty)
-            return snapshot.DocumentCount;
+            return PostingListOperations.MaterializeRecordIds(snapshot, ordinals);
 
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
-        int count = 0;
-        for (int ordinal = 0; ordinal < snapshot.DocumentCount; ordinal++)
-        {
-            if (MatchesAll(resolved, ordinal))
-                count++;
-        }
-
-        return count;
-    }
-
-    internal static List<int> MaterializeFilterOnly(
-        FacetFilter filter,
-        IndexSnapshot snapshot,
-        SearchSortMode sortMode)
-    {
-        if (filter.IsEmpty)
-            return [];
-
-        var resolved = ResolvePredicates(filter.Predicates, snapshot);
+        var bound = new SnapshotFilter(filter, snapshot);
         var results = new List<int>();
-        var recordIds = snapshot.RecordIds.AsSpan();
-
-        if (sortMode == SearchSortMode.NaturalSortAscending)
+        foreach (int ordinal in ordinals)
         {
-            var permutation = snapshot.GetSortedPermutation();
-            for (int i = 0; i < permutation.Length; i++)
-            {
-                int ordinal = permutation[i];
-                if (MatchesAll(resolved, ordinal))
-                    results.Add(recordIds[ordinal]);
-            }
-        }
-        else
-        {
-            for (int ordinal = 0; ordinal < snapshot.DocumentCount; ordinal++)
-            {
-                if (MatchesAll(resolved, ordinal))
-                    results.Add(recordIds[ordinal]);
-            }
+            if (bound.Matches(ordinal))
+                results.Add(snapshot.RecordIdAt(ordinal));
         }
 
         return results;
-    }
-
-    internal static ResolvedPredicate[] ResolvePredicates(
-        ReadOnlySpan<FacetPredicate> predicates,
-        IndexSnapshot snapshot)
-    {
-        var resolved = new ResolvedPredicate[predicates.Length];
-        for (int i = 0; i < predicates.Length; i++)
-        {
-            FacetPredicate predicate = predicates[i];
-            if (!snapshot.FacetColumns.TryGetValue(predicate.Facet, out long[]? column))
-            {
-                throw new ArgumentException($"Unknown facet '{predicate.Facet}'.");
-            }
-
-            resolved[i] = new(predicate, column);
-        }
-
-        return resolved;
-    }
-
-    internal static bool MatchesAll(ResolvedPredicate[] resolved, int ordinal)
-    {
-        for (int i = 0; i < resolved.Length; i++)
-        {
-            if (!Matches(resolved[i].Predicate, resolved[i].Column[ordinal]))
-                return false;
-        }
-
-        return true;
     }
 
     // FacetPredicate is closed: this switch is exhaustive, and a new kind is a compile error here until it is handled.
@@ -216,5 +136,84 @@ internal static class FacetFilterEvaluator
         FacetMask mask => (value & mask.MustHave) == mask.MustHave && (value & mask.MustNot) == 0,
     };
 
-    internal readonly record struct ResolvedPredicate(FacetPredicate Predicate, long[] Column);
+    // A filter bound to the facet columns of one segment, read by the segment's local document index. A predicate on
+    // a facet without a column is true or false for every document of the segment (value 0): a true one is dropped,
+    // a false one makes the segment match nothing.
+    private readonly struct SegmentFilter
+    {
+        private readonly FacetPredicate[]? _predicates;
+        private readonly long[][]? _columns;
+
+        private SegmentFilter(FacetPredicate[]? predicates, long[][]? columns)
+        {
+            _predicates = predicates;
+            _columns = columns;
+        }
+
+        internal bool MatchesNothing => _predicates is null;
+
+        internal static SegmentFilter Bind(FacetFilter filter, IndexSegment segment)
+        {
+            ReadOnlySpan<FacetPredicate> all = filter.Predicates;
+            var predicates = new List<FacetPredicate>(all.Length);
+            var columns = new List<long[]>(all.Length);
+            foreach (var predicate in all)
+            {
+                if (segment.FacetColumns.TryGetValue(predicate.Facet, out long[]? column))
+                {
+                    predicates.Add(predicate);
+                    columns.Add(column);
+                }
+                else if (!FacetFilterEvaluator.Matches(predicate, 0))
+                {
+                    return new(null, null);
+                }
+            }
+
+            return new([.. predicates], [.. columns]);
+        }
+
+        internal bool Matches(int local)
+        {
+            var predicates = _predicates!;
+            var columns = _columns!;
+            for (int i = 0; i < predicates.Length; i++)
+            {
+                if (!FacetFilterEvaluator.Matches(predicates[i], columns[i][local]))
+                    return false;
+            }
+
+            return true;
+        }
+    }
+
+    // A filter bound to every segment of a snapshot, read by snapshot ordinal.
+    private readonly struct SnapshotFilter
+    {
+        private readonly SegmentFilter _base;
+        private readonly SegmentFilter _delta;
+        private readonly int _deltaStart;
+
+        internal SnapshotFilter(FacetFilter filter, IndexSnapshot snapshot)
+        {
+            _base = SegmentFilter.Bind(filter, snapshot.Base);
+            if (snapshot.Delta is { } delta)
+            {
+                _delta = SegmentFilter.Bind(filter, delta);
+                _deltaStart = delta.FirstOrdinal;
+            }
+            else
+            {
+                _deltaStart = int.MaxValue;
+            }
+        }
+
+        internal bool Matches(int ordinal)
+        {
+            if (ordinal >= _deltaStart)
+                return !_delta.MatchesNothing && _delta.Matches(ordinal - _deltaStart);
+
+            return !_base.MatchesNothing && _base.Matches(ordinal);
+        }
+    }
 }

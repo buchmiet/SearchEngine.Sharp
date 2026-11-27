@@ -31,19 +31,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
 
     /// <inheritdoc />
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false)
-    {
-        ArgumentNullException.ThrowIfNull(expression);
-        var snapshot = _snapshotProvider.Current;
-        if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
-            return 0;
-
-        if (TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
-            return exactMatches.Length;
-
-        using var queryContext = new QueryContext(snapshot.DocumentCount);
-        var resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
-        return resultSet?.GetTrueCount() ?? 0;
-    }
+        => CountMatches(expression, method, enableOperators, null);
 
     /// <inheritdoc />
     public int CountMatches(string expression, WordMatchMethod method, bool enableOperators, FacetFilter? filter)
@@ -53,39 +41,16 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return 0;
 
-        if (filter is not null && !filter.IsEmpty)
-        {
-            if (string.IsNullOrWhiteSpace(expression))
-                return FacetFilterEvaluator.CountFilterOnly(filter, snapshot);
+        if (TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
+            return filter is null ? exactMatches.Count : FacetFilterEvaluator.CountMatchingOrdinals(filter, snapshot, exactMatches);
 
-            if (TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
-                return FacetFilterEvaluator.CountMatchingOrdinals(filter, snapshot, exactMatches);
-        }
-
-        using var queryContext = new QueryContext(snapshot.DocumentCount);
-        var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
-        return resultSet?.GetTrueCount() ?? 0;
+        using var queryContext = new QueryContext(snapshot.OrdinalCount);
+        return Evaluate(snapshot, expression, method, enableOperators, filter, queryContext)?.GetTrueCount() ?? 0;
     }
 
     /// <inheritdoc />
     public List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode)
-    {
-        ArgumentNullException.ThrowIfNull(expression);
-        var snapshot = _snapshotProvider.Current;
-        if (string.IsNullOrWhiteSpace(expression) || snapshot.DocumentCount == 0)
-            return [];
-
-        if (sortMode == SearchSortMode.SnapshotOrder
-            && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
-            return PostingListOperations.MaterializeRecordIds(snapshot.RecordIds, exactMatches);
-
-        using var queryContext = new QueryContext(snapshot.DocumentCount);
-        var resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
-        if (resultSet == null)
-            return [];
-
-        return MaterializeResults(snapshot, resultSet, sortMode);
-    }
+        => Find(expression, method, enableOperators, sortMode, null);
 
     /// <inheritdoc />
     public List<int> Find(
@@ -100,36 +65,32 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return [];
 
-        if (filter is not null && !filter.IsEmpty)
+        if (sortMode == SearchSortMode.SnapshotOrder
+            && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
         {
-            if (string.IsNullOrWhiteSpace(expression))
-                return FacetFilterEvaluator.MaterializeFilterOnly(filter, snapshot, sortMode);
-
-            if (sortMode == SearchSortMode.SnapshotOrder
-                && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
-                return FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
+            return filter is null
+                ? PostingListOperations.MaterializeRecordIds(snapshot, exactMatches)
+                : FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
         }
 
-        using var queryContext = new QueryContext(snapshot.DocumentCount);
-        var resultSet = ExecuteQuery(snapshot, expression, method, enableOperators, filter, queryContext);
-        if (resultSet == null)
-            return [];
-
-        return MaterializeResults(snapshot, resultSet, sortMode);
+        using var queryContext = new QueryContext(snapshot.OrdinalCount);
+        var resultSet = Evaluate(snapshot, expression, method, enableOperators, filter, queryContext);
+        return resultSet is null ? [] : ResultMaterializer.Materialize(snapshot, resultSet, sortMode);
     }
 
+    // True when the query selects anything: a non-blank expression or a non-empty filter.
     private static bool HasQueryInput(string expression, FacetFilter? filter)
         => !string.IsNullOrWhiteSpace(expression) || filter is not null && !filter.IsEmpty;
 
-    // Fast path of an Exact query for one plain word (no glob metacharacters): its postings are read straight from
-    // the snapshot, without a bitset. False when the query is not such a word; empty postings when the word is not
-    // indexed.
+    // Fast path of an Exact query for one plain word (no glob metacharacters): its live postings are read straight
+    // from the snapshot, without a bitset. False when the query is not such a word; empty postings when the word is
+    // not indexed.
     private static bool TryGetExactWordPostings(
         string expression,
         WordMatchMethod method,
         bool enableOperators,
         IndexSnapshot snapshot,
-        out ReadOnlySpan<int> postings)
+        out LivePostings postings)
     {
         postings = default;
         if (method != WordMatchMethod.Exact
@@ -145,13 +106,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         return true;
     }
 
-    private static List<int> MaterializeResults(
-        IndexSnapshot snapshot,
-        FastBitSet resultSet,
-        SearchSortMode sortMode)
-        => ResultMaterializer.Materialize(snapshot, resultSet, sortMode);
-
-    private static FastBitSet? ExecuteQuery(
+    // The ordinals of the live documents that match the expression and the filter; null when the query selects
+    // nothing. A blank expression with a filter selects every document the filter matches.
+    private static FastBitSet? Evaluate(
         IndexSnapshot snapshot,
         string expression,
         WordMatchMethod method,
@@ -159,23 +116,25 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         FacetFilter? filter,
         QueryContext queryContext)
     {
+        bool hasFilter = filter is not null && !filter.IsEmpty;
         FastBitSet? resultSet;
         if (string.IsNullOrWhiteSpace(expression))
         {
-            if (filter is not null && !filter.IsEmpty)
-                resultSet = FacetFilterEvaluator.BuildMatchingBitSet(filter, snapshot, queryContext);
-            else
-                return null;
-        }
-        else
-        {
-            resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
-            if (resultSet is null)
+            if (!hasFilter)
                 return null;
 
-            if (filter is not null && !filter.IsEmpty)
-                FacetFilterEvaluator.Apply(resultSet, filter, snapshot, queryContext);
+            resultSet = FacetFilterEvaluator.BuildMatchingBitSet(filter!, snapshot, queryContext);
+            snapshot.RemoveDeadOrdinals(resultSet);
+            return resultSet;
         }
+
+        resultSet = EvaluateExpression(expression, method, enableOperators, queryContext, snapshot);
+        if (resultSet is null)
+            return null;
+
+        snapshot.RemoveDeadOrdinals(resultSet);
+        if (hasFilter)
+            FacetFilterEvaluator.Apply(resultSet, filter!, snapshot, queryContext);
 
         return resultSet;
     }
