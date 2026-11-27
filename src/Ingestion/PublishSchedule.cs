@@ -2,14 +2,14 @@ namespace SearchEngine.Ingestion;
 
 /// <summary>
 /// Applies a publish policy: decides whether the batch is full and how long until a timer publish is due. It
-/// remembers when the last publish finished, how long its rebuild took and the current batch cap.
+/// remembers when the last publish finished, how long it took and the current batch cap.
 /// </summary>
 internal sealed class PublishSchedule
 {
     private readonly IngestPublishPolicy _policy;
     private readonly TimeProvider _timeProvider;
     private long _lastPublishTimestamp;
-    private TimeSpan _lastRebuildDuration;
+    private TimeSpan _lastPublishDuration;
     private int _batchCap;
 
     public PublishSchedule(IngestPublishPolicy policy, TimeProvider timeProvider)
@@ -33,9 +33,9 @@ internal sealed class PublishSchedule
     /// Records a finished publish. Under <see cref="IngestPublishPolicy.Adaptive"/> with a growing cap, the cap
     /// becomes <c>max(BatchCap, indexedCount)</c>.
     /// </summary>
-    public void RecordPublish(TimeSpan rebuildDuration, int indexedCount)
+    public void RecordPublish(TimeSpan publishDuration, int indexedCount)
     {
-        _lastRebuildDuration = rebuildDuration;
+        _lastPublishDuration = publishDuration;
         _lastPublishTimestamp = _timeProvider.GetTimestamp();
         if (_policy is IngestPublishPolicy.Adaptive { GrowthAwareBatchCap: true } adaptive)
             _batchCap = Math.Max(adaptive.BatchCap, indexedCount);
@@ -54,12 +54,12 @@ internal sealed class PublishSchedule
         TimeSpan sinceLastPublish = _timeProvider.GetElapsedTime(_lastPublishTimestamp);
         TimeSpan untilStale = maxStaleness - _timeProvider.GetElapsedTime(batch.OldestTimestamp);
 
-        // Once one rebuild takes longer than MaxStaleness, every batch is already stale when the previous rebuild
-        // finishes; publishing on staleness alone then rebuilds back to back every ChannelCapacity entries and total
-        // work becomes quadratic. Under Adaptive, staleness may not publish sooner than RebuildMultiplier x the
-        // last rebuild duration after that rebuild.
+        // Once one publish takes longer than MaxStaleness, every batch is already stale when the previous publish
+        // finishes; publishing on staleness alone then rebuilds the index back to back every ChannelCapacity entries
+        // and total work becomes quadratic. Under Adaptive, staleness may not publish sooner than PublishMultiplier x
+        // the last publish duration after that publish.
         if (_policy is IngestPublishPolicy.Adaptive { StrictMaxStaleness: false } paced)
-            untilStale = Max(untilStale, _lastRebuildDuration * paced.RebuildMultiplier - sinceLastPublish);
+            untilStale = Max(untilStale, _lastPublishDuration * paced.PublishMultiplier - sinceLastPublish);
 
         if (untilStale <= TimeSpan.Zero)
             return TimeSpan.Zero;
@@ -69,7 +69,7 @@ internal sealed class PublishSchedule
             IngestPublishPolicy.TimeDebounce debounce => EarlierOf(untilStale, debounce.MinInterval - sinceLastPublish),
             IngestPublishPolicy.Adaptive adaptive when batch.Count >= adaptive.MinTimerPublishBatch => EarlierOf(
                 untilStale,
-                Max(adaptive.MinInterval, _lastRebuildDuration * adaptive.RebuildMultiplier) - sinceLastPublish),
+                Max(adaptive.MinInterval, _lastPublishDuration * adaptive.PublishMultiplier) - sinceLastPublish),
             IngestPublishPolicy.Adaptive => untilStale,
             IngestPublishPolicy.FixedBatch or IngestPublishPolicy.PerEntry => null, // no timer
         };

@@ -12,17 +12,17 @@ public class IngestPublishPolicyTests
     [Arguments(-1.0)]
     [Arguments(1_000.001)]
     [Arguments(double.MaxValue)]
-    public async Task Adaptive_RebuildMultiplier_RejectsValuesOutsideZeroToTheLimit(double multiplier)
+    public async Task Adaptive_PublishMultiplier_RejectsValuesOutsideZeroToTheLimit(double multiplier)
     {
-        await AssertOutOfRange("RebuildMultiplier", () => _ = new IngestPublishPolicy.Adaptive { RebuildMultiplier = multiplier });
+        await AssertOutOfRange("PublishMultiplier", () => _ = new IngestPublishPolicy.Adaptive { PublishMultiplier = multiplier });
     }
 
     [Test]
-    public async Task Adaptive_RebuildMultiplier_AcceptsTheLimit()
+    public async Task Adaptive_PublishMultiplier_AcceptsTheLimit()
     {
-        var policy = new IngestPublishPolicy.Adaptive { RebuildMultiplier = IngestPublishPolicy.Adaptive.MaxRebuildMultiplier };
+        var policy = new IngestPublishPolicy.Adaptive { PublishMultiplier = IngestPublishPolicy.Adaptive.MaxPublishMultiplier };
 
-        await Assert.That(policy.RebuildMultiplier).IsEqualTo(1_000.0);
+        await Assert.That(policy.PublishMultiplier).IsEqualTo(1_000.0);
     }
 
     [Test]
@@ -71,7 +71,7 @@ public class IngestPublishPolicyTests
             BatchCap = 2_000,
             GrowthAwareBatchCap = true,
             MinInterval = TimeSpan.FromMilliseconds(100),
-            RebuildMultiplier = 2.0,
+            PublishMultiplier = 2.0,
             MinTimerPublishBatch = 200,
             MaxStaleness = TimeSpan.FromSeconds(1),
             StrictMaxStaleness = false,

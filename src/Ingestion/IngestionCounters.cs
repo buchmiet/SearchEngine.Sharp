@@ -11,18 +11,18 @@ internal sealed class IngestionCounters(TimeProvider timeProvider)
     public int EntriesAccepted => Volatile.Read(ref _entriesAccepted);
     public int EntriesPublished { get; private set; }
     public int PublishCount { get; private set; }
-    public TimeSpan TotalRebuildDuration { get; private set; }
+    public TimeSpan TotalPublishDuration { get; private set; }
     public TimeSpan MaxObservedStaleness { get; private set; }
 
     public void IncrementAccepted() => Interlocked.Increment(ref _entriesAccepted);
 
     public void DecrementAccepted() => Interlocked.Decrement(ref _entriesAccepted);
 
-    public void AddPublished(int count, TimeSpan rebuildDuration)
+    public void AddPublished(int count, TimeSpan publishDuration)
     {
         EntriesPublished += count;
         PublishCount++;
-        TotalRebuildDuration += rebuildDuration;
+        TotalPublishDuration += publishDuration;
     }
 
     // Only the publisher calls this, and the result is read after the publisher has finished.
@@ -50,7 +50,7 @@ internal sealed class IngestionCounters(TimeProvider timeProvider)
         EntriesAccepted = EntriesAccepted,
         EntriesPublished = EntriesPublished,
         PublishCount = PublishCount,
-        TotalRebuildDuration = TotalRebuildDuration,
+        TotalPublishDuration = TotalPublishDuration,
         MaxObservedStaleness = MaxObservedStaleness,
         CompletedSuccessfully = completed,
         WasCancelled = cancelled,

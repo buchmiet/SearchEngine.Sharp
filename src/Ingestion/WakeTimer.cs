@@ -42,6 +42,6 @@ internal sealed class WakeTimer : IDisposable
 
     private void Fire() => Volatile.Read(ref _fired).TrySetResult();
 
-    // The publisher must not run its rebuild on the timer's callback thread.
+    // The publisher must not run its publish on the timer's callback thread.
     private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

@@ -41,23 +41,25 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   case-sensitively. `İstanbul` now finds `istanbul`, and under `CaseFold` a pattern no longer has to be written
   folded: `Straße`, `σας` and `ﬃ` find `strasse`, `σασ` and `ffi`. See
   [Regular expressions](docs/query-semantics.md#regular-expressions-wordmatchmethodregex).
-- `IngestionResult.TotalRebuildCpu` is renamed `TotalRebuildDuration` and `IngestionResult.WorstCaseStaleness` is
-  renamed `MaxObservedStaleness`. The first never measured CPU time: it is the wall-clock time of the rebuilds,
-  the sum of `IngestionPublishEvent.RebuildDuration`. The second is the longest staleness seen during the scan, not
-  a bound. Neither value changed; code written for 0.5.6 must use the new names, and the old names no longer exist.
+- `IngestionResult.TotalRebuildCpu` is renamed `TotalPublishDuration`, `IngestionPublishEvent.RebuildDuration` is
+  renamed `PublishDuration` and `IngestionResult.WorstCaseStaleness` is renamed `MaxObservedStaleness`. The first
+  never measured CPU time: it is the wall-clock time of the updater calls of the publishes, the sum of
+  `PublishDuration`. A publish no longer always rebuilds the whole index (see the `IndexUpdater` entry), so the
+  durations are named after the publish. `MaxObservedStaleness` is the longest staleness seen during the scan, not
+  a bound. No value changed; code written for 0.5.6 must use the new names, and the old names no longer exist.
 - The target framework is `net11.0` and the dependency `Microsoft.Extensions.DependencyInjection` is 11.0.0.
   Applications on .NET 10 stay on 0.5.6. Moving to .NET 11 needs no source changes.
 - Progressive ingestion with the `Adaptive` policy: a publish triggered by `MaxStaleness` also waits
-  `RebuildMultiplier` times the last rebuild duration after that rebuild. Large scans no longer degrade into
-  back-to-back full rebuilds once one rebuild takes longer than `MaxStaleness` (a 1 million file scan made 57 to
-  74 rebuilds and allocated about 30 GB; it now makes 13 to 18). The worst-case staleness is
-  `max(MaxStaleness, (1 + RebuildMultiplier) × rebuild duration)`; nothing changes while a rebuild takes less
-  than `MaxStaleness / (1 + RebuildMultiplier)`. `StrictMaxStaleness = true` restores the old schedule.
+  `PublishMultiplier` times the last publish duration after that publish. Large scans no longer degrade into
+  back-to-back full rebuilds once one publish takes longer than `MaxStaleness` (a 1 million file scan made 57 to
+  74 publishes and allocated about 30 GB; it now makes 13 to 18). The worst-case staleness is
+  `max(MaxStaleness, (1 + PublishMultiplier) × publish duration)`; nothing changes while a publish takes less
+  than `MaxStaleness / (1 + PublishMultiplier)`. `StrictMaxStaleness = true` restores the old schedule.
 - `IngestPublishPolicy` is a closed record hierarchy instead of an enum, and each policy carries only its own
   settings: `IngestPublishPolicy.Adaptive`, `TimeDebounce`, `FixedBatch` and `PerEntry`. `IngestPublishOptions`
   keeps `Policy`, `ChannelCapacity` and `FlushOnCancellation`; the other properties moved to the policies.
   `FixedBatchSize` is `Adaptive.BatchCap` or `FixedBatch.BatchSize`, and `AdaptiveMultiplier` is
-  `Adaptive.RebuildMultiplier`. `TimeDebounce` has no batch size: it never published by size, and setting
+  `Adaptive.PublishMultiplier`. `TimeDebounce` has no batch size: it never published by size, and setting
   `FixedBatchSize` for it did nothing. `PerEntry` has no settings. `IngestPublishOptions` and the policies are
   records, so `with` works on them, and every setting is checked when it is set: an invalid value throws
   `ArgumentOutOfRangeException` naming the property where it is set, not when `IngestAsync` starts. A `switch`
@@ -157,8 +159,8 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   updater, a `Published` or `onPublished` handler, or the progress callback) while the scanner was blocked on a
   full channel. It now cancels the scanner and faults with the original exception.
 - A NaN, infinite or very large `AdaptiveMultiplier` was accepted and made the ingestion fault at its first timer
-  publish. The multiplier, now `IngestPublishPolicy.Adaptive.RebuildMultiplier`, must be positive and at most
-  `MaxRebuildMultiplier` (1,000) and throws `ArgumentOutOfRangeException` otherwise.
+  publish. The multiplier, now `IngestPublishPolicy.Adaptive.PublishMultiplier`, must be positive and at most
+  `MaxPublishMultiplier` (1,000) and throws `ArgumentOutOfRangeException` otherwise.
 - A progress report of `ProgressiveIndexIngestion` could count one entry more in `EntriesPublished` than in
   `EntriesAccepted`: the scanner counted an entry after the publisher could already take and publish it. An entry
   is now counted before it enters the channel.

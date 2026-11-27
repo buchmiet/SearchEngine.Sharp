@@ -79,7 +79,7 @@ public class PublishScheduleTests
     }
 
     [Test]
-    public async Task Adaptive_TimerWaitsRebuildMultiplierTimesTheLastRebuild_OnlyFromMinTimerPublishBatch()
+    public async Task Adaptive_TimerWaitsPublishMultiplierTimesTheLastRebuild_OnlyFromMinTimerPublishBatch()
     {
         // Rebuild 400 ms, k = 2: the interval is max(100 ms, 800 ms). 300 ms later, 500 ms are left. One entry is
         // below MinTimerPublishBatch, so only staleness counts: max(1000 - 300, 800 - 300) = 700 ms.
@@ -124,7 +124,7 @@ public class PublishScheduleTests
             {
                 MinInterval = TimeSpan.MaxValue,
                 MaxStaleness = TimeSpan.MaxValue,
-                RebuildMultiplier = IngestPublishPolicy.Adaptive.MaxRebuildMultiplier,
+                PublishMultiplier = IngestPublishPolicy.Adaptive.MaxPublishMultiplier,
                 MinTimerPublishBatch = 1,
             },
             new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.MaxValue, MaxStaleness = TimeSpan.MaxValue },

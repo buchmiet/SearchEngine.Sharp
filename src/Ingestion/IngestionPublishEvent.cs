@@ -18,9 +18,9 @@ public readonly struct IngestionPublishEvent
     public int IndexedDocumentCount { get; init; }
 
     /// <summary>
-    /// Gets the elapsed time of the updater call for this publish, which consists mostly of the rebuild.
+    /// Gets the elapsed time of the updater call for this publish, which consists mostly of building the snapshot.
     /// </summary>
-    public TimeSpan RebuildDuration { get; init; }
+    public TimeSpan PublishDuration { get; init; }
 
     /// <summary>
     /// Gets the zero-based number of this publish within the ingestion.

@@ -177,7 +177,7 @@ public class ProgressiveIndexIngestionTests
                 {
                     BatchCap = 750,
                     MinInterval = TimeSpan.FromMilliseconds(25),
-                    RebuildMultiplier = 2.0,
+                    PublishMultiplier = 2.0,
                 },
             });
 
@@ -257,22 +257,22 @@ public class ProgressiveIndexIngestionTests
             .Because($"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
         await Assert.That(growth.PublishCount).IsEqualTo(5);      // 2k, 4k, 8k, 16k, final 20k
         await Assert.That(fixedBatch.PublishCount).IsEqualTo(10); // every 2k
-        await Assert.That(growth.TotalRebuildDuration).IsLessThan(fixedBatch.TotalRebuildDuration);
+        await Assert.That(growth.TotalPublishDuration).IsLessThan(fixedBatch.TotalPublishDuration);
     }
 
     [Test]
-    public async Task Ingest_TotalRebuildDuration_IsTheSumOfTheRebuildDurationsOfAllPublishes()
+    public async Task Ingest_TotalPublishDuration_IsTheSumOfThePublishDurationsOfAllPublishes()
     {
         var (_, _, ingestion) = Create();
-        var rebuildDurations = new ConcurrentQueue<TimeSpan>();
+        var publishDurations = new ConcurrentQueue<TimeSpan>();
 
         var result = await ingestion.IngestAsync(
             SyntheticPathFeed.EnumerateAsync(1_000, seed: 5),
             new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 250 } },
-            onPublished: e => rebuildDurations.Enqueue(e.RebuildDuration));
+            onPublished: e => publishDurations.Enqueue(e.PublishDuration));
 
-        await Assert.That(rebuildDurations.Count).IsEqualTo(4);
-        await Assert.That(result.TotalRebuildDuration).IsEqualTo(TimeSpan.FromTicks(rebuildDurations.Sum(d => d.Ticks)));
+        await Assert.That(publishDurations.Count).IsEqualTo(4);
+        await Assert.That(result.TotalPublishDuration).IsEqualTo(TimeSpan.FromTicks(publishDurations.Sum(d => d.Ticks)));
     }
 
     [Test]
@@ -353,7 +353,7 @@ public class ProgressiveIndexIngestionTests
                     StrictMaxStaleness = strict,
                 },
             },
-            onPublished: e => publishEnds.Add((System.Diagnostics.Stopwatch.GetTimestamp(), e.RebuildDuration)));
+            onPublished: e => publishEnds.Add((System.Diagnostics.Stopwatch.GetTimestamp(), e.PublishDuration)));
 
         // Gap between the end of one publish and the start of the next.
         var gaps = new List<TimeSpan>();

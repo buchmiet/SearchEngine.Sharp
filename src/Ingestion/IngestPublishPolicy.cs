@@ -16,7 +16,7 @@ namespace SearchEngine.Ingestion;
 ///   <listheader><term>Setting</term><description>Policies</description></listheader>
 ///   <item><term>Batch size or batch cap</term><description><see cref="Adaptive.BatchCap"/>,
 ///         <see cref="FixedBatch.BatchSize"/></description></item>
-///   <item><term><c>GrowthAwareBatchCap</c>, <c>RebuildMultiplier</c>, <c>MinTimerPublishBatch</c>,
+///   <item><term><c>GrowthAwareBatchCap</c>, <c>PublishMultiplier</c>, <c>MinTimerPublishBatch</c>,
 ///         <c>StrictMaxStaleness</c></term><description><see cref="Adaptive"/></description></item>
 ///   <item><term><c>MinInterval</c></term><description><see cref="Adaptive.MinInterval"/>,
 ///         <see cref="TimeDebounce.MinInterval"/></description></item>
@@ -40,7 +40,7 @@ public closed record class IngestPublishPolicy
 
     /// <summary>
     /// Publishes when the buffer reaches the batch cap, when at least <see cref="MinTimerPublishBatch"/> entries wait
-    /// and <c>max(MinInterval, RebuildMultiplier × last rebuild duration)</c> has passed since the last publish, or
+    /// and <c>max(MinInterval, PublishMultiplier × last publish duration)</c> has passed since the last publish, or
     /// when the oldest buffered entry has waited <see cref="MaxStaleness"/>. A timer makes the time-based publishes
     /// happen while the scanner is idle. Suits scans of any speed and size.
     /// </summary>
@@ -61,8 +61,8 @@ public closed record class IngestPublishPolicy
         /// <summary>
         /// Gets whether the batch cap grows with the index. When <see langword="true"/> (the default), the cap
         /// becomes, after each publish, <c>max(BatchCap, number of entries the updater holds)</c>, so the number of
-        /// full rebuilds stays low as the index grows. When <see langword="false"/>, the cap stays at
-        /// <see cref="BatchCap"/>.
+        /// publishes stays low as the index grows (a batch that large makes the updater rebuild the whole index).
+        /// When <see langword="false"/>, the cap stays at <see cref="BatchCap"/>.
         /// </summary>
         public bool GrowthAwareBatchCap { get; init; } = true;
 
@@ -78,27 +78,27 @@ public closed record class IngestPublishPolicy
         } = DefaultMinInterval;
 
         /// <summary>
-        /// The largest <see cref="RebuildMultiplier"/>: 1,000. At that value the publisher spends about 0.1% of its
-        /// time rebuilding while the timer drives the publishes, so a larger value saves nothing measurable; it only
-        /// delays results. The limit also keeps <c>k × last rebuild duration</c> inside the range of
-        /// <see cref="TimeSpan"/> for any rebuild shorter than 29 years.
+        /// The largest <see cref="PublishMultiplier"/>: 1,000. At that value the publisher spends about 0.1% of its
+        /// time publishing while the timer drives the publishes, so a larger value saves nothing measurable; it only
+        /// delays results. The limit also keeps <c>k × last publish duration</c> inside the range of
+        /// <see cref="TimeSpan"/> for any publish shorter than 29 years.
         /// </summary>
-        public const double MaxRebuildMultiplier = 1_000;
+        public const double MaxPublishMultiplier = 1_000;
 
         /// <summary>
-        /// Gets the multiplier <c>k</c> of the interval <c>max(MinInterval, k × last rebuild duration)</c> between
+        /// Gets the multiplier <c>k</c> of the interval <c>max(MinInterval, k × last publish duration)</c> between
         /// timer publishes. It also paces staleness publishes (see <see cref="MaxStaleness"/>). Must be positive and
-        /// at most <see cref="MaxRebuildMultiplier"/>. Defaults to 2.
+        /// at most <see cref="MaxPublishMultiplier"/>. Defaults to 2.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">The value is zero, negative, NaN or larger than
-        /// <see cref="MaxRebuildMultiplier"/>.</exception>
-        public double RebuildMultiplier
+        /// <see cref="MaxPublishMultiplier"/>.</exception>
+        public double PublishMultiplier
         {
             get;
             init
             {
-                if (!(value is > 0 and <= MaxRebuildMultiplier))
-                    throw new ArgumentOutOfRangeException(nameof(RebuildMultiplier), value, $"Must be positive and at most {MaxRebuildMultiplier}.");
+                if (!(value is > 0 and <= MaxPublishMultiplier))
+                    throw new ArgumentOutOfRangeException(nameof(PublishMultiplier), value, $"Must be positive and at most {MaxPublishMultiplier}.");
 
                 field = value;
             }
@@ -121,15 +121,15 @@ public closed record class IngestPublishPolicy
         /// </summary>
         /// <remarks>
         /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish that
-        /// contains it starts (see <see cref="IngestionResult.MaxObservedStaleness"/>); that publish's own rebuild
+        /// contains it starts (see <see cref="IngestionResult.MaxObservedStaleness"/>); that publish's own duration
         /// comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
         /// <para>Unless <see cref="StrictMaxStaleness"/> is set, a staleness publish also waits until
-        /// <see cref="RebuildMultiplier"/> × the last rebuild duration has passed since the previous publish
-        /// finished. An entry handed over just as a rebuild starts therefore waits that rebuild plus the gap, so
-        /// with <c>k = RebuildMultiplier</c> and a rebuild of duration <c>R</c> the worst staleness is
+        /// <see cref="PublishMultiplier"/> × the last publish duration has passed since the previous publish
+        /// finished. An entry handed over just as a publish starts therefore waits that publish plus the gap, so
+        /// with <c>k = PublishMultiplier</c> and a publish of duration <c>R</c> the worst staleness is
         /// <c>max(MaxStaleness, (1 + k) × R)</c>. While <c>R</c> stays below <c>MaxStaleness / (1 + k)</c> (333 ms
         /// with the defaults) the bound is <see cref="MaxStaleness"/>; beyond that it grows with the index (a 400 ms
-        /// rebuild gives 1.2 s instead of 1.0 s), which keeps the scan from running back-to-back full
+        /// publish gives 1.2 s instead of 1.0 s), which keeps the scan from running back-to-back full
         /// rebuilds.</para>
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
@@ -141,9 +141,9 @@ public closed record class IngestPublishPolicy
 
         /// <summary>
         /// Gets whether a publish starts as soon as the oldest buffered entry exceeds <see cref="MaxStaleness"/>,
-        /// even when that means starting a full rebuild immediately after the previous one. Once a single rebuild
-        /// takes longer than <see cref="MaxStaleness"/>, every batch is stale when the previous rebuild ends, so with
-        /// this set rebuilds run back to back and total rebuild work grows with the square of the index size.
+        /// even when that means starting a publish immediately after the previous one. Once a single publish
+        /// takes longer than <see cref="MaxStaleness"/>, every batch is stale when the previous publish ends, so with
+        /// this set full rebuilds run back to back and their total work grows with the square of the index size.
         /// Defaults to <see langword="false"/>, which applies the pacing described under
         /// <see cref="MaxStaleness"/>.
         /// </summary>
@@ -172,7 +172,7 @@ public closed record class IngestPublishPolicy
         /// <summary>
         /// Gets the longest time an accepted entry should wait before the publish that contains it starts. A timer
         /// enforces it while the scanner is idle. It matters only when it is shorter than <see cref="MinInterval"/>
-        /// or a rebuild is long: an entry that arrives during a rebuild is older than the time since that publish.
+        /// or a publish is long: an entry that arrives during a publish is older than the time since that publish.
         /// Must be positive. Defaults to 1 second.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
@@ -214,8 +214,9 @@ public closed record class IngestPublishPolicy
     }
 
     /// <summary>
-    /// Publishes after every entry. It has no settings. Meant only as a baseline for small collections: total
-    /// rebuild cost grows with the square of the entry count.
+    /// Publishes after every entry. It has no settings. Meant only as a baseline for small collections: every
+    /// publish builds the entries changed since the last full rebuild again, and the updater rebuilds the whole
+    /// index every few hundred to few thousand entries, so total cost grows faster than the entry count.
     /// </summary>
     public sealed record class PerEntry : IngestPublishPolicy;
 

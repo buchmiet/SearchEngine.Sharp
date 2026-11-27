@@ -58,7 +58,7 @@ public sealed class CommanderPattern(IngestPublishOptions? options, bool instrum
             options,
             onPublished: e =>
             {
-                if (instrument) lock (B.Publishes) B.Publishes.Add((e.IndexedDocumentCount, e.EntryCount, e.RebuildDuration.TotalMilliseconds));
+                if (instrument) lock (B.Publishes) B.Publishes.Add((e.IndexedDocumentCount, e.EntryCount, e.PublishDuration.TotalMilliseconds));
                 publishChannel.Writer.TryWrite(true);
             },
             cancellationToken: cancellationToken);

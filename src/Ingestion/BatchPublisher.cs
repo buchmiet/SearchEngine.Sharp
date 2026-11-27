@@ -29,9 +29,9 @@ internal sealed class BatchPublisher(
 
         updater.AddOrUpdateEntries(batch.Entries);
 
-        TimeSpan rebuildDuration = timeProvider.GetElapsedTime(publishStarted);
+        TimeSpan publishDuration = timeProvider.GetElapsedTime(publishStarted);
         int indexedCount = updater.EntryCount;
-        schedule.RecordPublish(rebuildDuration, indexedCount);
+        schedule.RecordPublish(publishDuration, indexedCount);
 
         // The batch is in the index: count it and empty the buffer before any handler runs, so a handler that
         // throws (for example after the caller cancelled) cannot make the flush publish the same entries again.
@@ -39,10 +39,10 @@ internal sealed class BatchPublisher(
         {
             EntryCount = batch.Count,
             IndexedDocumentCount = indexedCount,
-            RebuildDuration = rebuildDuration,
+            PublishDuration = publishDuration,
             PublishSequence = counters.PublishCount,
         };
-        counters.AddPublished(batch.Count, rebuildDuration);
+        counters.AddPublished(batch.Count, publishDuration);
         batch.Clear();
 
         observers.RaisePublished(publishEvent);
