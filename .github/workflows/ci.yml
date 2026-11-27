@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}${{ matrix.invariant && ' (globalization-invariant)' || '' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        invariant: [false]
+        include:
+          # Tests that need Unicode normalization skip themselves in this mode; the rest must still pass.
+          - os: ubuntu-latest
+            invariant: true
+    env:
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: ${{ matrix.invariant && '1' || '0' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+
+      - name: Restore
+        run: dotnet restore SearchEngine.Sharp.slnx
+
+      - name: Build
+        run: dotnet build SearchEngine.Sharp.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --project tests/SearchEngine.Sharp.Tests --configuration Release --no-build
