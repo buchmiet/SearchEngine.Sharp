@@ -262,17 +262,18 @@ internal static class TextFolder
         => ch is (>= '\u0300' and <= '\u036F') or (>= '\u1AB0' and <= '\u1AFF') or (>= '\u1DC0' and <= '\u1DFF') or (>= '\uFE20' and <= '\uFE2F')
             && CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark;
 
-    // Simple case folding from the Unicode 17.0.0 table in UnicodeCaseFolding.g.cs (CaseFolding.txt, statuses C and
-    // S), so the result is the same on every platform and globalization mode: case variants of one letter (σ/ς/Σ, μ/µ,
-    // β/ϐ, ι/U+0345/U+1FBE, в/ᲀ, ſ/s, Deseret 𐐨/𐐀) map to one code point. Per-character lowercase alone misses the
-    // lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. On top of that: the full
-    // foldings ß/ẞ→ss and the Latin ligatures U+FB00–U+FB06; İ→i (the Turkic mapping, because the default full folding
-    // i + U+0307 would not match i, and U+0130 has no simple folding). A text where folding differs from per-character
-    // lowercase nowhere is returned unchanged.
+    // Full case folding of the lowercase, both from the Unicode 17.0.0 tables in UnicodeCasing.g.cs (UnicodeData.txt
+    // and CaseFolding.txt, statuses C and F), so the result is the same on every platform and globalization mode: case
+    // variants of one letter (σ/ς/Σ, μ/µ, β/ϐ, ι/U+0345/U+1FBE, в/ᲀ, ſ/s, Deseret 𐐨/𐐀) map to one code point, and the
+    // full foldings expand (ß/ẞ→ss, ﬁ→fi, ŉ→ʼn, ﬓ→մն). Lowercasing first gives İ its lowercase i; its full folding
+    // i + U+0307 would not match the i that per-character lowercase gives. Per-character lowercase alone misses the
+    // lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. A text where folding
+    // differs from per-character lowercase nowhere is returned unchanged.
     private static string ApplyCaseFolding(string text)
     {
         StringBuilder? sb = null;
-        Span<char> buffer = stackalloc char[2];
+        Span<int> folded = stackalloc int[3];
+        Span<char> buffer = stackalloc char[6];
         int position = 0;
         while (position < text.Length)
         {
@@ -285,39 +286,22 @@ internal static class TextFolder
             }
 
             position += length;
-            string? expansion = rune.Value switch
+            int lowercase = UnicodeCasing.ToLower(rune.Value);
+            int count = UnicodeCasing.FullFold(lowercase, folded);
+            // What per-character lowercase gives on its own: the lowercase of a BMP character, a supplementary one as it is.
+            int lowered = rune.IsBmp ? lowercase : rune.Value;
+            if (count == 1 && folded[0] == lowered)
             {
-                'ß' or 'ẞ' => "ss",
-                'İ' => "i",
-                'ﬀ' => "ff",
-                'ﬁ' => "fi",
-                'ﬂ' => "fl",
-                'ﬃ' => "ffi",
-                'ﬄ' => "ffl",
-                'ﬅ' or 'ﬆ' => "st",
-                _ => null,
-            };
-
-            scoped ReadOnlySpan<char> folded;
-            if (expansion is not null)
-            {
-                folded = expansion;
+                sb?.Append(text, start, length);
+                continue;
             }
-            else
-            {
-                int simple = UnicodeCaseFolding.Fold(rune.Value);
-                int lowered = rune.IsBmp ? char.ToLowerInvariant((char)rune.Value) : rune.Value;
-                if (simple == lowered)
-                {
-                    sb?.Append(text, start, length);
-                    continue;
-                }
 
-                folded = buffer[..new Rune(simple).EncodeToUtf16(buffer)];
-            }
+            int written = 0;
+            foreach (int codePoint in folded[..count])
+                written += new Rune(codePoint).EncodeToUtf16(buffer[written..]);
 
             sb ??= new StringBuilder(text.Length + 4).Append(text, 0, start);
-            sb.Append(folded);
+            sb.Append(buffer[..written]);
         }
 
         return sb?.ToString() ?? text;

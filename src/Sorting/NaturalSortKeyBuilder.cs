@@ -1,3 +1,5 @@
+using SearchEngine.Tokenizer;
+
 namespace SearchEngine.Sorting;
 
 /// <summary>
@@ -17,8 +19,9 @@ namespace SearchEngine.Sorting;
 /// <item>A number part comes before a text part.</item>
 /// <item>Two number parts compare by value, whatever their length; leading zeros do not count, so <c>007</c> and
 /// <c>7</c> are equal. A digit of another script counts with its value (<c>٣</c> is 3).</item>
-/// <item>Two text parts compare character by character after <see cref="char.ToLowerInvariant(char)"/>, by UTF-16
-/// code unit, so the comparison ignores case and does not depend on the culture. A part that is the start of
+/// <item>Two text parts compare character by character after <see cref="TextNormalizer.ToLowerInvariantFast(char)"/>
+/// (Unicode 17.0.0 simple lowercase), by UTF-16 code unit, so the comparison ignores case and depends neither on the
+/// culture nor on the platform. A part that is the start of
 /// the other comes first: <c>a</c> before <c>ab</c>, so <c>a 2</c> sorts before <c>ab</c>.</item>
 /// <item>When all parts of one text equal the first parts of the other, the text with fewer parts comes first.</item>
 /// </list>
@@ -85,11 +88,11 @@ public static class NaturalSortKeyBuilder
                 if (char.IsLetter(c))
                 {
                     while (i < text.Length && char.IsLetter(text[i]))
-                        buffer[pos++] = char.ToLowerInvariant(text[i++]);
+                        buffer[pos++] = TextNormalizer.ToLowerInvariantFast(text[i++]);
                 }
                 else
                 {
-                    buffer[pos++] = char.ToLowerInvariant(c);
+                    buffer[pos++] = TextNormalizer.ToLowerInvariantFast(c);
                     i++;
                 }
 

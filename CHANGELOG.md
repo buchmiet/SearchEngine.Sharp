@@ -17,9 +17,7 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   during a one-shot directory scan instead of building an index.
 - `UnicodeMatching` and `SearchTokenization.WithUnicodeMatching(...)`: opt-in NFC composition, case folding
   (`ß`→`ss`, `ς`→`σ`, `İ`→`i` and more), accent removal and grapheme-cluster boundaries for `Within` and glob
-  matches. The default behaviour is unchanged. `CaseFold` takes simple case folding from a Unicode 17.0.0 table
-  built into the library, not from the casing data of the platform, so Windows NLS, ICU versions and
-  globalization-invariant mode fold the same characters. `Compose` and `RemoveDiacritics` need Unicode normalization, so
+  matches. The default behaviour is unchanged. `Compose` and `RemoveDiacritics` need Unicode normalization, so
   `WithUnicodeMatching` throws `PlatformNotSupportedException` for them in globalization-invariant mode.
   `RemoveDiacritics` strips only Latin, Greek and Cyrillic accents, and it folds `й` and `ў` into `и` and `у`, so
   it is unsuitable for Russian and Belarusian text. See
@@ -31,6 +29,13 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
 
 ### Changed
 
+- Lowercasing (tokens, query terms, `NameMatcher`, natural sort keys) and `UnicodeMatching.CaseFold` use Unicode
+  17.0.0 tables built into the library instead of the casing data of the platform, so Windows NLS, every ICU
+  version and globalization-invariant mode give the same tokens and the same sort order. Lowercase stays per
+  UTF-16 code unit. `İ` (U+0130) now lowercases to `i`, as Unicode defines it (`char.ToLowerInvariant` kept it), so
+  `İstanbul` matches `istanbul` without any option. Characters the platform cased differently from Unicode 17
+  (for example letters added in recent Unicode versions on an older ICU) now lowercase the same everywhere;
+  rebuild indexes that were built with 0.5.6 if they hold such names.
 - `IngestionResult.TotalRebuildCpu` is renamed `TotalRebuildDuration` and `IngestionResult.WorstCaseStaleness` is
   renamed `MaxObservedStaleness`. The first never measured CPU time: it is the wall-clock time of the rebuilds,
   the sum of `IngestionPublishEvent.RebuildDuration`. The second is the longest staleness seen during the scan, not

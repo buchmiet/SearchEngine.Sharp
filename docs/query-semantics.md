@@ -85,9 +85,10 @@ preset is fixed per snapshot.
 
 ### Unicode matching
 
-By default text is lowercased one UTF-16 code unit at a time with `char.ToLowerInvariant`; there is no
+By default text is lowercased one UTF-16 code unit at a time with the Unicode 17.0.0 simple lowercase mapping, built
+into the library and the same on every platform; there is no
 normalization. Consequences: a decomposed name (`e` + U+0301, common on macOS) is not found by a composed
-query and vice versa; `ß` ≠ `ss`, final `ς` ≠ `σ`, and `İ` stays `İ`; `Within` can match inside a grapheme
+query and vice versa; `ß` ≠ `ss` and final `ς` ≠ `σ`; `Within` can match inside a grapheme
 cluster (`cafe` inside a decomposed `café`, one emoji inside a ZWJ family sequence).
 
 `SearchTokenization.WithUnicodeMatching(UnicodeMatching)` opts in per preset (stored in each snapshot,
@@ -97,7 +98,7 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 | Flag | Effect |
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
-| `CaseFold` | Unicode 17.0.0 simple case folding from a table built into the library, the same on every platform and in globalization-invariant mode (`ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, `ᲀ`=`в`, `ſ`=`s`, Deseret `𐐀`=`𐐨`, other supplementary-plane letters), plus `ß`/`ẞ`→`ss`, ligatures U+FB00–FB06 → letters, `İ`→`i`; other full foldings (`ŉ`, Greek ypogegrammeni, Armenian ligatures) are not applied |
+| `CaseFold` | Unicode 17.0.0 full case folding (`CaseFolding.txt`, statuses C and F) of the lowercase, from tables built into the library, the same on every platform and in globalization-invariant mode: `ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, `ᲀ`=`в`, `ſ`=`s`, Deseret `𐐀`=`𐐨` and other supplementary-plane letters, `ß`/`ẞ`→`ss`, ligatures (`ﬁ`→`fi`, `ﬓ`→`մն`), `ŉ`→`ʼn`, Greek letters with ypogegrammeni → letter + `ι`. The Turkic foldings are not applied. A few foldings produce a combining mark (`ǰ` → `j` + U+030C, `ΐ` → `ι` + U+0308 + U+0301); combine `CaseFold` with `Compose` to compose them back |
 | `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
 | `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`); a glob `?` matches one cluster (`caf?` matches a decomposed `café`) |
 
@@ -137,7 +138,7 @@ space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 Every maximal run of non-separator characters is one token. All other characters,
 including `_ ' " * ? & @ % + = !`, are token characters.
 
-- Tokens are lowercased (`char.ToLowerInvariant`; ASCII fast path).
+- Tokens are lowercased (Unicode 17.0.0 simple lowercase per UTF-16 code unit; ASCII fast path).
 - Duplicate tokens within one document are indexed once.
 - Example: `"Report-2024_final.PDF"` → tokens `report`, `2024_final`, `pdf`
   (`-` and `.` are separators; `_` is not).
@@ -359,8 +360,8 @@ The natural order compares `SortText` part by part, the way file managers order 
 - Two numbers compare by value, at any length. Leading
   zeros do not count, so `007` equals `7`. Digits of other scripts count with their
   value: `٣` (Arabic-Indic three) equals `3`.
-- Two text parts compare one UTF-16 code unit at a time after `char.ToLowerInvariant`.
-  Case does not matter, and the culture of the machine plays no part: `é` comes after
+- Two text parts compare one UTF-16 code unit at a time after the same lowercase as tokens.
+  Case does not matter, and neither the culture nor the platform of the machine plays a part: `é` comes after
   `z`. When one text part is the start of the other, the shorter one comes first: `a`
   before `ab`, so `a 2` sorts before `ab`.
 - When every part of one text equals the matching part of the other and one text has

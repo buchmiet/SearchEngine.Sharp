@@ -23,6 +23,17 @@ public class UnicodeMatchingTests
     }
 
     [Test]
+    [Arguments("\u0130stanbul.txt", "istanbul*")]
+    [Arguments("ISTANBUL.txt", "\u0130stanbul*")]
+    public async Task Default_DottedCapitalILowercasesToI(string name, string query)
+    {
+        // UnicodeData.txt lowercases U+0130 to i; char.ToLowerInvariant kept U+0130.
+        var engine = Index(SearchTokenization.FileMask, name);
+
+        await Assert.That(engine.Find(query, WordMatchMethod.Exact, enableOperators: true)).IsEquivalentTo([1], CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Default_DecomposedNameIsNotFoundByComposedQuery()
     {
         var engine = Index(SearchTokenization.FileMask, ZazolcNfd + ".txt");
@@ -95,7 +106,6 @@ public class UnicodeMatchingTests
     [Arguments("Stra\u00DFe.txt", "strasse*")]
     [Arguments("STRASSE.txt", "stra\u00DFe*")]
     [Arguments("\u039F\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C2.txt", "\u039F\u0394\u03A5\u03A3\u03A3\u0395\u03A5\u03A3*")]
-    [Arguments("\u0130stanbul.txt", "istanbul*")]
     [Arguments("\uFB01le.txt", "file*")]
     [Arguments("\u017Fun.txt", "sun*")]
     [Arguments("5\u00B5m.txt", "5\u03BCm*")]
@@ -103,6 +113,8 @@ public class UnicodeMatchingTests
     [Arguments("\u1C80\u043E\u0434\u0430.txt", "\u0432\u043E\u0434\u0430*")]
     [Arguments("\uD801\uDC00\uD801\uDC01.txt", "\uD801\uDC28\uD801\uDC29*")]
     [Arguments("\uD83A\uDD00.txt", "\uD83A\uDD22*")]
+    [Arguments("\uFB13.txt", "\u0574\u0576*")]
+    [Arguments("\u0149.txt", "\u02BCn*")]
     public async Task CaseFold_FoldsCharactersThatLowercaseDoesNot(string name, string query)
     {
         var plain = Index(SearchTokenization.FileMask, name);
@@ -391,7 +403,9 @@ public class UnicodeMatchingTests
     // Generated names of letters in both cases, combining marks, characters that fold or compose to separators,
     // noncharacters and lone surrogates: every name is found by itself and by its per-character lowercase form, on
     // the index and by NameMatcher. I + U+0307 is left out: under Compose it is U+0130, which folds to a plain i, so
-    // its per-character lowercase i + U+0307 is another word (docs/query-semantics.md, Unicode matching).
+    // its per-character lowercase i + U+0307 is another word (docs/query-semantics.md, Unicode matching). For the same
+    // reason U+0130 stays as it is in the lowercase form: its lowercase i drops the dot above, which NFC keeps when a
+    // mark of a lower combining class follows (U+0130 + U+0323 composes to U+1ECA + U+0307).
     [Test]
     [SkipUnlessNormalization]
     public async Task GeneratedNames_AreFoundByThemselvesAndTheirLowercaseForm()
@@ -427,7 +441,7 @@ public class UnicodeMatchingTests
                         || (preset == SearchTokenization.FileMask && names[i].Contains(' ')))
                         continue;
 
-                    string lower = string.Concat(names[i].Select(char.ToLowerInvariant));
+                    string lower = string.Concat(names[i].Select(ch => ch == '\u0130' ? ch : SearchEngine.Tokenizer.TextNormalizer.ToLowerInvariantFast(ch)));
                     foreach (string query in new[] { names[i], lower })
                     {
                         bool index = engine.Find(query, WordMatchMethod.Exact).Contains(i + 1);

@@ -228,21 +228,21 @@ public static class TextNormalizer
         return true;
     }
 
-    /// <summary>Returns the same result as <see cref="char.ToLowerInvariant(char)"/>, using a table for
-    /// ASCII.</summary>
+    /// <summary>Returns the Unicode 17.0.0 simple lowercase (Simple_Lowercase_Mapping) of a UTF-16 code unit, the same
+    /// on every platform and globalization mode, using a table for ASCII. A surrogate stays as it is.</summary>
     /// <param name="ch">The character to convert.</param>
     /// <returns>The lowercase character.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static char ToLowerInvariantFast(char ch)
     {
-        return ch <= 0x7F ? AsciiLowercaseMap[ch] : char.ToLowerInvariant(ch);
+        return ch <= 0x7F ? AsciiLowercaseMap[ch] : (char)UnicodeCasing.ToLower(ch);
     }
 
     private static char[] BuildAsciiLowercaseMap()
     {
         var map = new char[128];
         for (int i = 0; i < map.Length; i++)
-            map[i] = char.ToLowerInvariant((char)i);
+            map[i] = (char)UnicodeCasing.ToLower(i);
 
         return map;
     }
