@@ -180,6 +180,7 @@ public class NameMatcherTests
 
     // GraphemeBoundaries alone folds nothing, so a non-ASCII text is matched without a folded copy.
     [Test]
+    [SkipUnlessOptimized]
     public async Task IsMatch_WithGraphemeBoundariesOnly_DoesNotCopyTheText()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
