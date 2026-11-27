@@ -1,17 +1,20 @@
 namespace SearchEngine;
 
 /// <summary>
-/// Changes the content of an index. The updater keeps its own copy of every entry; each change rebuilds the whole
+/// Changes the content of an index. The updater keeps its own copy of every entry; after each change it builds a new
 /// snapshot from that copy and publishes it through the <see cref="IIndexSnapshotProvider"/> that queries read.
 /// </summary>
 /// <remarks>
 /// <para>Calls are serialized. Queries never wait for them: they keep reading the last published snapshot
 /// until the new one is published.</para>
 /// <para>A call that throws leaves the stored entries and the published snapshot as they were.</para>
-/// <para>Every change costs a full rebuild, linear in the size of the whole index. Change many entries with one call
-/// to <see cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, IndexedEntry}})"/> or
-/// <see cref="RemoveEntries"/>, or feed a running scan through
-/// <see cref="Ingestion.ProgressiveIndexIngestion"/>.</para>
+/// <para>A change keeps most of the previous snapshot: it builds again only the entries added or replaced since the
+/// whole index was last built, so its cost grows with the number of changes since then rather than with the size
+/// of the index. Once those changes, removed and replaced entries included, pass about twice the square root of the
+/// entry count (at least 256, at most 4,096), the change builds the whole index again, which is linear in its size;
+/// <c>RebuildFrom</c> always does. Change many entries with one call to
+/// <see cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, IndexedEntry}})"/> or <see cref="RemoveEntries"/>,
+/// or feed a running scan through <see cref="Ingestion.ProgressiveIndexIngestion"/>.</para>
 /// <para>A <see langword="string"/> entry is indexed as <c>new IndexedEntry(text, text)</c>: the same text is searched
 /// and sorted, and the entry has no facets.</para>
 /// </remarks>
@@ -71,7 +74,7 @@ public interface IIndexUpdater
     /// <summary>Removes the entry with the given id and publishes the new snapshot.</summary>
     /// <param name="id">The id of the entry to remove.</param>
     /// <returns><see langword="true"/> when the entry existed; <see langword="false"/> when it did not, in which
-    /// case nothing is rebuilt.</returns>
+    /// case nothing is published.</returns>
     bool RemoveEntry(int id);
 
     /// <summary>Replaces the entry with the given id, or adds it when the id is new, and publishes the new
@@ -90,7 +93,7 @@ public interface IIndexUpdater
     /// <returns><see langword="true"/> when an entry with this id existed before the call.</returns>
     bool RefreshEntry(int id, IndexedEntry entry);
 
-    // ── Batch operations (single rebuild) ──
+    // ── Batch operations (one publish) ──
 
     /// <summary>Adds or replaces every entry of <paramref name="entries"/> and publishes one new snapshot.</summary>
     /// <param name="entries">The entries to store. When an id occurs more than once, the last value wins.</param>
@@ -106,7 +109,7 @@ public interface IIndexUpdater
     /// <summary>Removes the entries with the given ids and publishes one new snapshot.</summary>
     /// <param name="ids">The ids to remove. Ids that are not present are skipped.</param>
     /// <exception cref="ArgumentNullException"><paramref name="ids"/> is <see langword="null"/>.</exception>
-    /// <returns>The number of entries removed. When it is 0, nothing is rebuilt.</returns>
+    /// <returns>The number of entries removed. When it is 0, nothing is published.</returns>
     /// <remarks><paramref name="ids"/> is read in full before anything is removed, without holding the updater's
     /// lock. An exception thrown while it is enumerated leaves the index unchanged.</remarks>
     int RemoveEntries(IEnumerable<int> ids);

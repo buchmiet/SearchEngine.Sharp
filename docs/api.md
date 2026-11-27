@@ -97,8 +97,11 @@ grapheme-cluster boundaries. Exact effects and caveats: [Unicode matching](query
 ### `IIndexUpdater`, `IndexUpdater`
 
 Changes the index. Calls are serialized, and every successful call publishes a new snapshot through the provider.
-A call that throws leaves the stored entries and the published snapshot unchanged. Every mutation rebuilds the
-whole index, so prefer the batch methods, or `ProgressiveIndexIngestion` during a scan, over one call per entry.
+A call that throws leaves the stored entries and the published snapshot unchanged. A change keeps the bulk of the
+previous snapshot and builds again only the entries changed since the whole index was last built; once those
+changes pass about `2 × √(entry count)` (at least 256, at most 4,096), the change builds the whole index again.
+The cost of each call is in [performance.md](performance.md#keeping-an-index-current). Prefer the batch methods, or
+`ProgressiveIndexIngestion` during a scan, over one call per entry when many entries change at once.
 
 ```csharp
 IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null);
@@ -109,14 +112,14 @@ void RebuildFrom(IDictionary<int, IndexedEntry> entries);
 Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 
-// One entry per call (one rebuild each)
+// One entry per call (one publish each)
 void AddEntry(int id, string text);
 void AddEntry(int id, IndexedEntry entry);
 bool RemoveEntry(int id);
 bool RefreshEntry(int id, string text);
 bool RefreshEntry(int id, IndexedEntry entry);
 
-// Many entries per call (one rebuild each)
+// Many entries per call (one publish each)
 void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries);
 void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries);
 int RemoveEntries(IEnumerable<int> ids);
@@ -134,13 +137,15 @@ bool ContainsEntry(int id);
 - `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
   input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
   `RefreshEntry` returns whether the id existed before (it adds the entry either way).
-- `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither rebuilds then.
+- `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither publishes then.
   `RemoveEntries` returns the number of ids removed.
 - The batch methods and the async methods read the whole input before taking the updater's lock, so an input
   that throws while it is read changes nothing, and code inside it may call the updater. The async methods do not
   resume on the caller's synchronization context: when the stream completes a step asynchronously, the reading
   and the rebuild continue on a thread-pool thread, and a UI thread is not blocked by the rebuild.
-- The updater keeps its own copy of every entry, and that copy is the source of each rebuild.
+- The updater keeps its own copy of every entry, and that copy is the source of every snapshot it builds.
+- `SnapshotOrder` follows `RebuildFrom` and then the order in which entries were added, until an entry is removed
+  or replaced; after that the order is not specified until the next `RebuildFrom` or `Clear`.
 
 ### `IIndexSnapshotProvider`, `IndexSnapshotProvider`
 
@@ -183,7 +188,7 @@ code point, or one grapheme cluster with `UnicodeMatching.GraphemeBoundaries`. D
 
 | Value | Order |
 |---|---|
-| `SnapshotOrder` | Order of the documents in the snapshot |
+| `SnapshotOrder` | Order of the documents in the snapshot (for an `IndexUpdater`, see its notes) |
 | `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`), see [Result ordering](query-semantics.md#result-ordering) |
 
 ## Namespace `SearchEngine.Filters`
@@ -338,10 +343,10 @@ var debounced = options with { Policy = new IngestPublishPolicy.TimeDebounce { M
 | `Adaptive` | `BatchCap` | 2,000 | Buffered entries that start a publish; lower bound of the growing cap; at least 1 |
 | | `GrowthAwareBatchCap` | `true` | After each publish the cap becomes `max(BatchCap, indexed documents)` |
 | | `MinInterval` | 100 ms | Shortest time between timer publishes; not negative |
-| | `RebuildMultiplier` | 2.0 | A timer publish waits at least this many times the last rebuild duration; positive and at most `MaxRebuildMultiplier` (1,000), beyond which rebuilds take under 0.1% of the time and a larger value only delays results |
+| | `PublishMultiplier` | 2.0 | A timer publish waits at least this many times the last publish duration; positive and at most `MaxPublishMultiplier` (1,000), beyond which publishes take under 0.1% of the time and a larger value only delays results |
 | | `MinTimerPublishBatch` | 200 | Fewest buffered entries for a timer publish; staleness overrides it; at least 1 |
 | | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive; see [the worst case](performance.md#maxstaleness-and-the-worst-case) |
-| | `StrictMaxStaleness` | `false` | Publish on staleness even right after a rebuild |
+| | `StrictMaxStaleness` | `false` | Publish on staleness even right after the previous publish |
 | `TimeDebounce` | `MinInterval` | 100 ms | Shortest time between publishes; not negative |
 | | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive |
 | `FixedBatch` | `BatchSize` | 2,000 | Buffered entries that start a publish; at least 1 |
@@ -365,7 +370,7 @@ Reported after each publish.
 |---|---|
 | `EntryCount` | Entries in this publish |
 | `IndexedDocumentCount` | Documents in the index after this publish |
-| `RebuildDuration` | Wall-clock time of this publish's rebuild |
+| `PublishDuration` | Wall-clock time of this publish's updater call |
 | `PublishSequence` | Zero-based number of this publish |
 
 ### `IngestionResult`
@@ -375,7 +380,7 @@ Reported after each publish.
 | `EntriesAccepted` | Entries taken from the scan |
 | `EntriesPublished` | Entries published (equals `EntriesAccepted` after a successful scan) |
 | `PublishCount` | Number of publishes |
-| `TotalRebuildDuration` | Wall-clock time spent in rebuilds, summed over all publishes |
+| `TotalPublishDuration` | Wall-clock time spent in the updater calls, summed over all publishes |
 | `MaxObservedStaleness` | Longest observed time between the scanner handing over an entry and the start of the publish that contains it |
 | `CompletedSuccessfully` | `true` when the scan ran to its end |
 | `WasCancelled` | `true` when cancellation ended the scan |

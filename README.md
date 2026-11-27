@@ -107,8 +107,8 @@ List<int> ids = engine.Find("*.txt", WordMatchMethod.Exact); // [1]
 
 ### Indexing a long scan
 
-Every `IndexUpdater` mutation rebuilds the whole index, so calling `AddEntry` once per file makes a scan of N files
-cost O(N²). Stream the scan through `ProgressiveIndexIngestion`, which publishes growing batches and keeps the index
+Every `IndexUpdater` call publishes a new snapshot, and the whole index is built again every few hundred to few
+thousand changes, so calling `AddEntry` once per file makes a long scan cost many full builds. Stream the scan through `ProgressiveIndexIngestion`, which publishes growing batches and keeps the index
 queryable meanwhile:
 
 ```csharp
@@ -131,13 +131,15 @@ language to one name at a time.
   per token, the sort texts and one column per facet. Any number of threads can query it.
 - `IndexSnapshotProvider` holds the current snapshot. Readers take it with a volatile read and never lock; a new
   snapshot replaces the reference atomically, and a query that already started finishes on the old one.
-- `IndexUpdater` keeps the entries, serializes changes, rebuilds a complete snapshot for every change and
-  publishes it. A change that fails leaves the published snapshot as it was.
+- `IndexUpdater` keeps the entries, serializes changes and publishes a new snapshot for every change. A change
+  keeps the bulk of the previous snapshot (its base) and builds only the entries changed since the base was built;
+  once those pass a limit, it builds the whole index again. A change that fails leaves the published snapshot as
+  it was.
 - `SearchEngineSharp` parses the expression, resolves each term to a set of documents (a bitset), combines the
   sets with the boolean operators, applies the facet filter and turns the result into ids in the requested order.
   The bigram index for `Within` and the natural sort permutation are built on the first query that needs them.
 - `ProgressiveIndexIngestion` sits between a scanner and an updater: a bounded channel, a publisher that decides
-  when to rebuild, and progress callbacks.
+  when to publish, and progress callbacks.
 - `NameMatcher` runs the same parser and matchers on a single name, without an index.
 
 Set operations on bitsets use AVX2 on x64 and AdvSimd on ARM64 when available, and scalar code otherwise. A query

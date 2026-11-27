@@ -330,12 +330,11 @@ Predicates:
 - There is no OR between facet predicates. If you need one, run two queries and
   union the results on the caller side.
 - Facet names are case-sensitive (ordinal comparison).
-- A document without a value for a facet has `0` in that column. A range that
-  includes `0`, or a mask with `mustHave: 0`, therefore matches such documents.
-  If that is not intended, attach the facet to every document.
-- A filter naming a facet that no indexed document carries throws `ArgumentException`
-  when it is evaluated. Facet names are not checked when the index is empty or when the
-  text expression matches nothing; such a query returns an empty list.
+- A document without a value for a facet has the value `0` for it, also when no
+  indexed document carries that facet. A range that includes `0`, or a mask with
+  `mustHave: 0`, therefore matches such documents, and a filter on a facet name
+  nobody uses (a typo, say) matches either every document or none, without an
+  exception. If that is not intended, attach the facet to every document.
 - `FacetFilter.None` (or a `Combine` of nothing) imposes no constraints.
 
 Recommended encodings:
@@ -360,7 +359,7 @@ The cost of filters depends on how many documents the text expression matches; s
 
 | `SearchSortMode` | Order |
 |---|---|
-| `SnapshotOrder` | Document order within the current snapshot |
+| `SnapshotOrder` | Document order within the current snapshot: the order the entries were added in, until an `IndexUpdater` removes or replaces one; after that it is not specified until the next `RebuildFrom` or `Clear` |
 | `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
 
 The natural order compares `SortText` part by part, the way file managers order names:

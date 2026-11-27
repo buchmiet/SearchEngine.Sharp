@@ -30,8 +30,8 @@ A search mode is the triple:
 2. `WordMatchMethod`: `Exact` (whole token) or `Within` (substring inside token/name)
 3. `enableOperators`: boolean `AND` / `OR` / `NOT`
 
-Configure the preset on `IndexUpdater` at construction; every rebuild publishes a snapshot
-carrying the same preset. Switching between modes (e.g. token search and classic file mask)
+Configure the preset on `IndexUpdater` at construction; every snapshot it publishes
+carries the same preset. Switching between modes (e.g. token search and classic file mask)
 requires one `RebuildFrom` from your file table. You cannot mix presets in one snapshot.
 
 ```csharp
@@ -51,7 +51,7 @@ style input; `Within` for incremental substring search on the whole name.
 To switch presets at runtime, create a new `IndexUpdater` with the other preset over the
 same provider and call `RebuildFrom`. The published snapshot replaces the old one
 atomically. Do not keep two updaters with different presets active against one provider;
-whichever rebuilds last wins. For both modes side by side, register two independent
+whichever publishes last wins. For both modes side by side, register two independent
 provider/updater/engine sets (keyed DI: `AddKeyedSearchEngine("mask",
 SearchTokenization.FileMask)`).
 
@@ -78,7 +78,7 @@ Decide this first; it matters more than any tuning below.
 |-----------|-----|-----|
 | One-shot search of a tree ("find files named `*.pdf` under this folder"), result thrown away afterwards | Plain scan with `NameMatcher` | Every name has to be read from disk once anyway, and matching it while it is read costs less than indexing it. At 1 million files the scan takes about 1 s and a few tens of MB; scanning into an index takes over 10 s and close to 2 GB of allocations. |
 | An index kept and queried many times over the same tree (filter as you type, a drive kept in memory) | `IndexUpdater` and `SearchEngineSharp` | A query over 1 million names takes 0.1 to 17 ms instead of a rescan. Building the index costs about 5 to 9 rescans, so it pays off after that many queries on a tree that does not change in between. |
-| A kept index over files that change often | An index only if the changes are rare or batched | Every `AddEntry`, `RemoveEntry` or `RefreshEntry` rebuilds the whole index (about 2 s at 1 million names). With one change per query, rescanning wins. Batch changes with `AddOrUpdateEntries` and `RemoveEntries`. |
+| A kept index over files that change often | `IndexUpdater`, one call per change or per batch of changes | A change builds only the entries changed since the last full build of the index; the whole index (about 2 s at 1 million names) is built again once every 1,000 to 2,000 changes at that size. Changes that arrive together go in one `AddOrUpdateEntries` or `RemoveEntries` call. |
 
 The measurements behind these numbers: [Index or plain scan](performance.md#index-or-plain-scan).
 
@@ -134,8 +134,8 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
 
 ## Scanning into a persistent index
 
-Do not call `AddEntry` per file: each call rebuilds the whole index and total work grows
-O(N²). Stream the scan through `ProgressiveIndexIngestion`. The scanner owns the id → path table and hands
+Do not call `AddEntry` per file: each call publishes a snapshot and the whole index is built again
+every few hundred to few thousand calls, so a long scan costs many full builds. Stream the scan through `ProgressiveIndexIngestion`. The scanner owns the id → path table and hands
 each path to the consumer through a thread-safe map; do not share a plain `List<string>` between the scanner
 (which runs on the ingestion's producer task) and the code that reads results:
 
@@ -197,8 +197,8 @@ IngestionResult result = await ingestion.IngestAsync(
 ```
 
 The default options publish about 7 times for 100,000 files on a fast scan and 14 times for 1 million. An entry
-becomes searchable within `MaxStaleness` (1 s) until one rebuild takes longer than about a third of that; for
-larger indexes the delay grows with the rebuild time. The options and the exact bound:
+becomes searchable within `MaxStaleness` (1 s) until one publish takes longer than about a third of that; for
+larger indexes the delay grows with the publish time. The options and the exact bound:
 [Tuning progressive ingestion](performance.md#tuning-progressive-ingestion).
 
 Starting a new search scope: `updater.Clear()`, a new `paths` map, start a new

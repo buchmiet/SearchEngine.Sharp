@@ -6,9 +6,12 @@ namespace SearchEngine;
 public enum SearchSortMode
 {
     /// <summary>
-    /// Results come in the order of the documents in the snapshot, which is the order in which the snapshot's
-    /// entries were enumerated when it was built. An <see cref="IndexUpdater"/> keeps insertion order only until
-    /// an entry is removed; after that, the order is not specified.
+    /// Results come in the order of the documents in the snapshot. A snapshot built by
+    /// <see cref="Snapshots.IndexSnapshotBuilder"/> keeps the order in which its entries were enumerated. An
+    /// <see cref="IndexUpdater"/> keeps the order of <see cref="IIndexUpdater.RebuildFrom(IDictionary{int, string})"/>
+    /// followed by the order in which entries were added, but only while no entry is removed or replaced; after that,
+    /// until the next <c>RebuildFrom</c> or <see cref="IIndexUpdater.Clear"/>, the order is not specified and can
+    /// change with every later change.
     /// </summary>
     SnapshotOrder = 0,
 

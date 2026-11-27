@@ -6,9 +6,11 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [0.6.0] - 2026-11-24
 
-Requires .NET 11. Code written for 0.5.6 may need changes: two members of `IngestionResult` are renamed, one
-`AddSearchEngine` overload is replaced, and most methods now throw `ArgumentNullException` or `ArgumentException`
-for invalid arguments. Every change to what shipped in 0.5.6 is listed under Changed.
+Requires .NET 11. Code written for 0.5.6 may need changes: the publish durations of the ingestion results and the
+ingestion settings are renamed, one `AddSearchEngine` overload is replaced, a facet filter on an unknown facet no
+longer throws, `SnapshotOrder` is unspecified after an entry is replaced, and most methods now throw
+`ArgumentNullException` or `ArgumentException` for invalid arguments. Every change to what shipped in 0.5.6 is listed
+under Changed.
 
 ### Added
 
@@ -82,9 +84,10 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
       ChannelCapacity = 1_000,
   };
   ```
-- The bigram index used by `WordMatchMethod.Within` is built on the first `Within` query against a snapshot
-  instead of in every build. Builds are faster, and the first `Within` query after each publish pays the cost
-  (0.1 to 0.5 s at 1 million names, depending on the number of distinct tokens). Concurrent first callers share one build.
+- The bigram index used by `WordMatchMethod.Within` is built on the first `Within` query that needs it instead of
+  in every build. Builds are faster, and the first `Within` query after each full build pays the cost (0.1 to 0.5 s
+  at 1 million names, depending on the number of distinct tokens); a change that keeps the base of the
+  `IndexUpdater` (see the `IndexUpdater` entry) keeps its bigram index. Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
   otherwise.
 - `NaturalSortAscending` compares sort texts part by part: text parts with text parts, numbers by value at any
@@ -141,6 +144,23 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   `AddSearchEngine` and `AddKeyedSearchEngine` start with an empty snapshot of the registered preset. Until the
   first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,
   whatever preset the index was configured with.
+- `IndexUpdater` publishes a change without rebuilding the whole index. A snapshot of the updater holds a base built
+  from all entries, a delta built from the entries added or replaced since then, and the list of base documents
+  removed or replaced since then. `AddEntry`, `RemoveEntry`, `RefreshEntry`, `AddOrUpdateEntries` and
+  `RemoveEntries` keep the base of the previous snapshot and build only a new delta; when the delta and the removed
+  base documents together pass about `2 × √(entry count)` (at least 256, at most 4,096), the change builds the whole
+  index instead and the next delta starts empty. `RebuildFrom`, `RebuildFromAsync` and `Clear` always build the whole
+  index. The results are the same as those of a full build, apart from `SnapshotOrder` (next entry). See
+  [Keeping an index current](docs/performance.md#keeping-an-index-current).
+- `SearchSortMode.SnapshotOrder` on an `IndexUpdater` is the order of `RebuildFrom` followed by the order in which
+  entries were added only while no entry is removed or replaced. In 0.5.6 replacing an entry kept its place; now
+  the order after a removal or a replacement is not specified until the next `RebuildFrom` or `Clear`, and it can
+  change with every later change. Use `NaturalSortAscending` when the order matters. Snapshots built by
+  `IndexSnapshotBuilder` keep the order of their entries.
+- A facet filter on a facet that no entry of the snapshot carries reads the facet as 0, like a facet that only some
+  entries carry, instead of throwing `ArgumentException("Unknown facet ...")`. `Range("size", 1, 100)` on an index
+  without `size` matches nothing, and `Range("size", 0, 100)` matches every document. A filter used to throw on an
+  empty index, after `Clear`, or while no entry with that facet had been published yet.
 
 ### Removed
 
@@ -192,6 +212,11 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   was 50% in 0.5.6). Between 50% and 75% such queries filter faster: 18% faster at 65% on 100,000 file names.
   Above 80%, scanning every document is still faster, and those queries keep the scan.
 - Counting the hits of a result set is 22-33% faster on ARM64 (Apple M1) and up to 20% faster on x64.
+- A change made through `IndexUpdater` costs a build of the entries changed since the last full build instead of a
+  full rebuild (see Changed), and keeps the bigram index and the natural sort permutation that earlier queries built
+  on the base. A full build runs only when the changes pass the merge limit, about `2 × √(entry count)` changes.
+- A filter-only query (an empty expression with a facet filter) sorted with `NaturalSortAscending` is sorted like any
+  other result instead of always building the snapshot's sort permutation.
 - Natural sort walks the snapshot's sort permutation for every result above 0.5% of the documents once a query has
   built it, instead of sorting the hits up to 80%. On 100,000 names: 1% of the documents 304 us to 146 us, 10%
   3.4 ms to 0.25 ms, 50% 19.1 ms to 0.65 ms.

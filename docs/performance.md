@@ -89,12 +89,35 @@ What the tables show:
 |---|---|---:|---:|
 | Full build, `Default` | linear in the number of tokens | 0.21 s | 2.0 s |
 | Full build, `FileMask` | linear in the number of names | 0.19 s | 2.1 s |
-| `AddEntry`, `RemoveEntry`, `RefreshEntry` | one full rebuild | 0.13 to 0.17 s | 1.8 to 2.0 s |
-| `AddOrUpdateEntries`, `RemoveEntries` | one full rebuild per call | same | same |
+| `RebuildFrom` | one full build | same | same |
+| `AddEntry`, `RemoveEntry`, `RefreshEntry`, `AddOrUpdateEntries`, `RemoveEntries` | a build of the entries changed since the last full build (the delta), or a full build when the changes pass the merge limit | see below | see below |
 
-Every mutation rebuilds the whole snapshot from the entries the updater keeps. Batch changes: one call with 1,000
-changes costs the same as one call with one change. Queries never wait for a rebuild: they keep reading the previous snapshot until the new one is published. The async
-rebuild methods read their input before taking the updater's lock, so other writers wait only for the build itself.
+### Keeping an index current
+
+A snapshot of an `IndexUpdater` has three parts: a base built from all entries, a delta built from the entries added
+or replaced since then, and the list of base documents removed or replaced since then. A change keeps the base of
+the previous snapshot and builds only a new delta, so its cost grows with the number of changes since the last full
+build, not with the size of the index. When the delta and the removed base documents together pass about
+`2 × √(entry count)`, the change builds the whole index instead (a merge), and the next changes start from an empty
+delta again:
+
+| Entries | Merge limit | Largest delta a change builds | Changes between two merges |
+|---:|---:|---:|---|
+| up to 16,000 | 256 | 256 | 128 to 256 |
+| 10^5 | 632 | 632 | 316 to 632 |
+| 10^6 | 2,000 | 2,000 | 1,000 to 2,000 |
+| 4.2 × 10^6 and more | 4,096 | 4,096 | 2,048 to 4,096 |
+
+Adding an entry counts one (its delta entry), replacing an entry of the base counts two (the new delta entry
+and the removed base document), removing one counts one, and changing an entry that is already in the delta
+again counts nothing. A merge costs a full build (0.2 s at 10^5, 2 s at
+10^6). One call with many changes publishes once: a batch larger than the merge limit is a full build, which is
+what `ProgressiveIndexIngestion` does with its large batches. Queries never wait for a change: they keep reading
+the previous snapshot until the new one is published. The async rebuild methods read their input before taking
+the updater's lock, so other writers wait only for the build itself.
+
+Every query pays a little for the delta and the removed documents: the delta is searched like a second, small
+index, and the removed documents are cleared from the result once.
 
 ### Memory
 
@@ -114,14 +137,14 @@ permutation are extra and exist only after their first use (see below).
 
 ### Work deferred to the first query
 
-Two structures are built on first use, once per snapshot. Concurrent first callers wait for one build; every later
-query on that snapshot reuses it. Each publish creates a new snapshot, so the cost comes back after every
-publish.
+Two structures are built on first use. Concurrent first callers wait for one build; every later query reuses it.
+They belong to the base of a snapshot, so a change that keeps the base keeps them too: their cost comes back only
+after a full build (`RebuildFrom` or a merge). The delta has its own, small ones, built again for every change.
 
 | Structure | Built by | Measured at 10^5 | Measured at 10^6 |
 |---|---|---:|---:|
 | Bigram index | the first `Within` query with a term of two or more characters | 18 ms (109,000 tokens) to 90 ms (78,000 whole names) | 0.12 s (1 million tokens) to 0.46 s (659,000 whole names) |
-| Natural sort permutation | the first `NaturalSortAscending` query whose result holds more than 80% of the documents, or any filter-only query with natural sort | 0.18 s | 2.2 s |
+| Natural sort permutation | the first `NaturalSortAscending` query whose result holds more than 80% of the documents | 0.18 s | 2.2 s |
 
 The permutation was measured on `SyntheticPathFeed` paths (6 to 7 tokens per sort text); the bigram index on both
 corpora. `Exact`, glob and regex queries never build the bigram index.
@@ -139,14 +162,14 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
   shapes `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) use vectorized string search.
 - A regex runs `Regex.IsMatch` on every token of the vocabulary.
 - A facet filter checks only the hits when they are at most 75% of the documents, otherwise it scans the facet
-  columns. A filter-only query always scans the columns.
+  columns. A filter-only query always scans the columns and is then sorted like any other result.
 - `NaturalSortAscending` with one hit costs nothing extra. While the snapshot has no permutation yet, a result of
   up to 80% of the documents builds the sort keys of its hits and sorts them (65 ms for 105,000 hits at 10^6), and
   a larger result builds the permutation and walks it. Once the permutation exists, every result of more than 0.5%
   of the documents walks it, and only smaller results sort their hits.
 
 When you re-run a query after every publish and sort it naturally, each run pays the sort of its hits until
-some query builds the permutation, and a dense result pays that build once per publish.
+some query builds the permutation, and a dense result pays that build once per full build of the index.
 
 ## Index or plain scan
 
@@ -161,14 +184,16 @@ synthetic tree on disk (ext4, warm cache) for `*.pdf` (one process per run, one 
 Both variants read each directory entry once with `FileSystemEnumerable`, as in the recipes of the
 [file search guide](file-search-guide.md#index-or-plain-scan). A kept index answers a query over 1 million names
 in 0.1 to 17 ms (a regex up to 230 ms) instead of a 1.15 s rescan. Building it from disk costs about as much as 5 to 9 rescans, so it pays
-off after about 5 to 9 queries on a tree that does not change in between. Each change to the tree is a full
-rebuild (about 2 s at 10^6), so with one change per query the scan wins.
+off after about 5 to 9 queries on a tree that does not change in between. A change to the kept index builds
+only the entries changed since the last full build, and the whole index (about 2 s at 10^6) is built again once
+every 1,000 to 2,000 changes at 10^6.
 
 ## Tuning progressive ingestion
 
 `ProgressiveIndexIngestion` buffers the entries of a scan and publishes them through
-`IIndexUpdater.AddOrUpdateEntries`. Each publish is a full rebuild, so the number of publishes decides the total
-cost, and the time between publishes decides how stale the index is.
+`IIndexUpdater.AddOrUpdateEntries`. A publish whose batch is larger than the merge limit of the updater (see
+[Keeping an index current](#keeping-an-index-current)) is a full rebuild, and the batches of a fast scan are, so
+the number of publishes decides the total cost, and the time between publishes decides how stale the index is.
 
 ### Policies
 
@@ -177,14 +202,14 @@ settings it uses (the full list with defaults is in [the API reference](api.md#i
 
 | Policy | Publishes when | Use it for |
 |---|---|---|
-| `Adaptive` (default) | the buffer reaches the batch cap; or `max(MinInterval, RebuildMultiplier × last rebuild)` has passed and at least `MinTimerPublishBatch` entries wait; or the oldest entry has waited `MaxStaleness`. A timer drives the time-based publishes | scans of any speed and size |
+| `Adaptive` (default) | the buffer reaches the batch cap; or `max(MinInterval, PublishMultiplier × last publish duration)` has passed and at least `MinTimerPublishBatch` entries wait; or the oldest entry has waited `MaxStaleness`. A timer drives the time-based publishes | scans of any speed and size |
 | `TimeDebounce` | `MinInterval` has passed since the last publish and the buffer is not empty; or the oldest entry has waited `MaxStaleness`. A timer drives both. The number of buffered entries never starts a publish | scans where you want a fixed refresh rate |
 | `FixedBatch` | the buffer reaches `BatchSize`; or an entry arrives while the oldest buffered entry has waited `MaxStaleness`. No timer, so an idle scanner leaves entries unpublished | tests and benchmarks |
-| `PerEntry` | after every entry | a baseline only: total work grows with the square of the entry count |
+| `PerEntry` | after every entry | a baseline only: every publish builds the entries changed since the last full rebuild again, and the index is rebuilt every few hundred to few thousand entries |
 
 100,000 synthetic paths fed as fast as possible (`--ingestion-policy` benchmark, same machine):
 
-| Policy | Publishes | Total rebuild time | Rebuild time relative to one build | Longest observed staleness |
+| Policy | Publishes | Total publish time | Publish time relative to one build | Longest observed staleness |
 |---|---:|---:|---:|---:|
 | `Adaptive` (defaults) | 7 | 0.62 s | 2.3 times | 0.25 s |
 | `Adaptive` with `GrowthAwareBatchCap = false` | 50 | 7.1 s | 25 times | 1.5 s |
@@ -202,9 +227,9 @@ These are the settings of `Adaptive`, except where noted.
   batch under `FixedBatch`. Smaller values show the first results sooner and cost more rebuilds.
 - `MinInterval` (default 100 ms) is the shortest time between timer publishes. `TimeDebounce` has the same
   setting.
-- `RebuildMultiplier` (`k`, default 2) spaces timer publishes by `k` times the last rebuild, so while the timer
-  drives the publishes about `1 / (1 + k)` of the time goes into rebuilds. Raise it to spend less CPU on rebuilds; lower it for fresher
-  results.
+- `PublishMultiplier` (`k`, default 2) spaces timer publishes by `k` times the duration of the last publish, so
+  while the timer drives the publishes about `1 / (1 + k)` of the time goes into publishing. Raise it to spend less
+  CPU on publishing; lower it for fresher results.
 - `MinTimerPublishBatch` (default 200) keeps a slow scan from rebuilding for a handful of new entries. Staleness
   overrides it.
 - `IngestPublishOptions.ChannelCapacity` (default 10,000, any policy) bounds the queue between scanner and
@@ -215,15 +240,15 @@ These are the settings of `Adaptive`, except where noted.
 ### `MaxStaleness` and the worst case
 
 `MaxStaleness` (default 1 s) is the longest an accepted entry should wait before the publish that contains it
-starts. That publish's rebuild comes on top, as does time spent in `Published` and `onPublished` handlers.
+starts. That publish's own duration comes on top, as does time spent in `Published` and `onPublished` handlers.
 `Adaptive` and `TimeDebounce` enforce it with a timer, so it holds while the scanner is idle. `FixedBatch`
 publishes for staleness only when the next entry arrives, never from a timer: an idle scanner leaves a stale
 buffer unpublished until it hands over another entry or ends. `PerEntry` has no `MaxStaleness`, because it
 publishes every entry as soon as it arrives.
 
-Under `Adaptive`, a staleness publish also waits until `k × R` has passed since the previous rebuild ended,
-where `R` is the duration of that rebuild and `k` is `RebuildMultiplier`. An entry that arrives just as a rebuild
-starts therefore waits for that rebuild and the gap after it:
+Under `Adaptive`, a staleness publish also waits until `k × R` has passed since the previous publish ended,
+where `R` is the duration of that publish and `k` is `PublishMultiplier`. An entry that arrives just as a publish
+starts therefore waits for that publish and the gap after it:
 
 ```
 worst staleness = max(MaxStaleness, (1 + k) × R)
