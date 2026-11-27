@@ -21,9 +21,11 @@ public enum WordMatchMethod
     /// <summary>
     /// The whole expression is one .NET regular expression, matched against each indexed token with unanchored
     /// <see cref="System.Text.RegularExpressions.Regex.IsMatch(ReadOnlySpan{char})"/>; a document matches when one
-    /// of its tokens does. Operators and query separators do not apply. The pattern is compiled case-insensitive
-    /// and culture-invariant, non-backtracking when the pattern allows it, with a one-second timeout for each
-    /// token. An invalid pattern, or a timeout on any token, gives an empty result.
+    /// of its tokens does. Operators and query separators do not apply. The characters of the pattern that stand for
+    /// themselves get the casing of indexed tokens (lowercase, and case folding under
+    /// <see cref="UnicodeMatching.CaseFold"/>) from the Unicode tables of the library, and the pattern then runs
+    /// case-sensitively, non-backtracking when the pattern allows it, with a one-second timeout for each token. An
+    /// invalid pattern, or a timeout on any token, gives an empty result.
     /// </summary>
     Regex = 2,
 }

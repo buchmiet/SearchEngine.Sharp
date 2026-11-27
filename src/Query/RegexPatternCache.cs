@@ -2,25 +2,29 @@ using System.Text.RegularExpressions;
 
 namespace SearchEngine.Query;
 
-/// <summary>Small LRU cache of case-insensitive regexes (non-backtracking when supported).</summary>
+/// <summary>Small LRU cache of compiled regexes (non-backtracking when supported). A pattern is compiled with the
+/// casing of indexed tokens (<see cref="RegexCaseFolding"/>) and matched case-sensitively: the tokens are lowercase, or
+/// case folded, already.</summary>
 internal static class RegexPatternCache
 {
     private const int Capacity = 8;
-    private const RegexOptions BaseOptions =
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-    private const RegexOptions NonBacktrackingOptions =
-        BaseOptions | RegexOptions.NonBacktracking;
+    private const RegexOptions BaseOptions = RegexOptions.None;
+    private const RegexOptions NonBacktrackingOptions = BaseOptions | RegexOptions.NonBacktracking;
 
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(1);
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Entries = new(StringComparer.Ordinal);
+    private static readonly Dictionary<CacheKey, LinkedListNode<CacheEntry>> Entries = new();
     private static readonly LinkedList<CacheEntry> Lru = new();
 
-    internal static bool TryGet(string pattern, out Regex regex)
+    /// <param name="pattern">The pattern as the caller wrote it.</param>
+    /// <param name="caseFold">Whether the index applies <see cref="UnicodeMatching.CaseFold"/>.</param>
+    /// <param name="regex">The compiled regex; null when the pattern is invalid.</param>
+    internal static bool TryGet(string pattern, bool caseFold, out Regex regex)
     {
+        var key = new CacheKey(pattern, caseFold);
         lock (Gate)
         {
-            if (Entries.TryGetValue(pattern, out var node))
+            if (Entries.TryGetValue(key, out var node))
             {
                 Lru.Remove(node);
                 Lru.AddFirst(node);
@@ -29,7 +33,7 @@ internal static class RegexPatternCache
             }
         }
 
-        if (!TryCompile(pattern, out var compiled))
+        if (!TryCompile(RegexCaseFolding.Apply(pattern, caseFold), out var compiled))
         {
             regex = null!;
             return false;
@@ -37,21 +41,21 @@ internal static class RegexPatternCache
 
         lock (Gate)
         {
-            if (Entries.TryGetValue(pattern, out var existing))
+            if (Entries.TryGetValue(key, out var existing))
             {
                 regex = existing.Value.Regex;
                 return true;
             }
 
-            var entry = new CacheEntry(pattern, compiled);
+            var entry = new CacheEntry(key, compiled);
             var newNode = Lru.AddFirst(entry);
-            Entries[pattern] = newNode;
+            Entries[key] = newNode;
 
             while (Entries.Count > Capacity)
             {
                 var last = Lru.Last!;
                 Lru.RemoveLast();
-                Entries.Remove(last.Value.Pattern);
+                Entries.Remove(last.Value.Key);
             }
 
             regex = compiled;
@@ -86,5 +90,7 @@ internal static class RegexPatternCache
         }
     }
 
-    private readonly record struct CacheEntry(string Pattern, Regex Regex);
+    private readonly record struct CacheKey(string Pattern, bool CaseFold);
+
+    private readonly record struct CacheEntry(CacheKey Key, Regex Regex);
 }

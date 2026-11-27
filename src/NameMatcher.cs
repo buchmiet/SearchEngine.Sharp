@@ -63,7 +63,8 @@ public sealed class NameMatcher
 
         if (method == WordMatchMethod.Regex)
         {
-            RegexPatternCache.TryGet(expression, out var regex); // invalid pattern: null, never matches
+            // An invalid pattern gives null, which never matches.
+            RegexPatternCache.TryGet(expression, (tokenization.UnicodeMatching & UnicodeMatching.CaseFold) != 0, out var regex);
             return new(tokenization, method, null, regex);
         }
 

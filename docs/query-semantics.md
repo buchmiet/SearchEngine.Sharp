@@ -111,10 +111,10 @@ A combining mark after a separator never composes with it: with `=` as a separat
 `;`), the token or term splits there. Under `Compose` the decomposed `I` + U+0307 is `İ`, which lowercases (and
 case folds) to a plain `i`, so it does not match `i` + U+0307.
 
-Regex patterns are not folded by any option, because folding would change character classes (`[e` + U+0301`]`
-would become `[é]`, `[b-å]` the invalid range `[b-a]`). A pattern runs as written against the folded text, so
-write it in folded form: `ss` for `ß` under `CaseFold`, `e` for `é` under `RemoveDiacritics`, precomposed letters
-under `Compose`. `SortText` is never folded.
+Regex patterns are not normalized by any option, because composing or stripping would change character classes
+(`[e` + U+0301`]` would become `[é]`, `[b-å]` the invalid range `[b-a]`). Write them in normalized form: `e` for
+`é` under `RemoveDiacritics`, precomposed letters under `Compose`. Their casing does follow the index: see
+[Regular expressions](#regular-expressions-wordmatchmethodregex). `SortText` is never folded.
 
 `Compose` and `RemoveDiacritics` need the Unicode normalization data of ICU (or NLS). Globalization-invariant mode
 (`<InvariantGlobalization>true</InvariantGlobalization>` or `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`, common in
@@ -211,9 +211,22 @@ The entire `expression` is one .NET regular expression. The boolean tokenizer is
 not used: separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
 regex syntax, not query operators. `enableOperators` is ignored.
 
-Matching scans every unique indexed token (same loop as glob), using
-`RegexOptions.IgnoreCase | CultureInvariant` with standard unanchored
-`Regex.IsMatch` (the user pattern is compiled as-is, with no implicit `^...$` wrapper).
+Matching scans every unique indexed token (same loop as glob) with standard unanchored
+`Regex.IsMatch` (no implicit `^...$` wrapper). The pattern is case-insensitive the way the
+index is, from the same Unicode 17.0.0 tables, not through `RegexOptions.IgnoreCase`: every
+character of the pattern that stands for itself (a plain character, `\uXXXX`, `\xXX`) gets
+the casing of indexed tokens (case folding under `CaseFold`, then the per-character
+lowercase), and the pattern runs case-sensitively against the tokens, which are lowercase
+(or folded) already. So `İstanbul` finds `istanbul`, and under `CaseFold` `Straße`, `σας` and
+`ﬃ` find `strasse`, `σασ` and `ffi`. Escapes such as `\D` or `\p{Lu}`, group names, inline
+options and comments are not changed. A character that folds to several (`ß` to `ss`)
+becomes the group `(?:ss)`, so `ß+` means `(?:ss)+`. A character class keeps what it lists
+and gains the casing of each character and range (`[A-C]` also matches `a`-`c`); a
+several-character folding in a class becomes an alternative (`[aß]` is `(?:[aß]|ss)`),
+except in a negated class or a class with a subtraction, which keep only the one-character
+foldings (`[^ß]` still matches the `s` of `strasse`). An inline `(?i)` turns on the casing
+of .NET on top of this; it is not needed.
+
 `NonBacktracking` is preferred; when the .NET regex engine throws
 `NotSupportedException` (lookarounds, backreferences), the library falls back to the
 default backtracking engine with the same options and 1 s match timeout. Invalid

@@ -172,7 +172,7 @@ public sealed record IndexedEntry(string SearchText, string SortText, FacetValue
 |---|---|
 | `Exact` | A term matches a whole indexed token. |
 | `Within` | A term matches a substring of an indexed token. |
-| `Regex` | The whole expression is one .NET regular expression, matched against each indexed token with `Regex.IsMatch` (unanchored, case-insensitive). Operators and query separators do not apply. An invalid pattern or a match timeout returns no results. |
+| `Regex` | The whole expression is one .NET regular expression, matched against each indexed token with `Regex.IsMatch` (unanchored, case-insensitive through the Unicode tables of the library, see [Regular expressions](query-semantics.md#regular-expressions-wordmatchmethodregex)). Operators and query separators do not apply. An invalid pattern or a match timeout returns no results. |
 
 With `Exact` and `Within`, a term that contains `*` or `?` is a glob that must match a whole token. `?` matches one
 code point, or one grapheme cluster with `UnicodeMatching.GraphemeBoundaries`. Details:

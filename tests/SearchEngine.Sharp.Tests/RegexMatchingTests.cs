@@ -35,7 +35,7 @@ public class RegexMatchingTests
     }
 
     [Test]
-    public async Task Regex_IgnoreCase_MatchesNormalizedTokens()
+    public async Task Regex_UppercasePattern_MatchesLowercaseTokens()
     {
         var (engine, updater, _) = TestIndex.Create();
         updater.RebuildFrom(new Dictionary<int, string> { [1] = "Report-Final.PDF" });

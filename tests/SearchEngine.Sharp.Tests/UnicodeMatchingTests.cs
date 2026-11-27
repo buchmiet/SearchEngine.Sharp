@@ -297,11 +297,11 @@ public class UnicodeMatchingTests
         await Assert.That(TextFolder.Fold("e\u0301\uFFFFe\u0301\uFDD0e\u0301", options)).IsEqualTo(expected);
     }
 
-    // A regex pattern runs as written against the folded text: folding the pattern would change its character
-    // classes ([e<U+0301>] composed to [é], [b-å] stripped to the invalid range [b-a]).
+    // A regex pattern is not normalized: composing or stripping it would change its character classes ([e<U+0301>]
+    // composed to [é], [b-å] stripped to the invalid range [b-a]). Only its casing follows the index.
     [Test]
     [SkipUnlessNormalization]
-    public async Task RegexPattern_IsNotFolded_Compose()
+    public async Task RegexPattern_IsNotNormalized_Compose()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold);
         string[] names = ["e.txt", "Re\u0301sume\u0301.pdf", "Stra\u00DFe.pdf"];
@@ -311,12 +311,12 @@ public class UnicodeMatchingTests
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^r\u00E9sum\u00E9", [2]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^re\u0301sume\u0301", []);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, @"^strasse\.pdf$", [3]);
-        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra\u00DFe" + @"\.pdf$", []);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra\u00DFe" + @"\.pdf$", [3]); // casing: ß folds to ss
     }
 
     [Test]
     [SkipUnlessNormalization]
-    public async Task RegexPattern_IsNotFolded_RemoveDiacritics()
+    public async Task RegexPattern_IsNotNormalized_RemoveDiacritics()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics);
         string[] names = ["report.pdf", "\u00E9cole.txt", "\u00C5l.txt", "bar"];
@@ -325,6 +325,39 @@ public class UnicodeMatchingTests
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[b-\u00E5]", [1, 2, 4]);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[\u00E0-\u00FF]", []);
         await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^ecole", [2]);
+    }
+
+    // The letters of a regex pattern get the casing of indexed tokens from the same Unicode tables, and the pattern
+    // runs case-sensitively: the casing of .NET (RegexOptions.IgnoreCase) would keep U+0130 apart from the i the index
+    // holds, and would not fold the pattern under CaseFold.
+    [Test]
+    public async Task RegexPattern_HasTheCasingOfTheIndex_Default()
+    {
+        var tokenization = SearchTokenization.Default;
+        string[] names = ["\u0130stanbul.txt", "Report.pdf"];
+        var engine = Index(tokenization, names);
+
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^\u0130STANBUL$", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, @"^\u0130s", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[Q-S]E", [2]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^[^R]E", []);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, @"^\p{Lu}", []);
+    }
+
+    [Test]
+    public async Task RegexPattern_HasTheCasingOfTheIndex_CaseFold()
+    {
+        var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);
+        string[] names = ["Stra\u00DFe.pdf", "\u03A3\u0391\u03A3.txt", "\uFB03x.txt", "\u017Fun.txt"];
+        var engine = Index(tokenization, names);
+
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^STRA\u00DFE" + @"\.pdf$", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra\u1E9Ee", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra[x\u00DF]e", [1]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^stra\u00DF{2}", []);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^\u03C3\u03B1\u03C2" + @"\.", [2]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^\uFB03x", [3]);
+        await AssertFinds(engine, tokenization, names, WordMatchMethod.Regex, "^\u017F", [1, 4]);
     }
 
     // Operators are recognized in the query as typed; a word that only folds to and/or/not (nöt, ånd, őr, ør) is

@@ -269,7 +269,7 @@ internal static class TextFolder
     // i + U+0307 would not match the i that per-character lowercase gives. Per-character lowercase alone misses the
     // lowercase variants and, working on UTF-16 code units, every supplementary-plane letter. A text where folding
     // differs from per-character lowercase nowhere is returned unchanged.
-    private static string ApplyCaseFolding(string text)
+    internal static string ApplyCaseFolding(string text)
     {
         StringBuilder? sb = null;
         Span<int> folded = stackalloc int[3];

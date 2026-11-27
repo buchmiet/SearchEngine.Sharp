@@ -36,6 +36,11 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   `İstanbul` matches `istanbul` without any option. Characters the platform cased differently from Unicode 17
   (for example letters added in recent Unicode versions on an older ICU) now lowercase the same everywhere;
   rebuild indexes that were built with 0.5.6 if they hold such names.
+- `WordMatchMethod.Regex` takes its case-insensitivity from the same Unicode 17.0.0 tables instead of
+  `RegexOptions.IgnoreCase`: the characters of the pattern get the casing of indexed tokens and the pattern runs
+  case-sensitively. `İstanbul` now finds `istanbul`, and under `CaseFold` a pattern no longer has to be written
+  folded: `Straße`, `σας` and `ﬃ` find `strasse`, `σασ` and `ffi`. See
+  [Regular expressions](docs/query-semantics.md#regular-expressions-wordmatchmethodregex).
 - `IngestionResult.TotalRebuildCpu` is renamed `TotalRebuildDuration` and `IngestionResult.WorstCaseStaleness` is
   renamed `MaxObservedStaleness`. The first never measured CPU time: it is the wall-clock time of the rebuilds,
   the sum of `IngestionPublishEvent.RebuildDuration`. The second is the longest staleness seen during the scan, not

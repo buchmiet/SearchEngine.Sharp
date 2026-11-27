@@ -11,7 +11,7 @@ internal static class RegexMatcher
     {
         var result = qc.RentEmptyBitSet();
 
-        if (pattern.Length == 0 || !RegexPatternCache.TryGet(pattern, out Regex regex))
+        if (pattern.Length == 0 || !RegexPatternCache.TryGet(pattern, (snapshot.Tokenization.UnicodeMatching & UnicodeMatching.CaseFold) != 0, out Regex regex))
             return result;
 
         try
