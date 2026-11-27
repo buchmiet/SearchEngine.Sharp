@@ -146,22 +146,20 @@ runs on the calling thread.
 ## Building and testing
 
 ```bash
-dotnet build SearchEngine.Sharp.sln -c Release
+dotnet build SearchEngine.Sharp.slnx -c Release
 dotnet test --project tests/SearchEngine.Sharp.Tests -c Release
-dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 100000 --scan-delay-ms 0
 ```
 
 The tests use [TUnit](https://tunit.dev) on Microsoft.Testing.Platform, which `global.json` selects for `dotnet test`.
 Tests that need Unicode normalization are skipped in globalization-invariant mode; run the suite once more with
 `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` to cover that mode.
 
-The demo shows the match count growing while a synthetic scan runs. Benchmarks: [benchmarks/README.md](benchmarks/README.md).
+Benchmarks: [benchmarks/README.md](benchmarks/README.md).
 
 ```
-src/SearchEngine.Sharp/          library
+src/                             library
 tests/SearchEngine.Sharp.Tests/  TUnit tests
 benchmarks/                      benchmark and profiling projects
-demos/ProgressiveIngestion.Demo/ progressive ingestion demo
 docs/                            documentation
 ```
 

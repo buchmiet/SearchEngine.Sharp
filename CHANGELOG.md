@@ -140,6 +140,10 @@ for invalid arguments. Every change to what shipped in 0.5.6 is listed under Cha
   first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,
   whatever preset the index was configured with.
 
+### Removed
+
+- The console demo `demos/ProgressiveIngestion.Demo`. It was never part of the package; `SyntheticPathFeed` stays.
+
 ### Fixed
 
 - `Find` and `CountMatches` with `enableOperators: true` threw `ArgumentOutOfRangeException` for expressions

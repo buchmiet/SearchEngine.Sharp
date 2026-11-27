@@ -59,7 +59,7 @@ A BenchmarkDotNet suite that runs in process, with the memory diagnoser. The arg
 ### Selectivity benchmarks
 
 The query pipeline picks a facet strategy and a natural sort strategy from the share of documents the query matches,
-using the fractions in `src/SearchEngine.Sharp/Query/SelectivityThresholds.cs`. These benchmarks check those
+using the fractions in `src/Query/SelectivityThresholds.cs`. These benchmarks check those
 fractions. All of them run at the hit densities 0.1%, 1%, 10%, 25%, 50%, 65%, 80%, 90% and 100% of a 100,000-name
 corpus (`SelectivityCorpus`: the `FileSearchDataFactory` names, one search word per density, a facet filter that
 keeps half of the documents). The strategy benchmarks call the internal strategy methods directly, so each
