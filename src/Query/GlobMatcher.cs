@@ -123,6 +123,7 @@ internal static class GlobMatcher
         private readonly int _headStart, _headLength, _tailStart, _tailLength;
         private readonly Kind _kind;
         private readonly bool _graphemeBoundaries;
+        private readonly bool _checkBoundaries;
 
         private enum Kind { General, Prefix, Suffix, Contains, PrefixSuffix }
 
@@ -174,6 +175,13 @@ internal static class GlobMatcher
                 (_headStart, _headLength) = (0, first);
                 (_tailStart, _tailLength) = (first + 1, pattern.Length - first - 1);
             }
+
+            // Where a literal meets a *, the word can be split inside a surrogate pair only if the literal ends with a
+            // high surrogate there (the head) or starts with a low one (the tail). Any other literal always meets the
+            // word on a code point boundary, so for code points the check is settled here, once per pattern.
+            _checkBoundaries = graphemeBoundaries
+                || (_headLength > 0 && char.IsHighSurrogate(pattern[_headStart + _headLength - 1]))
+                || (_tailLength > 0 && char.IsLowSurrogate(pattern[_tailStart]));
         }
 
         /// <summary>False when the pattern needs the general matcher (<c>?</c>, several inner <c>*</c>).</summary>
@@ -183,11 +191,12 @@ internal static class GlobMatcher
         {
             // First-character check before the vectorized compare: most words differ there.
             Kind.Prefix => word.Length >= _headLength && word[0] == _pattern[_headStart] && word.StartsWith(Head)
-                && AreBoundaries(word, _headLength, _headLength),
-            Kind.Suffix => word.EndsWith(Tail) && AreBoundaries(word, word.Length - _tailLength, word.Length - _tailLength),
+                && (!_checkBoundaries || AreBoundaries(word, _headLength, _headLength)),
+            Kind.Suffix => word.EndsWith(Tail)
+                && (!_checkBoundaries || AreBoundaries(word, word.Length - _tailLength, word.Length - _tailLength)),
             Kind.Contains => QueryMatcher.ContainsWithin(word, Head, _graphemeBoundaries),
             Kind.PrefixSuffix => word.Length >= _headLength + _tailLength && word.StartsWith(Head) && word.EndsWith(Tail)
-                && AreBoundaries(word, _headLength, word.Length - _tailLength),
+                && (!_checkBoundaries || AreBoundaries(word, _headLength, word.Length - _tailLength)),
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
