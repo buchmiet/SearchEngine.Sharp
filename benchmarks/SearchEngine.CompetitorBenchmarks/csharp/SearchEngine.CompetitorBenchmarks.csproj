@@ -1,22 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>SearchEngine.CompetitorBenchmarks</RootNamespace>
     <SharpSourceRoot Condition="'$(SharpSourceRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..</SharpSourceRoot>
+    <!-- The library is src/SearchEngine.Sharp.csproj from 0.6.1 on, src/SearchEngine.Sharp/SearchEngine.Sharp.csproj before. -->
+    <SharpProjectDir>$(SharpSourceRoot)\src\SearchEngine.Sharp</SharpProjectDir>
+    <SharpProjectDir Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp.csproj')">$(SharpSourceRoot)\src</SharpProjectDir>
   </PropertyGroup>
 
-  <PropertyGroup Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp\Filters\FacetFilter.cs')">
+  <PropertyGroup Condition="Exists('$(SharpProjectDir)\Filters\FacetFilter.cs')">
     <DefineConstants>$(DefineConstants);SHARP_HAS_FACET</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp\SearchTokenization.cs')">
+  <PropertyGroup Condition="Exists('$(SharpProjectDir)\SearchTokenization.cs')">
     <DefineConstants>$(DefineConstants);SHARP_HAS_FILEMASK</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="$(SharpSourceRoot)\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+    <ProjectReference Include="$(SharpProjectDir)\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 </Project>

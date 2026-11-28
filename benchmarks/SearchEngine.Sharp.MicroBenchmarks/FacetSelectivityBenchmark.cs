@@ -1,63 +1,65 @@
 using BenchmarkDotNet.Attributes;
-using SearchEngine;
 using SearchEngine.Filters;
 using SearchEngine.Index;
 using SearchEngine.Pooling;
-using SearchEngine.Sharp.Benchmarks;
+using SearchEngine.Query;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.MicroBenchmarks;
 
+/// <summary>
+/// Each facet filter strategy of <see cref="FacetFilterEvaluator"/> on its own, by density of the text hits. Where
+/// the two cross is what <see cref="SelectivityThresholds.FacetOnHitsMaxFraction"/> should be.
+/// </summary>
+/// <remarks>
+/// Both methods start from a pooled copy of the same random hit set, as the query pipeline does, and apply the
+/// filter of <see cref="SelectivityCorpus"/>, which passes half of the documents.
+/// </remarks>
 [MemoryDiagnoser]
-[WarmupCount(1)]
-[IterationCount(3)]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class FacetSelectivityBenchmark
 {
     private IndexSnapshot _snapshot = null!;
     private FacetFilter _filter = null!;
     private FastBitSet _textHits = null!;
-    private int[] _ordinalBuffer = null!;
+    private int _hitCount;
 
-    [Params(0, 1, 10, 100, 1_000, 10_000, 50_000, 100_000)]
-    public int HitCount { get; set; }
+    public static IEnumerable<double> Densities => SelectivityCorpus.Densities;
+
+    [ParamsSource(nameof(Densities))]
+    public double Density { get; set; }
+
+    [Params(100_000, 1_000_000)]
+    public int DocumentCount { get; set; }
 
     [GlobalSetup]
     public void Setup()
     {
-        const int documentCount = 100_000;
-        var data = FileSearchDataFactory.Create(documentCount, seed: 2026);
+        var corpus = SelectivityCorpus.Create(DocumentCount);
         var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(FileSearchDataFactory.ToIndexedEntries(data.Documents));
+        new IndexUpdater(provider).RebuildFrom(corpus.Entries);
         _snapshot = provider.Current;
-        _filter = FacetFilter.Range("size", 1_024, 1_048_576);
-        _textHits = SelectivityProbe.CreateSparseBitSet(documentCount, HitCount);
-        _ordinalBuffer = new int[documentCount];
+        _filter = corpus.Filter;
+        _hitCount = HitSets.CountFor(Density, DocumentCount);
+        _textHits = HitSets.Random(DocumentCount, _hitCount, seed: 1);
     }
 
-    [Benchmark(Baseline = true, Description = "Current — facet scan all N ordinals")]
-    public int FacetFullScan()
+    [Benchmark(Baseline = true, Description = "Full scan: test every document, then AND")]
+    public int FullScan()
     {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
+        using var qc = new QueryContext(_snapshot.OrdinalCount);
         var results = qc.RentCopyOf(_textHits);
-        SelectivityProbe.FacetApplyFullScan(results, _filter, _snapshot, qc);
+        FacetFilterEvaluator.ApplyFullScan(results, _filter, _snapshot, qc);
         return results.GetTrueCount();
     }
 
-    [Benchmark(Description = "Facet on K — intersect second bitset (conservative prototype)")]
-    public int FacetOnHitsIntersect()
+    [Benchmark(Description = "On hits: test the text hits only")]
+    public int OnHits()
     {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
+        using var qc = new QueryContext(_snapshot.OrdinalCount);
         var results = qc.RentCopyOf(_textHits);
-        SelectivityProbe.FacetApplyOnHitsOnly(results, _filter, _snapshot, qc, _ordinalBuffer);
-        return results.GetTrueCount();
-    }
-
-    [Benchmark(Description = "Facet on K — clear + re-add matches (tighter prototype)")]
-    public int FacetOnHitsInPlace()
-    {
-        using var qc = new QueryContext(_snapshot.DocumentCount);
-        var results = qc.RentCopyOf(_textHits);
-        SelectivityProbe.FacetApplyOnHitsInPlace(results, _filter, _snapshot, _ordinalBuffer);
+        FacetFilterEvaluator.ApplyOnHitsInPlace(results, _filter, _snapshot, _hitCount);
         return results.GetTrueCount();
     }
 }

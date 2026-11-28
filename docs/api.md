@@ -1,17 +1,31 @@
 # Public API reference
 
-Complete public surface of `SearchEngine.Sharp`, grouped by namespace. Behavioral
-details are specified in [query-semantics.md](query-semantics.md); a task-oriented
-walkthrough is in [file-search-guide.md](file-search-guide.md).
+The public types of `SearchEngine.Sharp`, grouped by namespace. Matching rules are in
+[query-semantics.md](query-semantics.md), costs and tuning in [performance.md](performance.md), and a worked file
+search in [file-search-guide.md](file-search-guide.md).
+
+## Argument checks
+
+Every public constructor, method and extension method throws `ArgumentNullException`, naming the parameter, when a
+reference argument is `null` and the parameter is not declared nullable (`?`). The check runs at the call: a method
+that returns a `Task` throws before it returns the task. A nullable parameter has a documented meaning for `null`,
+for example `tokenization` (the default preset), `progress` (no reports) or `filter` (no filter).
+
+A `null` element inside a collection argument, such as a `null` text in the entries of `RebuildFrom`, throws
+`ArgumentException` naming the collection. In an asynchronous stream it is found while the stream is read, so the
+returned task faults with it.
 
 ## Namespace `SearchEngine`
 
-### `ISearchEngine`
+### `ISearchEngine`, `SearchEngineSharp`
 
-Query execution against the current snapshot. Stateless; thread-safe for concurrent
-queries. Default implementation: `SearchEngineSharp(IIndexSnapshotProvider)`.
+Runs queries against the current snapshot of an `IIndexSnapshotProvider`. The engine keeps no state of its own and
+is safe to call from many threads at once. Each call reads the snapshot once, so it sees either the index before a
+publish or the one after it, never a mix.
 
 ```csharp
+SearchEngineSharp(IIndexSnapshotProvider snapshotProvider);
+
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false);
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode);
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode, FacetFilter? filter);
@@ -21,73 +35,131 @@ int DocumentCount { get; }
 int UniqueWordCount { get; }
 ```
 
-- `Find` returns the caller-supplied ids of matching entries, ordered per `sortMode`.
-- The `filter` overloads always run the full evaluation pipeline. When there are no
-  facet constraints, call the overloads without `filter` — single-term exact queries
-  then use a dictionary fast path.
-- An empty `expression` returns nothing unless a non-empty `filter` is present, in
-  which case all documents passing the filter are returned.
-- A `filter` naming a facet that no indexed document carries throws `ArgumentException`.
+- `Find` returns the ids the caller indexed, in `sortMode` order (`SnapshotOrder` for the overloads without it).
+  `CountMatches` returns the same number without building the list.
+- An empty or whitespace `expression` matches nothing, unless a non-empty `filter` is given; then every document
+  that passes the filter matches. A `null` expression throws `ArgumentNullException`.
+- `enableOperators` turns on `AND`, `OR`, `NOT` and parentheses. It is ignored for `WordMatchMethod.Regex`.
+- A facet that no document carries reads as 0 and does not throw; see
+  [Facet filters](query-semantics.md#facet-filters).
+- `null` and an empty filter (`FacetFilter.None`) give the same results at the same cost.
+
+### `NameMatcher`
+
+Evaluates a query against one text (usually a file name) without an index. `IsMatch` gives the same answer as
+`Find` on an index that holds only that text, built with the same `SearchTokenization`: the same operators, globs,
+`Exact`/`Within`/`Regex` semantics and Unicode options. Facet criteria are not part of it; check them against the
+metadata you already have.
+
+```csharp
+static NameMatcher Create(string expression, WordMatchMethod method, bool enableOperators = false, SearchTokenization? tokenization = null);
+bool IsMatch(ReadOnlySpan<char> text);
+```
+
+- `Create` parses the expression once; `tokenization` defaults to `SearchTokenization.Default`. Throws
+  `ArgumentNullException` when `expression` is null. An empty expression or an invalid regex gives a matcher that
+  matches nothing.
+- Instances are immutable and safe to share between threads.
 
 ### `SearchTokenization`
 
-Configurable index-side and query-side separator sets. Stored in each `IndexSnapshot`;
-queries always use `snapshot.Tokenization.QuerySeparators`.
+The separator characters used to split indexed text and queries, plus the Unicode options. Every snapshot stores
+the preset it was built with, and queries always use the preset of the snapshot they run on.
 
 ```csharp
-static SearchTokenization Default { get; }   // token-level (legacy behavior)
-static SearchTokenization FileMask { get; }  // whole-name index; whitespace query split
+static SearchTokenization Default { get; }    // token-level search
+static SearchTokenization FileMask { get; }   // the whole SearchText is one token; queries split on space, CR and LF
 static SearchTokenization Create(string indexSeparators, string querySeparators);
-
+SearchTokenization WithUnicodeMatching(UnicodeMatching options);
 string IndexSeparators { get; }
 string QuerySeparators { get; }
+UnicodeMatching UnicodeMatching { get; }      // None for Default, FileMask and Create
 ```
 
-See [query-semantics.md](query-semantics.md#tokenization-presets) for preset tables and
-FileMask behavioral notes.
+- `Create` takes an empty string for an empty separator set (the whole text or query is one token).
+- `WithUnicodeMatching` returns a preset with the same separators and the given options. It throws
+  `PlatformNotSupportedException` for `Compose` or `RemoveDiacritics` when the process runs in
+  globalization-invariant mode.
 
-### `IIndexUpdater`
+Separator tables and the FileMask rules: [Tokenization presets](query-semantics.md#tokenization-presets).
 
-Index mutations. All operations are serialized and publish a new immutable snapshot on
-completion. Each mutation rebuilds the full index; prefer batch methods or
-`ProgressiveIndexIngestion` over per-entry calls. Default implementation:
-`IndexUpdater(IndexSnapshotProvider, SearchTokenization? tokenization = null)`.
+### `UnicodeMatching` (flags)
+
+```csharp
+None = 0, Compose = 1, CaseFold = 2, RemoveDiacritics = 4, GraphemeBoundaries = 8
+```
+
+`Compose` is NFC composition, `CaseFold` is Unicode case folding, `RemoveDiacritics` removes Latin, Greek and
+Cyrillic accents (and implies `Compose`), and `GraphemeBoundaries` keeps `Within` and glob matches on
+grapheme-cluster boundaries. Exact effects and caveats: [Unicode matching](query-semantics.md#unicode-matching).
+
+### `IIndexUpdater`, `IndexUpdater`
+
+Changes the index. Calls are serialized, and every call that changes an entry publishes a new snapshot through the
+provider.
+A call that throws leaves the stored entries and the published snapshot unchanged. A change keeps the bulk of the
+previous snapshot and builds again only the entries changed since the whole index was last built; once those
+changes pass about `2 × √(entry count)` (at least 256, at most 4,096), the change builds the whole index again.
+The cost of each call is in [performance.md](performance.md#keeping-an-index-current). Prefer the batch methods, or
+`ProgressiveIndexIngestion` during a scan, over one call per entry when many entries change at once.
 
 ```csharp
 IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null);
 
-// Full rebuild
+// Replace everything
 void RebuildFrom(IDictionary<int, string> entries);
 void RebuildFrom(IDictionary<int, IndexedEntry> entries);
 Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 
-// Single entry (one full rebuild per call)
+// One entry per call (one publish each)
 void AddEntry(int id, string text);
 void AddEntry(int id, IndexedEntry entry);
 bool RemoveEntry(int id);
 bool RefreshEntry(int id, string text);
 bool RefreshEntry(int id, IndexedEntry entry);
 
-// Batch (one rebuild per call)
+// Many entries per call (one publish each)
 void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries);
 void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, IndexedEntry>> entries);
 int RemoveEntries(IEnumerable<int> ids);
 
-// Utility
 void Clear();
 int EntryCount { get; }
 bool ContainsEntry(int id);
 ```
 
-### `IIndexSnapshotProvider` / `IndexSnapshotProvider`
+- `tokenization` defaults to `SearchTokenization.Default` and applies to every snapshot this updater publishes,
+  including the empty ones it publishes when it is created and after `Clear`.
+- The constructor replaces the provider's snapshot with an empty one; the updater never reads what the provider
+  held before.
+- A `string` entry is indexed as `new IndexedEntry(text, text)`.
+- `AddEntry`, `RefreshEntry` and `AddOrUpdateEntries` add the entry or replace the one with the same id. When the
+  input of `AddOrUpdateEntries` or `RebuildFromAsync` holds an id more than once, the last value wins.
+  `RefreshEntry` returns whether the id existed before (it adds the entry either way).
+- `RemoveEntry` returns `false`, and `RemoveEntries` returns 0, when no id was present; neither publishes then.
+  `RemoveEntries` returns the number of ids removed.
+- The batch methods and the async methods read the whole input before taking the updater's lock, so an input
+  that throws while it is read changes nothing, and code inside it may call the updater. The async methods do not
+  resume on the caller's synchronization context: when the stream completes a step asynchronously, the reading
+  and the rebuild continue on a thread-pool thread, and a UI thread is not blocked by the rebuild.
+- The updater keeps its own copy of every entry, and that copy is the source of every snapshot it builds.
+- `SnapshotOrder` follows `RebuildFrom` and then the order in which entries were added, until an entry is removed
+  or replaced; after that the order is not specified until the next `RebuildFrom` or `Clear`.
 
-Holds the current immutable snapshot. Reads are lock-free (`Volatile.Read`); the
-updater swaps the reference atomically.
+### `IIndexSnapshotProvider`, `IndexSnapshotProvider`
+
+Holds the current snapshot. Reading `Current` takes no lock; the updater replaces the reference atomically.
 
 ```csharp
-IndexSnapshot Current { get; }
+IndexSnapshotProvider();
+IndexSnapshot Current { get; }   // never null
 ```
+
+- A new provider holds `IndexSnapshot.Empty`. Creating an `IndexUpdater` for it publishes an empty snapshot with
+  the updater's preset, so `Current.Tokenization` is the index's preset before the first change.
+- The providers registered by `ServiceCollectionExtensions` start with a snapshot of the registered preset: the
+  empty one, or the one built from the initial entries.
 
 ### `IndexedEntry`
 
@@ -95,45 +167,52 @@ IndexSnapshot Current { get; }
 public sealed record IndexedEntry(string SearchText, string SortText, FacetValues? Facets = null);
 ```
 
-- `SearchText` — tokenized and matched.
-- `SortText` — input for the natural sort key (`SearchSortMode.NaturalSortAscending`).
-- `Facets` — optional numeric columns for `FacetFilter` (see below).
+- `SearchText` is tokenized and matched.
+- `SortText` is the input of `SearchSortMode.NaturalSortAscending`.
+- `Facets` are the optional numeric values that a `FacetFilter` tests.
 
 ### `WordMatchMethod`
 
 | Value | Meaning |
 |---|---|
-| `Exact` | Whole-token equality |
-| `Within` | Substring inside an indexed token |
-| `Regex` | Entire expression is one .NET regex matched against indexed tokens via unanchored `Regex.IsMatch`; boolean parsing is bypassed. Prefer `NonBacktracking`; lookarounds/backreferences fall back to backtracking. Invalid patterns return empty. |
+| `Exact` | A term matches a whole indexed token. |
+| `Within` | A term matches a substring of an indexed token. |
+| `Regex` | The whole expression is one .NET regular expression, matched against each indexed token with `Regex.IsMatch` (unanchored, case-insensitive through the Unicode tables of the library, see [Regular expressions](query-semantics.md#regular-expressions-wordmatchmethodregex)). Operators and query separators do not apply. An invalid pattern or a match timeout returns no results. |
 
-Terms containing `*` or `?` are matched as anchored globs regardless of the method
-(except `Regex`, where they are regex syntax).
+With `Exact` and `Within`, a term that contains `*` or `?` is a glob that must match a whole token. `?` matches one
+code point, or one grapheme cluster with `UnicodeMatching.GraphemeBoundaries`. Details:
+[Term matching](query-semantics.md#term-matching) and
+[Regular expressions](query-semantics.md#regular-expressions-wordmatchmethodregex).
 
 ### `SearchSortMode`
 
-| Value | Meaning |
+| Value | Order |
 |---|---|
-| `SnapshotOrder` | Document order within the current snapshot |
-| `NaturalSortAscending` | Natural sort of `SortText` (digit runs compare numerically) |
+| `SnapshotOrder` | Order of the documents in the snapshot (for an `IndexUpdater`, see its notes) |
+| `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`), see [Result ordering](query-semantics.md#result-ordering) |
 
 ## Namespace `SearchEngine.Filters`
 
 ### `FacetValues`
 
-Immutable per-document facet bag; values are `long`. Facet names compare ordinally
-(case-sensitive).
+An immutable set of named `long` values for one document. Names compare ordinally (case-sensitive).
 
 ```csharp
 static FacetValues Empty { get; }
-static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values); // null when empty
 static FacetValues Create(string facet, long value);
+static FacetValues Create(params ReadOnlySpan<KeyValuePair<string, long>> values);
+static FacetValues? FromDictionary(IReadOnlyDictionary<string, long>? values);
 ```
+
+- `Create(span)` returns `Empty` for no values. `FromDictionary` returns `null` for a null or empty dictionary and
+  reads the dictionary once, so it is safe with a dictionary that other threads change.
+- A null or duplicate name throws `ArgumentException`; `Create(string, long)` throws `ArgumentNullException` for a
+  null name.
 
 ### `FacetFilter`
 
-AND-combined predicates applied after the text expression (including `NOT`).
-Documents lacking a facet have `0` in its column.
+Facet predicates combined with AND. The filter applies after the text expression, including `NOT`. A document
+without a value for a facet has `0` in that facet.
 
 ```csharp
 static FacetFilter None { get; }
@@ -143,18 +222,21 @@ static FacetFilter Mask(string facet, long mustHave, long mustNot = 0);
 static FacetFilter Combine(params FacetFilter[] filters);
 ```
 
-- `Range` — inclusive on both ends; equality is `Range(f, x, x)`.
-- `Mask` — `(value & mustHave) == mustHave && (value & mustNot) == 0`.
-- `Combine` — logical AND of all contained predicates. There is no OR across predicates.
+- `Range` includes both ends; equality is `Range(f, x, x)`.
+- `Mask` matches when `(value & mustHave) == mustHave && (value & mustNot) == 0`.
+- `Combine` joins all predicates of its arguments with AND. There is no OR between predicates.
 
 ## Namespace `SearchEngine.Snapshots`
 
 ### `IndexSnapshot`
 
-Immutable index snapshot; safe for unlimited concurrent readers. `IndexSnapshot.Empty`
-is the empty singleton.
+An index whose content never changes. Any number of threads may query one snapshot at once. The lookup structures
+for `Within` and for `NaturalSortAscending` are built on the first query that needs them, and concurrent first
+callers wait for that build. They belong to the snapshot's base, so the snapshots that `IndexUpdater` publishes
+after small changes share them; only the small delta part is built again after each change.
 
 ```csharp
+static readonly IndexSnapshot Empty;    // empty snapshot with SearchTokenization.Default
 int DocumentCount { get; }
 int UniqueWordCount { get; }
 SearchTokenization Tokenization { get; }
@@ -162,8 +244,8 @@ SearchTokenization Tokenization { get; }
 
 ### `IndexSnapshotBuilder`
 
-Builds a snapshot directly, without an updater — for pre-built initial snapshots
-(see the DI overloads below).
+Builds a snapshot without an updater. To query it, return it from your own `IIndexSnapshotProvider` and pass that
+provider to `SearchEngineSharp`.
 
 ```csharp
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries);
@@ -176,14 +258,19 @@ static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
 static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization, IProgress<float>? progress);
 ```
 
+- The entries are enumerated once, in the order that becomes `SnapshotOrder`.
+- An id that occurs twice throws `ArgumentException` naming the id. Dictionaries are not checked, because their
+  keys are unique.
+- `progress` receives percentages on the building thread, once each time the value reaches a new whole percent
+  (at most 102 reports per build). The last report is 100, made when the snapshot is complete. `RebuildFromAsync`
+  reports its rebuild the same way.
+
 ## Namespace `SearchEngine.Ingestion`
 
 ### `ProgressiveIndexIngestion`
 
-Buffers a streaming scan and publishes batches through `IIndexUpdater` so the index
-stays queryable during long scans. One `IngestAsync` call per instance at a time;
-concurrent queries are safe throughout. `onPublished` and the `Published` event run
-on the publisher task, not the caller's synchronization context.
+Indexes a streaming scan in batches so the index can be queried while the scan runs. Publishing policies and
+their tuning: [performance.md](performance.md#tuning-progressive-ingestion).
 
 ```csharp
 ProgressiveIndexIngestion(IIndexUpdater updater);
@@ -205,53 +292,123 @@ Task<IngestionResult> IngestAsync(
     CancellationToken cancellationToken = default);
 ```
 
-Cancellation: the scan stops accepting entries; buffered entries are flushed when
-`IngestPublishOptions.FlushOnCancellation` is `true` (default), otherwise discarded.
-Entries already published stay in the index.
-
-### `IngestPublishPolicy`
-
-| Value | Publishes |
-|---|---|
-| `PerEntry` | After every entry (baseline only; O(N²) total rebuild cost) |
-| `FixedBatch` | When the buffer reaches `FixedBatchSize` |
-| `TimeDebounce` | When the buffer is non-empty and `MinInterval` elapsed |
-| `Adaptive` (default) | When elapsed ≥ `max(MinInterval, AdaptiveMultiplier × lastRebuildDuration)`, or the buffer reaches `FixedBatchSize` |
+- The entries are added to what the updater already holds; an entry replaces the one with the same id.
+- One `IngestAsync` call per instance at a time; the task of a second concurrent call faults with
+  `InvalidOperationException`.
+- Options and policies check their settings when they are set, so `IngestAsync` never receives invalid ones.
+- The scanner writes into a bounded channel and waits when it is full. Queries on the same provider are safe
+  throughout.
+- `Published`, `onPublished` and `progress` run on the publisher task, not on the caller's synchronization
+  context. Marshal to the UI thread yourself.
+- When the scan ends, the remaining buffer is published. If the scanner throws, the buffer is published first and
+  then the task faults with the scanner's exception.
+- Cancellation stops the scan. With `FlushOnCancellation` (default) every accepted entry that is not yet published,
+  including entries still in the channel, is published before the task completes; otherwise they are discarded.
+  The entries that have arrived are published at once, without waiting for the scanner to stop; entries it hands
+  over before it stops follow in one more publish. Entries already published stay in the index. The task then
+  completes with `WasCancelled = true`.
+- When the updater, a `Published` or `onPublished` handler, or `progress` throws, the publisher stops, the scan is
+  cancelled through the token passed to its enumerator, the enumerator is disposed, and the task faults with that
+  exception (with the scanner's exception if both failed). Entries already published stay; buffered ones are not
+  published.
+- The task completes only after the scanner has stopped, so the scanner must observe the token it receives (an
+  `async` iterator with an `[EnumeratorCancellation]` parameter does).
 
 ### `IngestPublishOptions`
 
+A `sealed record class`. Every property is `init`-only and checked when it is set.
+
 | Property | Default | Meaning |
 |---|---|---|
-| `Policy` | `Adaptive` | Publish policy |
-| `FixedBatchSize` | 2 000 | Buffer size that forces a publish |
-| `MinInterval` | 100 ms | Floor between publishes (`TimeDebounce`, `Adaptive`) |
-| `AdaptiveMultiplier` | 2.0 | `k` in the adaptive interval formula |
-| `ChannelCapacity` | 10 000 | Scanner→publisher channel bound (backpressure when full) |
-| `FlushOnCancellation` | `true` | Flush buffered entries on cancel |
-| `MaxStaleness` | 1 s | Max time an accepted entry may stay unpublished |
-| `MinTimerPublishBatch` | 200 | Min buffered entries for a timer-triggered adaptive publish |
+| `Policy` | `new IngestPublishPolicy.Adaptive()` | When to publish, with the policy's own settings; `null` throws `ArgumentNullException` |
+| `ChannelCapacity` | 10,000 | Size of the queue between scanner and publisher; at least 1 |
+| `FlushOnCancellation` | `true` | Publish accepted entries when the scan is cancelled |
+
+### `IngestPublishPolicy`
+
+A closed `record class` with four nested cases. Each case is a `sealed record class` that carries only its own
+settings, with defaults. Change settings with an object initializer or `with`; an invalid value throws
+`ArgumentOutOfRangeException` naming the property, also inside `with`. No other assembly can add a case, so a
+`switch` expression over the four is exhaustive. When each case publishes:
+[Policies](performance.md#policies).
+
+```csharp
+var options = new IngestPublishOptions
+{
+    Policy = new IngestPublishPolicy.Adaptive { BatchCap = 500 },
+};
+var debounced = options with { Policy = new IngestPublishPolicy.TimeDebounce { MinInterval = TimeSpan.FromMilliseconds(250) } };
+```
+
+| Case | Setting | Default | Meaning |
+|---|---|---|---|
+| `Adaptive` | `BatchCap` | 2,000 | Buffered entries that start a publish; lower bound of the growing cap; at least 1 |
+| | `GrowthAwareBatchCap` | `true` | After each publish the cap becomes `max(BatchCap, indexed documents)` |
+| | `MinInterval` | 100 ms | Shortest time between timer publishes; not negative |
+| | `PublishMultiplier` | 2.0 | A timer publish waits at least this many times the last publish duration; positive and at most `MaxPublishMultiplier` (1,000), beyond which publishes take under 0.1% of the time and a larger value only delays results |
+| | `MinTimerPublishBatch` | 200 | Fewest buffered entries for a timer publish; staleness overrides it; at least 1 |
+| | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive; see [the worst case](performance.md#maxstaleness-and-the-worst-case) |
+| | `StrictMaxStaleness` | `false` | Publish on staleness even right after the previous publish |
+| `TimeDebounce` | `MinInterval` | 100 ms | Shortest time between publishes; not negative |
+| | `MaxStaleness` | 1 s | Longest an entry should wait for its publish to start, enforced by a timer; positive |
+| `FixedBatch` | `BatchSize` | 2,000 | Buffered entries that start a publish; at least 1 |
+| | `MaxStaleness` | 1 s | Age of the oldest buffered entry beyond which the next arriving entry starts a publish; checked only when an entry arrives, never from a timer; positive |
+| `PerEntry` | none | | Publishes every entry |
 
 ### `IngestionProgress` (struct)
 
-`EntriesAccepted`, `EntriesPublished`, `PublishCount`, `PendingCount`.
+Reported after each publish.
+
+| Property | Meaning |
+|---|---|
+| `EntriesAccepted` | Entries taken from the scan so far |
+| `EntriesPublished` | Entries published so far |
+| `PublishCount` | Publishes so far |
+| `PendingCount` | Entries accepted but not yet published, in the channel or the buffer: `EntriesAccepted − EntriesPublished` |
 
 ### `IngestionPublishEvent` (struct)
 
-`EntryCount`, `IndexedDocumentCount`, `RebuildDuration`, `PublishSequence`.
+| Property | Meaning |
+|---|---|
+| `EntryCount` | Entries in this publish |
+| `IndexedDocumentCount` | Documents in the index after this publish |
+| `PublishDuration` | Wall-clock time of this publish's updater call |
+| `PublishSequence` | Zero-based number of this publish |
 
 ### `IngestionResult`
 
-`EntriesAccepted`, `EntriesPublished`, `PublishCount`, `TotalRebuildCpu`,
-`WorstCaseStaleness`, `CompletedSuccessfully`, `WasCancelled`.
+| Property | Meaning |
+|---|---|
+| `EntriesAccepted` | Entries taken from the scan |
+| `EntriesPublished` | Entries published (equals `EntriesAccepted` after a successful scan) |
+| `PublishCount` | Number of publishes |
+| `TotalPublishDuration` | Wall-clock time spent in the updater calls, summed over all publishes |
+| `MaxObservedStaleness` | Longest observed time between the scanner handing over an entry and the start of the publish that contains it |
+| `CompletedSuccessfully` | `true` when the scan ran to its end |
+| `WasCancelled` | `true` when cancellation ended the scan |
 
 ### `SyntheticPathFeed`
 
-Synthetic path generator used by the demo and benchmarks.
+Deterministic synthetic paths (5 to 8 tokens each, joined with `-`) for tests, demos and benchmarks.
 
 ```csharp
-static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(int count, int scanDelayMs = 0, int seed = 42, CancellationToken ct = default);
+static IAsyncEnumerable<KeyValuePair<int, string>> EnumerateAsync(int count, int seed = 42, TimeSpan delayPerEntry = default, CancellationToken cancellationToken = default);
 static Dictionary<int, string> CreateDictionary(int count, int seed = 42);
 ```
+
+Both methods throw `ArgumentOutOfRangeException` for a negative `count`. `EnumerateAsync` throws it at the call,
+before the stream is read.
+
+## Namespace `SearchEngine.Sorting`
+
+### `NaturalSortKeyBuilder`
+
+```csharp
+static string Build(string sortText);
+```
+
+Returns the key that `NaturalSortAscending` compares ordinally. The rules are in
+[Result ordering](query-semantics.md#result-ordering).
 
 ## Namespace `SearchEngine.Tokenizer`
 
@@ -261,28 +418,32 @@ static Dictionary<int, string> CreateDictionary(int count, int seed = 42);
 static string TokenizeName(string? name, string joinCharacter = "-");
 ```
 
-Keeps letter/digit runs only (splits on everything else, including `_`), lowercases,
-deduplicates, joins with `joinCharacter`. Optional pre-processing for `SearchText`;
-never apply it to query strings (it strips `*` and `?`).
+Keeps runs of letters and digits (everything else, including `_`, splits), lowercases them, drops duplicates and
+joins them with `joinCharacter`. It is an optional preprocessing step for `SearchText`. Never apply it to a query:
+it removes `*` and `?`.
 
 ### `TextNormalizer`
 
-Low-level tokenization helpers used by the index builder.
+The tokenization helpers used by the index builder.
 
 ```csharp
+delegate void UniqueWordAction<TState>(ref TState state, string word);
+
 static bool IsSeparator(char ch);
 static bool IsSeparator(char ch, SearchValues<char> separators);
-static List<string> GetWordsFromString(string text);          // unique, length-descending
+static List<string> GetWordsFromString(string text);                        // distinct lowercase tokens, longest first
 static List<string> GetWordsFromString(string text, SearchValues<char> separators);
-static string CreateNormalizedWord(ReadOnlySpan<char> source); // lowercase copy
+static string CreateNormalizedWord(ReadOnlySpan<char> source);              // lowercase copy
 static char ToLowerInvariantFast(char ch);
 static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, ref TState state, UniqueWordAction<TState> action);
 static void ForEachUniqueWord<TState>(string text, HashSet<string> uniqueWords, SearchValues<char> separators, ref TState state, UniqueWordAction<TState> action);
 ```
 
-Overloads without a separator set use the `SearchTokenization.Default` index separators.
-To use a preset's characters, create the set with
-`SearchValues.Create(tokenization.IndexSeparators)`.
+- The overloads without `separators` use the index separators of `SearchTokenization.Default`. For another preset
+  pass `SearchValues.Create(tokenization.IndexSeparators)`.
+- `ForEachUniqueWord` clears `uniqueWords` and calls `action` once for each distinct lowercase token.
+  `uniqueWords` must compare ordinally (`StringComparer.Ordinal` or the default comparer); otherwise it throws
+  `ArgumentException`.
 
 ## Namespace `SearchEngine.DependencyInjection`
 
@@ -291,17 +452,25 @@ To use a preset's characters, create the set with
 ```csharp
 static IServiceCollection AddSearchEngine(this IServiceCollection services);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization);
-static IServiceCollection AddSearchEngineTransient(this IServiceCollection services);
-static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries);
 static IServiceCollection AddSearchEngine(this IServiceCollection services, IDictionary<int, string> initialEntries, SearchTokenization tokenization);
-static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IndexSnapshot> snapshotFactory);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IDictionary<int, string>> entriesFactory);
+static IServiceCollection AddSearchEngine(this IServiceCollection services, Func<IServiceProvider, IDictionary<int, string>> entriesFactory, SearchTokenization tokenization);
+static IServiceCollection AddSearchEngineTransient(this IServiceCollection services);
+static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, SearchTokenization tokenization);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, IDictionary<int, string> initialEntries);
 static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key, IDictionary<int, string> initialEntries, SearchTokenization tokenization);
 ```
 
-Lifetimes: `IIndexSnapshotProvider` and `IIndexUpdater` singletons; `ISearchEngine`
-scoped (`AddSearchEngineTransient` registers it transient). Keyed overloads register
-independent indexes resolvable via `[FromKeyedServices("key")]`.
+- `IndexSnapshotProvider`, `IIndexSnapshotProvider` and `IIndexUpdater` are singletons. `ISearchEngine` is scoped,
+  or transient with `AddSearchEngineTransient`.
+- The keyed overloads register independent indexes; inject them with `[FromKeyedServices("key")]`.
+- The `initialEntries` overloads copy the dictionary when they are called. `entriesFactory` runs once, when the
+  index or its updater is first resolved. In both cases the first snapshot is built from these entries with the
+  given tokenization (`SearchTokenization.Default` when omitted), and the registered `IIndexUpdater` starts from
+  the same entries and the same tokenization. A mutation of the updater therefore extends or changes the initial
+  entries; it does not drop them.
+- There is no overload that takes a ready-made `IndexSnapshot`. A snapshot keeps neither the search text nor the
+  facet values of its entries, so an updater could not start from it.

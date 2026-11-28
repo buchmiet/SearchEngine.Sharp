@@ -1,17 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+    <InternalsVisibleTo Include="SearchEngine.Sharp.MicroBenchmarks" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="SearchEngine.Sharp.MicroBenchmarks" />
+    <ProjectReference Include="..\..\src\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 </Project>

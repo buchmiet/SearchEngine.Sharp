@@ -1,17 +1,18 @@
 # Query semantics reference
 
-Precise behavior of tokenization, term matching, boolean expressions, glob patterns, and
-facet filters. The test suite (`tests/SearchEngine.Sharp.Tests`) encodes these rules;
-where this document and the tests disagree, the tests win.
+How text is tokenized and how a query is parsed and matched: terms, boolean operators, glob
+patterns, regular expressions, Unicode options, facet filters and result order.
 
 ## Pipeline overview
 
-**Indexing:** `SearchText` → split on the snapshot's **index-side** separators → lowercase
-→ unique tokens per document → inverted index (token → posting list of documents).
+Indexing: `SearchText` → split on the snapshot's index-side separators → Unicode options
+applied to each token, if any → lowercase → unique tokens per document → inverted index
+(token → posting list of documents).
 
-**Querying:** expression → split on the snapshot's **query-side** separators → each term
-resolves to a document set → sets combined with boolean algebra → optional facet filter
-intersected → results materialized in the requested sort order.
+Querying: expression → split on the snapshot's query-side separators → Unicode options
+applied to each term, if any → lowercase → each term resolves to a document set → sets
+combined with boolean algebra → optional facet filter intersected → results materialized
+in the requested sort order.
 
 Both separator sets are stored in each `IndexSnapshot` as a `SearchTokenization` preset
 so queries always match the index that built them.
@@ -24,8 +25,8 @@ read it from `snapshot.Tokenization`.
 
 | Preset | Index separators | Query separators | Use case |
 |---|---|---|---|
-| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index except **no TAB** | token-level search (pre-0.5.3 behavior) |
-| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | whitespace only: space, CR, LF | classic file-manager masks on whole names |
+| `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index | token-level search |
+| `SearchTokenization.FileMask` | none (whole `SearchText` = one token) | space, CR, LF (not TAB) | classic file-manager masks on whole names |
 | `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
 
 Factory:
@@ -38,15 +39,17 @@ var custom = SearchTokenization.Create(indexSeparators: "-", querySeparators: " 
 
 With `SearchTokenization.FileMask`:
 
-- A bare term such as `system` matches the **whole file name** (case-insensitive exact
+- A bare term such as `system` matches the whole file name (case-insensitive exact
   token equality), not a substring inside a longer token. `my-system-backup.zip` does
-  **not** match `system`.
-- `*.pdf`, `system*`, and `*system*` are anchored globs on the whole name; `.` is **not**
+  not match `system`.
+- `*.pdf`, `system*`, and `*system*` are anchored globs on the whole name; `.` is not
   a separator, so `*.pdf` means "name ends with `.pdf`".
 - `WordMatchMethod.Within` still matches substrings of the whole name (e.g. `port`
   matches `report-final.pdf`).
-- Boolean operators (`AND` / `OR` / `NOT`) still work; only **space** splits query terms
-  (implicit AND between adjacent terms still applies).
+- Boolean operators (`AND` / `OR` / `NOT`) still work; space, CR and LF split query
+  terms (implicit AND between adjacent terms still applies).
+- Tab does not split a mask. The whole name is one token, and names on Linux and macOS
+  may contain a tab, so a tab in a mask is matched as a character of the name.
 
 Worked examples, given an index of names `report-final.pdf`, `System`,
 `my-system-backup.zip`, `notes.txt` (queries with `WordMatchMethod.Exact`,
@@ -62,13 +65,12 @@ Worked examples, given an index of names `report-final.pdf`, `System`,
 | `* AND NOT *.zip` | all except `my-system-backup.zip` | `*` = all, minus suffix glob |
 | `port` (`Within`) | `report-final.pdf` | substring of the whole name |
 
-FileMask behavioral notes (by design — not bugs):
+Limits of FileMask:
 
-1. **Parentheses are not query separators** in FileMask, so parenthesis grouping is
-   unavailable. Unbalanced-paren degradation in the evaluator does not apply because `(`
-   and `)` are ordinary name characters, not separators — a literal `(` or `)` in a name
-   **can** be matched (`report(1).pdf` matches the mask `report(1).pdf`).
-2. A **space in a file name** cannot be typed literally in a mask expression — use `?`
+1. Parentheses are not query separators in FileMask, so they cannot group terms. They are
+   ordinary name characters instead, and a mask matches them literally (`report(1).pdf`
+   matches the mask `report(1).pdf`).
+2. A space in a file name cannot be typed literally in a mask expression. Use `?`
    or `*` wildcards instead.
 3. `*.*` means "name contains a dot", not "match everything". Applications wanting DOS
    `*.*` behavior should rewrite `*.*` → `*` in the UI layer.
@@ -76,10 +78,55 @@ FileMask behavioral notes (by design — not bugs):
    searched by its bare name (the term parses as an operator). Query it with operators
    disabled, or with a wildcard that keeps the term out of operator form (`and*` also
    matches longer names, so prefer disabling operators). This collision exists in every
-   preset; it is simply more visible when whole names are single terms.
+   preset; it is more visible when whole names are single terms.
 
-Switching presets requires a full `RebuildFrom` from the application's file table; the
-preset is fixed per snapshot.
+An `IndexUpdater` keeps the preset it was created with, and every snapshot stores the
+preset that built it. To switch presets, create a new `IndexUpdater` with the new preset
+and fill it with `RebuildFrom` from the application's file table.
+
+### Unicode matching
+
+By default text is lowercased one UTF-16 code unit at a time with the Unicode 17.0.0 simple lowercase mapping, built
+into the library and the same on every platform; there is no
+normalization. Consequences: a decomposed name (`e` + U+0301, common on macOS) is not found by a composed
+query and vice versa; `ß` ≠ `ss` and final `ς` ≠ `σ`; `Within` can match inside a grapheme
+cluster (`cafe` inside a decomposed `café`, one emoji inside a ZWJ family sequence).
+
+`SearchTokenization.WithUnicodeMatching(UnicodeMatching)` opts in per preset (stored in each snapshot,
+applied to indexed `SearchText` and to each query term; ASCII text is never touched). Operators are recognized
+in the query as typed, before folding, so under `RemoveDiacritics` the words `nöt`, `ånd` and `ør` stay terms:
+
+| Flag | Effect |
+|------|--------|
+| `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
+| `CaseFold` | Unicode 17.0.0 full case folding (`CaseFolding.txt`, statuses C and F) of the lowercase, from tables built into the library, the same on every platform and in globalization-invariant mode: `ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, `ᲀ`=`в`, `ſ`=`s`, Deseret `𐐀`=`𐐨` and other supplementary-plane letters, `ß`/`ẞ`→`ss`, ligatures (`ﬁ`→`fi`, `ﬓ`→`մն`), `ŉ`→`ʼn`, Greek letters with ypogegrammeni → letter + `ι`. The Turkic foldings are not applied. A few foldings produce a combining mark (`ǰ` → `j` + U+030C, `ΐ` → `ι` + U+0308 + U+0301); combine `CaseFold` with `Compose` to compose them back |
+| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300 to U+036F, U+1AB0 to U+1AFF, U+1DC0 to U+1DFF and U+FE20 to U+FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
+| `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`); a glob `?` matches one cluster (`caf?` matches a decomposed `café`) |
+
+Indexed text and queries are folded the same way. Both are split at their separators as written, and each token
+or term is then folded on its own: composition (or accent removal), case folding, the per-character lowercase
+that every token gets, and composition once more, because lowercasing can undo it (`T` + U+0308 has no composed
+form, but `t` + U+0308 composes to `ẗ`). So a name, its lowercase form and its composed form all find each other.
+A combining mark after a separator never composes with it: with `=` as a separator, `x=` + U+0338 is the tokens
+`x` and U+0338 on both sides, not `x≠`. When folding produces a separator (U+037E GREEK QUESTION MARK composes to
+`;`), the token or term splits there. Under `Compose` the decomposed `I` + U+0307 is `İ`, which lowercases (and
+case folds) to a plain `i`, so it does not match `i` + U+0307.
+
+Regex patterns are not normalized by any option, because composing or stripping would change character classes
+(`[e` + U+0301`]` would become `[é]`, `[b-å]` the invalid range `[b-a]`). Write them in normalized form: `e` for
+`é` under `RemoveDiacritics`, precomposed letters under `Compose`. Their casing does follow the index: see
+[Regular expressions](#regular-expressions-wordmatchmethodregex). `SortText` is never folded.
+
+`Compose` and `RemoveDiacritics` need the Unicode normalization data of ICU (or NLS). Globalization-invariant mode
+(`<InvariantGlobalization>true</InvariantGlobalization>` or `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`, common in
+trimmed apps and small container images) has none, so `WithUnicodeMatching` throws `PlatformNotSupportedException`
+for them there; `CaseFold` and `GraphemeBoundaries` work in every mode.
+
+Ill-formed UTF-16 (a lone surrogate, which NTFS allows in names) and the noncharacters (U+FDD0 to U+FDEF and the
+last two code points of every plane, such as U+FFFE and U+FFFF) are kept as they are, and the text around them is
+folded, so such a name still matches itself. ICU refuses to normalize U+FFFE and Windows NLS
+(`DOTNET_SYSTEM_GLOBALIZATION_USENLS=1`) refuses every noncharacter; leaving them all out gives the same result
+with either library.
 
 ## Index-side tokenization (Default preset)
 
@@ -89,17 +136,17 @@ Separator characters (`SearchTokenization.Default.IndexSeparators`):
 space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 ```
 
-Every maximal run of non-separator characters is one token. All other characters —
-including `_ ' " * ? & @ % + = !` — are token characters.
+Every maximal run of non-separator characters is one token. All other characters,
+including `_ ' " * ? & @ % + = !`, are token characters.
 
-- Tokens are lowercased (`char.ToLowerInvariant`; ASCII fast path).
+- Tokens are lowercased (Unicode 17.0.0 simple lowercase per UTF-16 code unit; ASCII fast path).
 - Duplicate tokens within one document are indexed once.
 - Example: `"Report-2024_final.PDF"` → tokens `report`, `2024_final`, `pdf`
   (`-` and `.` are separators; `_` is not).
 
 `NameTokenizer.TokenizeName` is an optional pre-processing helper with a stricter rule:
 it keeps only letter/digit runs (so `_` also splits) and joins the result with `-`.
-If you pre-process indexed text with it, do **not** run query strings through it — it
+If you pre-process indexed text with it, do not run query strings through it, because it
 strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidance.
 
 ## Query parsing (Default preset)
@@ -107,31 +154,42 @@ strips `*` and `?`. See the [file search guide](file-search-guide.md) for guidan
 Separator characters (`SearchTokenization.Default.QuerySeparators`):
 
 ```
-space . , ; : / \ CR LF | - # [ ] { } ( ) ~ £ $ €
+space . , ; : / \ CR LF TAB | - # [ ] { } ( ) ~ £ $ €
 ```
 
-(Same set as indexing except TAB, which is a separator only on the index side.)
+(The same set as indexing, so a query pasted with tabs between its words finds the
+same documents as one typed with spaces.)
 
 Rules:
 
 1. The expression splits into terms on separators. Terms are lowercased.
-2. **Adjacent terms are combined with an implicit AND**, regardless of
+2. Adjacent terms are combined with an implicit AND, regardless of
    `enableOperators`: `report pdf` means `report AND pdf`.
 3. With `enableOperators: true`:
    - The words `and`, `or`, `not` (ASCII case-insensitive) are operators, not search terms.
    - `not term` matches all documents in the snapshot except those matching `term`.
    - Precedence: `NOT` binds tighter than `AND`, which binds tighter than `OR`.
      Same-precedence operators evaluate left to right.
-   - Parentheses group subexpressions, but only when balanced across the whole
-     expression. If unbalanced, every parenthesis degrades to a plain separator.
+   - Parentheses group subexpressions when both `(` and `)` are query separators
+     (as in `Default`) and they balance across the whole expression. If they do not
+     balance, every parenthesis is a plain separator. A preset that has only one of
+     them among its query separators never groups: that one splits terms like a
+     space, and the other is a character of its term (`SearchTokenization.Create(" ", " )")`
+     reads `(a b)` as the terms `(a` and `b`).
 4. With `enableOperators: false` (the default), `and` / `or` / `not` are ordinary
    search terms and parentheses are plain separators.
-5. Malformed expressions are corrected, not rejected:
-   - Leading `AND` / `OR` and all trailing operators are dropped.
-   - `AND AND` collapses to a single `AND`; `NOT NOT` cancels out;
-     any other adjacent binary-operator pair collapses to `AND`.
+5. Malformed expressions are corrected, not rejected. The start and end of a
+   parenthesised group are treated like the start and end of the expression:
+   - Leading `AND` / `OR` and all trailing operators are dropped
+     (`(AND a)` = `a`, `(a OR) b` = `a AND b`).
+   - `NOT NOT` counts as one `NOT`. A binary operator followed by `NOT` is kept
+     (`a AND NOT b`). Any other pair of adjacent operators collapses to `AND`,
+     wherever it occurs: `a AND AND b`, `a OR OR b`, `a NOT AND b` and
+     `a AND NOT AND b` all mean `a AND b`.
+   - An empty group `()` is dropped, and what follows it meets what came before
+     it: `a () OR b` = `a OR b`, `a AND () OR b` = `a AND OR b` = `a AND b`.
 6. An expression that is empty, whitespace, or reduces to nothing after correction
-   returns no results — unless a non-empty facet filter is supplied
+   returns no results unless a non-empty facet filter is supplied
    (see [filter-only queries](#filter-only-queries)).
 
 ## Term matching
@@ -150,36 +208,50 @@ expression a plain term uses the requested method while a wildcard term uses glo
 
 ## Regular expressions (`WordMatchMethod.Regex`)
 
-The **entire** `expression` is one .NET regular expression. The boolean tokenizer is
-**not** used — separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
+The entire `expression` is one .NET regular expression. The boolean tokenizer is
+not used: separators, `AND` / `OR` / `NOT`, and parentheses in the pattern are
 regex syntax, not query operators. `enableOperators` is ignored.
 
-Matching scans every unique indexed token (same loop as glob), using
-`RegexOptions.IgnoreCase | CultureInvariant` with standard unanchored
-`Regex.IsMatch` (the user pattern is compiled as-is — no implicit `^...$` wrapper).
+Matching scans every unique indexed token (same loop as glob) with standard unanchored
+`Regex.IsMatch` (no implicit `^...$` wrapper). The pattern is case-insensitive the way the
+index is, from the same Unicode 17.0.0 tables, not through `RegexOptions.IgnoreCase`: every
+character of the pattern that stands for itself (a plain character, `\uXXXX`, `\xXX`) gets
+the casing of indexed tokens (case folding under `CaseFold`, then the per-character
+lowercase), and the pattern runs case-sensitively against the tokens, which are lowercase
+(or folded) already. So `İstanbul` finds `istanbul`, and under `CaseFold` `Straße`, `σας` and
+`ﬃ` find `strasse`, `σασ` and `ffi`. Escapes such as `\D` or `\p{Lu}`, group names, inline
+options and comments are not changed. A character that folds to several (`ß` to `ss`)
+becomes the group `(?:ss)`, so `ß+` means `(?:ss)+`. A character class keeps what it lists
+and gains the casing of each character and range (`[A-C]` also matches `a`-`c`); a
+several-character folding in a class becomes an alternative (`[aß]` is `(?:[aß]|ss)`),
+except in a negated class or a class with a subtraction, which keep only the one-character
+foldings (`[^ß]` still matches the `s` of `strasse`). An inline `(?i)` turns on the casing
+of .NET on top of this; it is not needed.
+
 `NonBacktracking` is preferred; when the .NET regex engine throws
 `NotSupportedException` (lookarounds, backreferences), the library falls back to the
 default backtracking engine with the same options and 1 s match timeout. Invalid
 patterns and patterns that exceed the match timeout (catastrophic backtracking on
 the fallback path) yield an empty result set (no exception).
 
-**Token-level semantics (Default preset):** patterns run against normalized lowercase
+Token-level semantics (Default preset): patterns run against normalized lowercase
 tokens, not the original `SearchText`. A pattern that spans index separators (e.g.
 `report.*\.pdf`) cannot match because no single token contains both `report` and
-`pdf`. Use **`SearchTokenization.FileMask`** when the indexed token is the full file
+`pdf`. Use `SearchTokenization.FileMask` when the indexed token is the full file
 name, or combine regex hits with boolean/glob terms on Default.
 
-Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`):
+Examples on a Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`) and
+`reporting.log` (tokens `reporting`, `log`):
 
 | Expression | Matches tokens | Documents |
 |---|---|---|
 | `report` | `report`, `reporting` (substring) | union of posting lists |
 | `^report$` | `report` only | docs with token `report` |
-| `report.*` | tokens containing `report` prefix | e.g. `report`, `reporting` |
+| `report.*` | `report`, `reporting`: unanchored, so any token containing `report` | union of posting lists |
 | `pdf` | `pdf` | docs with token `pdf` |
 | `final\|pdf` | `final`, `pdf` | union of posting lists |
 
-On **FileMask** index, token `report-final.pdf` can match `report-final\.pdf`,
+On a FileMask index, token `report-final.pdf` can match `report-final\.pdf`,
 `\.pdf$`, or unanchored `report` (matches `my-report.pdf` too). Use `^...$` for
 full-name equality.
 
@@ -188,9 +260,13 @@ full-name equality.
 A term containing `*` or `?` is matched as a glob against whole indexed tokens
 (anchored at both ends):
 
-- `*` — zero or more characters; consecutive `*` collapse into one
-- `?` — exactly one character
-- any other character — literal (after lowercasing)
+- `*`: zero or more characters; consecutive `*` collapse into one
+- `?`: exactly one character of the text as a reader sees it: one code point (an emoji
+  written as a surrogate pair is one, and so is a lone surrogate), or one extended
+  grapheme cluster with `UnicodeMatching.GraphemeBoundaries` (a decomposed `é` or a
+  ZWJ emoji family is one). `*` likewise covers whole code points or clusters, and a
+  match never starts or ends inside one
+- any other character: literal (after lowercasing)
 
 Examples against an index containing tokens `report`, `reporting`, `log`:
 
@@ -201,7 +277,7 @@ Examples against an index containing tokens `report`, `reporting`, `log`:
 | `l?g` | `log` |
 | `?*?` | any token of length ≥ 2 |
 | `*` | every document |
-| `?` | any single-character token |
+| `?` | any token of one character (one code point, or one grapheme cluster with `GraphemeBoundaries`) |
 
 Limits and edge cases:
 
@@ -211,19 +287,18 @@ Limits and edge cases:
   wildcards. Indexed tokens *can* contain them (they are not index separators) but are
   then only reachable through wildcard patterns or `Within` substrings.
 - A pattern containing separators splits into terms first: `ga-1*` becomes
-  `ga AND 1*`, and `*.txt` becomes `* AND txt` — that is, "has token `txt`", not
+  `ga AND 1*`, and `*.txt` becomes `* AND txt`, which means "has token `txt`", not
   "name ends with `.txt`". For anchored extension filtering use a facet
   (see the [file search guide](file-search-guide.md#file-extensions)).
-- Cost: one scan over *unique tokens* (not documents) with an early exit on token
-  length; posting lists of all matching tokens are unioned. Measurements:
-  [glob-and-facets-report.md](glob-and-facets-report.md).
+- A glob term scans every unique token of the index (not every document) and unions
+  the posting lists of the tokens that match. Costs: [performance.md](performance.md#per-query).
 
 ## Facet filters
 
 A document may carry named numeric values (facets), supplied as the optional third
 parameter of `IndexedEntry` and stored in the snapshot as columns parallel to the
 index. A `FacetFilter` restricts results to documents whose facet values satisfy
-**all** of its predicates. The filter applies after the text expression is fully
+all of its predicates. The filter applies after the text expression is fully
 evaluated, including `NOT`.
 
 ```csharp
@@ -257,10 +332,11 @@ Predicates:
 - There is no OR between facet predicates. If you need one, run two queries and
   union the results on the caller side.
 - Facet names are case-sensitive (ordinal comparison).
-- A document without a value for a facet has `0` in that column. A range that
-  includes `0`, or a mask with `mustHave: 0`, therefore matches such documents.
-  If that is not intended, attach the facet to every document.
-- A filter naming a facet that no indexed document carries throws `ArgumentException`.
+- A document without a value for a facet has the value `0` for it, also when no
+  indexed document carries that facet. A range that includes `0`, or a mask with
+  `mustHave: 0`, therefore matches such documents, and a filter on a facet name
+  nobody uses (a typo, say) matches either every document or none, without an
+  exception. If that is not intended, attach the facet to every document.
 - `FacetFilter.None` (or a `Combine` of nothing) imposes no constraints.
 
 Recommended encodings:
@@ -278,19 +354,55 @@ An empty or whitespace expression combined with a non-empty filter matches all
 documents that pass the filter. An empty expression with no filter (or an empty one)
 returns nothing.
 
-### Performance note
-
-Filter evaluation is a single pass over all documents followed by one bitset
-intersection. The `Find` / `CountMatches` overloads that take a filter always run the
-full evaluation pipeline — when you have no facet constraints, call the overloads
-*without* the filter parameter to keep the exact single-term fast path.
+The cost of filters depends on how many documents the text expression matches; see
+[performance.md](performance.md#per-query).
 
 ## Result ordering
 
 | `SearchSortMode` | Order |
 |---|---|
-| `SnapshotOrder` | Document order within the current snapshot |
-| `NaturalSortAscending` | Natural sort of `SortText`: digit runs compare numerically (`file2` < `file10`), text case-insensitively; the permutation is computed once per snapshot and cached |
+| `SnapshotOrder` | Document order within the current snapshot: the order the entries were added in, until an `IndexUpdater` removes or replaces one; after that it is not specified until the next `RebuildFrom` or `Clear` |
+| `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
+
+The natural order compares `SortText` part by part, the way file managers order names:
+
+- `-`, space, `_` and `/` separate parts and are otherwise ignored. Every run of letters
+  and every run of digits is a part of its own, and any other character is a
+  one-character text part. `IMG_0012.jpg` has the parts `img`, `0012`, `.`, `jpg`.
+- The first parts are compared first; the next pair decides only when they are equal.
+- A number part comes before a text part.
+- Two numbers compare by value, at any length. Leading
+  zeros do not count, so `007` equals `7`. Digits of other scripts count with their
+  value: `٣` (Arabic-Indic three) equals `3`.
+- Two text parts compare one UTF-16 code unit at a time after the same lowercase as tokens.
+  Case does not matter, and neither the culture nor the platform of the machine plays a part: `é` comes after
+  `z`. When one text part is the start of the other, the shorter one comes first: `a`
+  before `ab`, so `a 2` sorts before `ab`.
+- When every part of one text equals the matching part of the other and one text has
+  more parts, the one with fewer parts comes first: `a` before `a 2`.
+- Texts that differ only in case, in leading zeros or in which separator they use are
+  equal: `File2` and `file2`, `007` and `7`, `a_b` and `a b`. Equal texts come in
+  ascending id order, whatever the number of hits and whether a filter is applied, so
+  the same query on the same entries always returns the same order.
+
+Examples, in ascending order:
+
+| Before | After | Rule |
+|---|---|---|
+| `file2` | `file10` | numbers by value |
+| `a 2` | `ab` | `a` is the start of `ab` |
+| `x 1` | `x a` | number before text |
+| `a b` | `ab` | `a` is the start of `ab` |
+| `a` | `a 2` | fewer parts |
+| `img_0012.jpg` | `img_12a.jpg` | `0012` equals `12`; then `.` before `a` |
+| `a999999999999` | `a1000000000000` | numbers by value at any length |
+| `z` | `é` | code units, not the alphabet of a culture |
+
+`NaturalSortKeyBuilder.Build` returns the key that holds this order: comparing two keys
+with `string.CompareOrdinal` gives the order of their texts.
+
+`SortText` is never changed by the Unicode options. [performance.md](performance.md#work-deferred-to-the-first-query)
+describes what a natural sort costs.
 
 ## Worked examples
 
@@ -311,7 +423,7 @@ Queries with `WordMatchMethod.Within`, `enableOperators: true`:
 | `report pdf` | 1, 2 | implicit AND |
 | `report AND NOT draft` | 1, 4 | boolean operators |
 | `rep*` | 1, 2, 4 | glob, prefix-anchored on whole tokens |
-| `*.pdf` | 1, 2 | splits into `*` AND `pdf` → "has token pdf" |
+| `*.pdf` | 1, 2 | splits into `*` AND `pdf`; under `Within`, `pdf` matches any token containing it |
 | `fin?l` | 1 | `?` = exactly one character |
 | `(draft OR final) pdf` | 1, 2 | grouping plus implicit AND |
 | `""` + `Range("size", 10_240, long.MaxValue)` | size-dependent | filter-only query |

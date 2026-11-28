@@ -1,62 +1,48 @@
 using BenchmarkDotNet.Attributes;
-using SearchEngine;
-using SearchEngine.Filters;
 using SearchEngine.Index;
-using SearchEngine.Pooling;
-using SearchEngine.Sharp.Benchmarks;
+using SearchEngine.Query;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.MicroBenchmarks;
 
+/// <summary>
+/// Each natural sort strategy of <see cref="ResultMaterializer"/> on its own, by density of the hits, on a snapshot
+/// whose sort permutation is already built (warm). Together with <see cref="NaturalSortColdSelectivityBenchmark"/>
+/// this shows what <see cref="SelectivityThresholds.NaturalSortSortKMaxFraction"/> and
+/// <see cref="SelectivityThresholds.NaturalSortBuiltPermutationSortKMaxFraction"/> should be.
+/// </summary>
 [MemoryDiagnoser]
-[WarmupCount(1)]
-[IterationCount(3)]
+[WarmupCount(2)]
+[IterationCount(10)]
 public class NaturalSortSelectivityBenchmark
 {
-    private Dictionary<int, IndexedEntry> _entries = null!;
-    private IndexSnapshot _coldSnapshot = null!;
-    private FastBitSet _bitSet = null!;
-    private List<int> _results = null!;
-    private int[] _ordinalBuffer = null!;
-    private string[] _keyScratch = null!;
+    private IndexSnapshot _snapshot = null!;
+    private FastBitSet _hits = null!;
+    private int _hitCount;
 
-    [Params(0, 1, 10, 100, 1_000, 10_000, 50_000, 100_000)]
-    public int HitCount { get; set; }
+    // The corpus densities plus finer steps below 1%, where the limit for the built permutation lies.
+    public static IEnumerable<double> Densities => SelectivityCorpus.Densities.Concat([0.002, 0.005]).Order();
+
+    [ParamsSource(nameof(Densities))]
+    public double Density { get; set; }
 
     [GlobalSetup]
     public void Setup()
     {
         const int documentCount = 100_000;
-        var data = FileSearchDataFactory.Create(documentCount, seed: 2026);
-        _entries = FileSearchDataFactory.ToIndexedEntries(data.Documents);
-        _bitSet = SelectivityProbe.CreateSparseBitSet(documentCount, HitCount);
-        _results = new List<int>(Math.Max(HitCount, 16));
-        _ordinalBuffer = new int[documentCount];
-        _keyScratch = new string[documentCount];
-        RebuildColdSnapshot();
-    }
-
-    [IterationSetup]
-    public void IterationSetup()
-        => RebuildColdSnapshot();
-
-    [Benchmark(Baseline = true, Description = "Current — build full N permutation, scan all")]
-    public int NaturalSortFullPermutationScan()
-        => SelectivityProbe.NaturalSortCurrent(_coldSnapshot, _bitSet, _results);
-
-    [Benchmark(Description = "Sort K — precompute K keys once (production-shaped)")]
-    public int NaturalSortKPrecomputedKeys()
-        => SelectivityProbe.NaturalSortKOnlyPrecomputedKeys(
-            _coldSnapshot, _bitSet, _ordinalBuffer, _keyScratch, _results);
-
-    [Benchmark(Description = "Sort K — naive comparator (unfair: rebuilds keys in sort)")]
-    public int NaturalSortKNaiveComparator()
-        => SelectivityProbe.NaturalSortKOnlyNaive(_coldSnapshot, _bitSet, _ordinalBuffer, _results);
-
-    private void RebuildColdSnapshot()
-    {
         var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(_entries);
-        _coldSnapshot = provider.Current;
+        new IndexUpdater(provider).RebuildFrom(SelectivityCorpus.Create(documentCount).Entries);
+        _snapshot = provider.Current;
+        _ = _snapshot.Base.GetSortedPermutation();
+        _hitCount = HitSets.CountFor(Density, documentCount);
+        _hits = HitSets.Random(documentCount, _hitCount, seed: 1);
     }
+
+    [Benchmark(Baseline = true, Description = "Full permutation (built): walk it, keep the hits")]
+    public int FullPermutation()
+        => ResultMaterializer.MaterializeNaturalSortFullPermutation(_snapshot, _hits, _hitCount).Count;
+
+    [Benchmark(Description = "K only: sort the hits")]
+    public int SortHitsOnly()
+        => ResultMaterializer.MaterializeNaturalSortKOnly(_snapshot, _hits, _hitCount).Count;
 }

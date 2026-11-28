@@ -1,31 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- TUnit is a self-hosting Microsoft.Testing.Platform application: the project builds an executable and needs neither
+       Microsoft.NET.Test.Sdk nor a VSTest adapter. global.json at the repository root opts dotnet test into the platform,
+       so the tests run with dotnet test and the project option (see README.md). -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- A TUnit analyzer warning, such as an assertion that is not awaited, fails the build. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="TUnit" Version="1.87.12" />
+    <!-- CollectionOrdering, used for ordered sequence checks: IsEquivalentTo(expected, CollectionOrdering.Matching). -->
+    <Using Include="TUnit.Assertions.Enums" />
   </ItemGroup>
 
   <ItemGroup>
-    <Using Include="Xunit" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\SearchEngine.Sharp\SearchEngine.Sharp.csproj" />
+    <ProjectReference Include="..\..\src\SearchEngine.Sharp.csproj" />
   </ItemGroup>
 
 </Project>

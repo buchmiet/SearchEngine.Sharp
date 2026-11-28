@@ -4,12 +4,9 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Folder Name="/demos/">
-    <Project Path="demos/ProgressiveIngestion.Demo/ProgressiveIngestion.Demo.csproj" />
-  </Folder>
-  <Folder Name="/src/" />
   <Project Path="benchmarks/SearchEngine.Sharp.Benchmarks/SearchEngine.Sharp.Benchmarks.csproj" />
   <Project Path="benchmarks/SearchEngine.Sharp.MicroBenchmarks/SearchEngine.Sharp.MicroBenchmarks.csproj" />
-  <Project Path="src/SearchEngine.Sharp/SearchEngine.Sharp.csproj" />
+  <Project Path="benchmarks/SearchEngine.Sharp.Profiling/SearchEngine.Sharp.Profiling.csproj" />
+  <Project Path="src/SearchEngine.Sharp.csproj" />
   <Project Path="tests/SearchEngine.Sharp.Tests/SearchEngine.Sharp.Tests.csproj" />
 </Solution>

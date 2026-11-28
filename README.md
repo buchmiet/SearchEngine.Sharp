@@ -1,93 +1,91 @@
 # SearchEngine.Sharp
 
-In-memory inverted index for .NET. Supports exact token match, substring (within-word) search, glob patterns (`*`, `?`), boolean expressions (AND / OR / NOT), numeric facet filters (ranges and bitmasks over dates, sizes, flags), natural sort ordering, and progressive indexing during long scans.
+An in-memory search index for .NET, built for names: file names, product codes, titles. It finds whole tokens,
+substrings, glob patterns (`*`, `?`) and regular expressions, combines terms with `AND`, `OR` and `NOT`, filters
+by numeric facets (sizes, dates, attribute bits), sorts results naturally (`file2` before `file10`), and stays
+queryable while a long scan is still adding names. Queries run lock-free on immutable snapshots.
 
-Target: .NET 10 (C# 14). NuGet: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp) (publish on tag `v*`).
+Requires .NET 11. Package: [`SearchEngine.Sharp`](https://www.nuget.org/packages/SearchEngine.Sharp).
 
-**Tokenization presets:** `SearchTokenization.Default` (token-level search) and
-`SearchTokenization.FileMask` (whole-file-name classic masks — `*.pdf` is end-anchored).
-Pass to `IndexUpdater`; details in [docs/query-semantics.md](docs/query-semantics.md#tokenization-presets).
+```bash
+dotnet add package SearchEngine.Sharp
+```
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [docs/query-semantics.md](docs/query-semantics.md) | Exact rules: tokenization, match methods, boolean operators, globs, facet filters, edge cases |
-| [docs/file-search-guide.md](docs/file-search-guide.md) | End-to-end recipe: file search with live results, size/date/attribute criteria |
-| [docs/api.md](docs/api.md) | Full public API reference with signatures |
-| [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) | Measured publish-policy comparison for progressive ingestion |
-| [docs/glob-and-facets-report.md](docs/glob-and-facets-report.md) | Measured glob and facet filter throughput |
+| Question | Page |
+|---|---|
+| How do I build a file search with live results and size, date or attribute criteria? | [docs/file-search-guide.md](docs/file-search-guide.md) |
+| Should I build an index or scan the directory each time? | [Index or plain scan](docs/file-search-guide.md#index-or-plain-scan) |
+| What exactly does a query match: tokens, operators, globs, regex, Unicode options, facets, sort order? | [docs/query-semantics.md](docs/query-semantics.md) |
+| What are the signatures, defaults and exceptions of a type? | [docs/api.md](docs/api.md) |
+| How fast is it, how much memory does it take, and how do I tune progressive ingestion? | [docs/performance.md](docs/performance.md) |
+| What changed between versions? | [CHANGELOG.md](CHANGELOG.md) |
+| How do I run the benchmarks? | [benchmarks/README.md](benchmarks/README.md) |
+| How should comments and documentation be written? | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-## Requirements
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-
-## Build
-
-```bash
-dotnet build SearchEngine.Sharp.sln -c Release
-```
-
-## Tests
-
-```bash
-dotnet test SearchEngine.Sharp.sln -c Release
-```
-
-## Benchmarks
-
-Console app on synthetic data. Reports query throughput (queries/s) and P50/P95 latency.
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks
-```
-
-Optional parallel infix experiment (not part of the library API):
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --parallel
-```
-
-Flags: `--warmup N`, `--iterations N`, `--seed N`.
-
-## Usage
-
-### Without DI
+## Quick start
 
 ```csharp
 using SearchEngine;
-using SearchEngine.Snapshots;
 
 var provider = new IndexSnapshotProvider();
 var updater = new IndexUpdater(provider);
+var engine = new SearchEngineSharp(provider);
 
 updater.RebuildFrom(new Dictionary<int, string>
 {
     [1] = "GA-100 digital watch",
     [2] = "GA-200 analog watch",
+    [3] = "report-2024.pdf",
 });
 
-var engine = new SearchEngineSharp(provider);
-
-// Exact token match
-var exact = engine.Find("digital", WordMatchMethod.Exact);
-
-// Substring match (within indexed words)
-var within = engine.Find("ana", WordMatchMethod.Within);
-
-// Boolean expression
-var filtered = engine.Find("digital AND watch", WordMatchMethod.Exact, enableOperators: true);
-
-// Glob token match (* and ?) — auto-routed when a token contains metacharacters
-var reports = engine.Find("report*", WordMatchMethod.Exact);
-var filteredGlob = engine.Find("report* AND NOT *tmp", WordMatchMethod.Exact, enableOperators: true);
-
-// Natural sort by model name (requires IndexedEntry with separate SortText)
-var sorted = engine.Find("watch", WordMatchMethod.Exact, enableOperators: false,
-    sortMode: SearchSortMode.NaturalSortAscending);
+List<int> exact = engine.Find("digital", WordMatchMethod.Exact);                          // [1]
+List<int> within = engine.Find("ana", WordMatchMethod.Within);                            // [2]
+List<int> both = engine.Find("watch AND NOT analog", WordMatchMethod.Exact, enableOperators: true); // [1]
+List<int> glob = engine.Find("rep*", WordMatchMethod.Exact);                              // [3]
+List<int> sorted = engine.Find("watch", WordMatchMethod.Exact, enableOperators: false,
+    SearchSortMode.NaturalSortAscending);                                                 // [1, 2]
+int count = engine.CountMatches("watch", WordMatchMethod.Exact);                          // 2
 ```
 
-### With DI
+`Find` returns the ids you indexed. The default preset, `SearchTokenization.Default`, splits text into tokens at
+spaces and punctuation such as `.` and `-`, so `rep*` matches the token `report`. For file-manager masks, where
+`*.pdf` means "the name ends with `.pdf`", create the updater with `SearchTokenization.FileMask`
+([Tokenization presets](docs/query-semantics.md#tokenization-presets)).
+
+### Facets and sort text
+
+`IndexedEntry` separates the text that is searched from the text that is sorted, and carries optional numeric
+facets for filtering:
+
+```csharp
+using SearchEngine;
+using SearchEngine.Filters;
+
+var provider = new IndexSnapshotProvider();
+var updater = new IndexUpdater(provider);
+var engine = new SearchEngineSharp(provider);
+
+updater.RebuildFrom(new Dictionary<int, IndexedEntry>
+{
+    [10] = new("GA-100 G-Shock digital", "GA-100",
+        FacetValues.Create([new("size", 12_345), new("modified", DateTime.UtcNow.Ticks), new("attrs", 0x1 | 0x4)])),
+});
+
+var filter = FacetFilter.Combine(
+    FacetFilter.Range("size", 1024, 1_048_576),
+    FacetFilter.Mask("attrs", mustHave: 0x1, mustNot: 0x2));
+
+List<int> hits = engine.Find("g shock", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter); // [10]
+List<int> large = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder,
+    FacetFilter.Range("size", 10_000, long.MaxValue));                                      // [10]
+```
+
+An empty expression with a filter returns every document that passes the filter. Rules for missing values and
+unknown facet names: [Facet filters](docs/query-semantics.md#facet-filters).
+
+### Dependency injection
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -95,205 +93,98 @@ using SearchEngine;
 using SearchEngine.DependencyInjection;
 
 var services = new ServiceCollection();
-services.AddSearchEngine();
-var sp = services.BuildServiceProvider();
+services.AddSearchEngine(SearchTokenization.FileMask);
+using var sp = services.BuildServiceProvider();
 
 var updater = sp.GetRequiredService<IIndexUpdater>();
 var engine = sp.GetRequiredService<ISearchEngine>();
 
-updater.AddEntry(1, "example text");
-var ids = engine.Find("example", WordMatchMethod.Exact);
+updater.AddEntry(1, "notes.txt");
+List<int> ids = engine.Find("*.txt", WordMatchMethod.Exact); // [1]
 ```
 
-`AddSearchEngine` overloads accept an initial snapshot, a keyed index, or a custom snapshot factory. See `ServiceCollectionExtensions`.
+`AddKeyedSearchEngine` registers several independent indexes; see
+[ServiceCollectionExtensions](docs/api.md#servicecollectionextensions).
 
-### IndexedEntry
+### Indexing a long scan
 
-When search text and display/sort text differ:
-
-```csharp
-updater.RebuildFrom(new Dictionary<int, IndexedEntry>
-{
-    [10] = new("GA-100 G-Shock digital", "GA-100"),
-});
-```
-
-`SearchText` is tokenized and matched. `SortText` drives `SearchSortMode.NaturalSortAscending`.
-
-Optional facet values attach numeric columns for post-query filtering:
-
-```csharp
-using SearchEngine.Filters;
-
-updater.RebuildFrom(new Dictionary<int, IndexedEntry>
-{
-    [10] = new(
-        "GA-100 G-Shock digital",
-        "GA-100",
-        FacetValues.FromDictionary(new Dictionary<string, long>
-        {
-            ["size"] = 12_345,              // bytes
-            ["modified"] = DateTime.UtcNow.Ticks,
-            ["attrs"] = 0x1 | 0x4,          // bit flags
-        })),
-});
-
-var filter = FacetFilter.Combine(
-    FacetFilter.Range("size", 1024, 1_048_576),
-    FacetFilter.Mask("attrs", mustHave: 0x1, mustNot: 0x2));
-
-var hits = engine.Find("g shock", WordMatchMethod.Within, false, SearchSortMode.SnapshotOrder, filter);
-var allLarge = engine.Find("", WordMatchMethod.Exact, false, SearchSortMode.SnapshotOrder,
-    FacetFilter.Range("size", 1_000_000, long.MaxValue));
-```
-
-Missing facet values default to `0` in the snapshot column. Unknown facet names in a filter throw `ArgumentException`. An empty expression with a non-empty filter matches all documents through the filter. Full rules: [docs/query-semantics.md](docs/query-semantics.md#facet-filters).
-
-### Glob matching
-
-Query tokens containing `*` or `?` are matched as glob patterns against whole indexed tokens (anchored at both ends), regardless of `WordMatchMethod`:
-
-- `*` — zero or more characters
-- `?` — exactly one character
-
-Notes:
-
-- There is no escape syntax: `*` and `?` in a query are always wildcards.
-- `[` and `]` are query separators and are not part of glob syntax.
-- A pattern spanning token boundaries (e.g. `ga-1*`) is split into multiple tokens joined by implicit AND; `*.txt` therefore means "has token `txt`", not "ends with `.txt`" — see [docs/file-search-guide.md](docs/file-search-guide.md#file-extensions) for anchored extension filtering.
-
-Full rules and worked examples: [docs/query-semantics.md](docs/query-semantics.md#glob-patterns).
-
-### Regular expressions
-
-Pass `WordMatchMethod.Regex` to match the **whole expression** as one regex against
-indexed tokens (standard unanchored `Regex.IsMatch`, case-insensitive):
-
-```csharp
-var hits = engine.Find(@"report.*|log", WordMatchMethod.Regex);
-```
-
-Patterns run on **normalized tokens**, not raw names — under `SearchTokenization.Default`
-a cross-separator pattern such as `report.*\.pdf` will not match. Use
-`SearchTokenization.FileMask` when the token is the full file name; use `^...$` when you
-need a full-token match. Invalid patterns return no matches. See
-[docs/query-semantics.md](docs/query-semantics.md#regular-expressions-wordmatchmethodregex).
-
-## API summary
-
-Full signatures: [docs/api.md](docs/api.md).
-
-| Type | Role |
-|------|------|
-| `ISearchEngine` | Query execution (`Find`, `CountMatches`) |
-| `IIndexUpdater` | Index mutations (rebuild, add, remove) |
-| `ProgressiveIndexIngestion` | Batched progressive ingestion during long scans |
-| `IIndexSnapshotProvider` | Current immutable snapshot |
-| `SearchEngineSharp` | Default `ISearchEngine` implementation |
-| `IndexSnapshotBuilder` | Build snapshot without DI |
-| `WordMatchMethod.Exact` | Whole-token match |
-| `WordMatchMethod.Within` | Substring match inside indexed tokens |
-| `WordMatchMethod.Regex` | Whole-expression regex on indexed tokens (unanchored) |
-| `SearchSortMode.SnapshotOrder` | Result order follows internal document ordinals |
-| `SearchSortMode.NaturalSortAscending` | Sort by natural key derived from `SortText` |
-| `FacetValues` | Optional per-document facet bag (`long` values) |
-| `FacetFilter` | Post-query AND filter (range / bitmask) |
-| `SearchTokenization` | Index/query separator presets (`Default`, `FileMask`) |
-
-## Index updates
-
-Each mutation rebuilds the full index from the in-memory entry dictionary. Batch methods (`AddOrUpdateEntries`, `RemoveEntries`) perform one rebuild per call. Async rebuild methods consume input outside the update lock.
-
-Queries read the current snapshot via `Volatile.Read`; updates publish a new snapshot with `Interlocked.Exchange`. Snapshots are immutable.
-
-## Live indexing during scans
-
-For large directory scans (100k+ files), do **not** call `AddEntry` per file — each call rebuilds the entire index and total work grows **O(N²)**.
-
-Use `ProgressiveIndexIngestion` instead. It buffers scan results and publishes batches through `AddOrUpdateEntries`:
+Every `IndexUpdater` call that changes an entry publishes a new snapshot, and the whole index is built again every
+few hundred to few thousand changes. Calling `AddEntry` once per file therefore turns a long scan into many full
+builds. Stream the
+scan through `ProgressiveIndexIngestion` instead: it publishes growing batches, and the index answers queries
+while the scan runs:
 
 ```csharp
 using SearchEngine.Ingestion;
 
 var ingestion = new ProgressiveIndexIngestion(updater);
-
-var result = await ingestion.IngestAsync(
-    ScanTokenizedPathsAsync(root, cancellationToken),
-    new IngestPublishOptions
-    {
-        Policy = IngestPublishPolicy.Adaptive, // default
-        FixedBatchSize = 2_000,
-        MaxStaleness = TimeSpan.FromSeconds(1),
-    },
-    onPublished: _ => RefreshResultList());
-
-// result.PublishCount, result.WorstCaseStaleness, result.TotalRebuildCpu
+IngestionResult result = await ingestion.IngestAsync(
+    ScanAsync(root, cancellationToken),           // your IAsyncEnumerable<KeyValuePair<int, IndexedEntry>>
+    onPublished: _ => RefreshResultList(),        // runs on the publisher task
+    cancellationToken: cancellationToken);
 ```
 
-Defaults target **&lt; 1 s staleness** and ~7 progressive updates per 100k files on a fast scan (growth-aware batch cap; was ~50 before v0.5.6). See [docs/ingestion-policy-report.md](docs/ingestion-policy-report.md) for measured policy comparison.
+A complete scanner and the live requery loop are in the [file search guide](docs/file-search-guide.md). For a
+one-shot search, skip the index and filter names during the scan with `NameMatcher`, which applies the same query
+language to one name at a time.
 
-**Demo:**
+## How it works
+
+- `IndexSnapshot` is an immutable index: the distinct tokens packed in one array sorted by length, a posting list
+  per token, the sort texts and one column per facet. Any number of threads can query it. A snapshot published by
+  `IndexUpdater` after a small change holds that data twice over: a large base and a small delta, plus the list of
+  base documents removed since the base was built.
+- `IndexSnapshotProvider` holds the current snapshot. Readers take it with a volatile read and never lock; a new
+  snapshot replaces the reference atomically, and a query that already started finishes on the old one.
+- `IndexUpdater` keeps the entries, serializes changes and publishes a new snapshot for every change. A change
+  reuses the base of the previous snapshot and builds only a new delta from the entries changed since the base was
+  built. Once the delta and the removed documents pass a limit that grows with the index, the change builds the
+  whole index again. A change that fails leaves the published snapshot as it was.
+- `SearchEngineSharp` parses the expression, resolves each term to a set of documents (a bitset), combines the
+  sets with the boolean operators, applies the facet filter and turns the result into ids in the requested order.
+  The bigram index for `Within` and the natural sort permutation are built on the first query that needs them.
+- `ProgressiveIndexIngestion` sits between a scanner and an updater: a bounded channel, a publisher that decides
+  when to publish, and progress callbacks.
+- `NameMatcher` runs the same parser and matchers on a single name, without an index.
+
+Set operations on bitsets use AVX2 on x64 and AdvSimd on ARM64 when available, and scalar code otherwise. A query
+runs on the calling thread.
+
+## Building and testing
 
 ```bash
-dotnet run -c Release --project demos/ProgressiveIngestion.Demo -- --count 100000 --scan-delay-ms 0
+dotnet build SearchEngine.Sharp.slnx -c Release
+dotnet test --project tests/SearchEngine.Sharp.Tests -c Release
 ```
 
-**Policy benchmark:**
+The tests use [TUnit](https://tunit.dev) on Microsoft.Testing.Platform, which `global.json` selects for `dotnet test`.
+Tests that need Unicode normalization are skipped in globalization-invariant mode; run the suite once more with
+`DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` to cover that mode.
 
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy --ingestion-count 100000
+Benchmarks: [benchmarks/README.md](benchmarks/README.md).
+
 ```
-
-**Facet filter benchmark:**
-
-```bash
-dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --facet
+src/                             library
+tests/SearchEngine.Sharp.Tests/  TUnit tests
+benchmarks/                      benchmark and profiling projects
+docs/                            documentation
 ```
-
-See [docs/glob-and-facets-report.md](docs/glob-and-facets-report.md) for glob and facet throughput measurements.
-
-
-## Platform notes
-
-Runs on any .NET 10-supported OS and CPU architecture.
-
-`FastBitSet` set operations use runtime CPU detection:
-
-- x64 with AVX2: 256-bit SIMD path
-- ARM64 with AdvSimd: 128-bit SIMD path
-- otherwise: scalar fallback
-
-Infix search in the library is single-threaded. A parallel variant exists only under `benchmarks/` for measurement.
 
 ## Publishing (maintainers)
 
-NuGet.org uses [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), not long-lived API keys.
+NuGet.org uses [Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing) (OIDC), not
+long-lived API keys.
 
-1. **nuget.org** → Account → Trusted Publishing → add policy:
-   - Provider: GitHub Actions
-   - Owner: `buchmiet`
-   - Repository: `SearchEngine.Sharp`
-   - Workflow: `publish-nuget.yml`
-   - Environment: `production` (must match the workflow job `environment:`)
-2. **GitHub** → repo Settings → Environments → ensure `production` exists (created automatically on first run).
-3. **GitHub** → Secrets → Actions → `NUGET_USER` = nuget.org **profile username** (policy creator; see your profile URL, not display name).
-4. Push a version tag, e.g. `git tag v0.5.0 && git push origin v0.5.0`.
+1. On nuget.org, under Account, Trusted Publishing, add a policy: provider GitHub Actions, owner `buchmiet`,
+   repository `SearchEngine.Sharp`, workflow `publish-nuget.yml`, environment `production` (it must match the
+   `environment:` of the workflow job).
+2. On GitHub, under the repository's Settings, Environments, make sure `production` exists (the first run creates
+   it).
+3. On GitHub, under Secrets, Actions, set `NUGET_USER` to the nuget.org profile user name of the policy creator
+   (as in the profile URL, not the display name).
+4. Push a version tag, for example `git tag v0.6.1 && git push origin v0.6.1`.
 
-The workflow builds, tests, packs, exchanges an OIDC token for a short-lived push key, then publishes.
-
-## Project layout
-
-```
-src/SearchEngine.Sharp/          Library
-tests/SearchEngine.Sharp.Tests/  xUnit tests
-benchmarks/SearchEngine.Sharp.Benchmarks/  Throughput console app
-demos/ProgressiveIngestion.Demo/           Progressive ingestion demo
-docs/query-semantics.md                    Tokenization, operators, globs, facets — exact rules
-docs/file-search-guide.md                  File search recipe (live results, facet criteria)
-docs/api.md                                Public API reference
-docs/ingestion-policy-report.md            Policy comparison measurements
-docs/glob-and-facets-report.md             Glob and facet filter measurements
-```
+The workflow builds, tests and packs, exchanges an OIDC token for a short-lived push key, and publishes.
 
 ## License
 

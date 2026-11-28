@@ -14,8 +14,6 @@ using SearchEngine.Snapshots;
 // Query throughput on synthetic data.
 //
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks
-//   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --parallel
-
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --ingestion-policy
 
 //   dotnet run -c Release --project benchmarks/SearchEngine.Sharp.Benchmarks -- --facet
@@ -23,7 +21,6 @@ using SearchEngine.Snapshots;
 int warmup     = GetInt(args, "--warmup", 3);
 int iterations = GetInt(args, "--iterations", 10);
 int seed       = GetInt(args, "--seed", 1337);
-bool parallel  = args.Contains("--parallel");
 bool facetBench = args.Contains("--facet");
 bool ingestionPolicy = args.Contains("--ingestion-policy");
 int ingestionCount = GetInt(args, "--ingestion-count", 100_000);
@@ -58,20 +55,6 @@ if (facetBench)
     Console.WriteLine();
     foreach (var scenario in scenarios.Where(s => s.Name is "medium" or "large"))
         RunFacetScenario(scenario);
-}
-
-if (parallel)
-{
-    Console.WriteLine();
-    var parallelScenarios = new BenchScenario[]
-    {
-        new("medium",  DocumentCount: 100_000, VocabularySize: 30_000, QueryCount: 500),
-        new("large",   DocumentCount: 250_000, VocabularySize: 30_000, QueryCount: 500),
-        new("xlarge",  DocumentCount: 500_000, VocabularySize: 80_000, QueryCount: 500),
-    };
-
-    foreach (var scenario in parallelScenarios)
-        RunParallelInfixScenario(scenario);
 }
 
 void RunQueryScenario(BenchScenario scenario)
@@ -121,37 +104,6 @@ void RunFacetScenario(BenchScenario scenario)
     Console.WriteLine();
 }
 
-void RunParallelInfixScenario(BenchScenario scenario)
-{
-    Console.WriteLine($"=== parallel infix — {scenario.Name} — {scenario.DocumentCount:N0} docs ===");
-
-    var data = SyntheticDataFactory.Create(scenario, seed);
-    var provider = new IndexSnapshotProvider();
-    var updater = new IndexUpdater(provider);
-    updater.RebuildFrom(data.Documents.ToDictionary(d => d.Id, d => d.Text));
-    var snapshot = provider.Current;
-
-    int[] threadCounts = [1, 2, 4, 8, Environment.ProcessorCount];
-    threadCounts = threadCounts.Distinct().Where(t => t <= Environment.ProcessorCount).OrderBy(t => t).ToArray();
-
-    for (int i = 0; i < warmup; i++)
-        foreach (var q in data.InfixQueries)
-            ParallelQueryMatcher.MatchWithinParallel(q, snapshot, 1);
-
-    int? referenceHits = null;
-    foreach (int threads in threadCounts)
-    {
-        ForceGc();
-        var (throughput, p50, p95, hits) = MeasureParallel(data.InfixQueries, snapshot, threads, iterations);
-        referenceHits ??= hits;
-        string label = threads == 1 ? "sequential" : $"T={threads}";
-        string status = hits == referenceHits ? "" : " (hit count mismatch)";
-        Console.WriteLine($"  {label,-12} {throughput,10:N0} q/s   P50 {p50:F4} ms   P95 {p95:F4} ms{status}");
-    }
-
-    Console.WriteLine();
-}
-
 void RunQueryBench(string label, IReadOnlyList<string> queries, Func<string, object> run)
 {
     for (int i = 0; i < warmup; i++)
@@ -190,39 +142,6 @@ void RunQueryBench(string label, IReadOnlyList<string> queries, Func<string, obj
     double throughput = queries.Count * iterationCount / totalSec;
     var ordered = perQueryMs.OrderBy(x => x).ToArray();
     return (throughput, Percentile(ordered, 0.50), Percentile(ordered, 0.95));
-}
-
-(double throughput, double p50, double p95, int hits) MeasureParallel(
-    IReadOnlyList<string> queries,
-    IndexSnapshot snapshot,
-    int threads,
-    int iterationCount)
-{
-    var batchMs = new List<double>(iterationCount);
-    var perQueryMs = new List<double>(iterationCount * queries.Count);
-    int totalHits = 0;
-
-    for (int iter = 0; iter < iterationCount; iter++)
-    {
-        var batchTimer = Stopwatch.StartNew();
-        int hits = 0;
-        foreach (var q in queries)
-        {
-            var qt = Stopwatch.StartNew();
-            hits += ParallelQueryMatcher.MatchWithinParallel(q, snapshot, threads).GetTrueCount();
-            qt.Stop();
-            if (iter > 0)
-                perQueryMs.Add(qt.Elapsed.TotalMilliseconds);
-        }
-        batchTimer.Stop();
-        batchMs.Add(batchTimer.Elapsed.TotalMilliseconds);
-        totalHits = hits;
-    }
-
-    double totalSec = batchMs.Sum() / 1000.0;
-    double throughput = queries.Count * iterationCount / totalSec;
-    var ordered = perQueryMs.OrderBy(x => x).ToArray();
-    return (throughput, Percentile(ordered, 0.50), Percentile(ordered, 0.95), totalHits / iterationCount);
 }
 
 static void ForceGc()
