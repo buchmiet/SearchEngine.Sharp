@@ -59,23 +59,34 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         bool enableOperators,
         SearchSortMode sortMode,
         FacetFilter? filter)
+        => Find(expression, method, enableOperators, sortMode, filter, int.MaxValue);
+
+    /// <inheritdoc />
+    public List<int> Find(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        SearchSortMode sortMode,
+        FacetFilter? filter,
+        int maxResults)
     {
         ArgumentNullException.ThrowIfNull(expression);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxResults);
         var snapshot = _snapshotProvider.Current;
-        if (!HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
+        if (maxResults == 0 || !HasQueryInput(expression, filter) || snapshot.DocumentCount == 0)
             return [];
 
         if (sortMode == SearchSortMode.SnapshotOrder
             && TryGetExactWordPostings(expression, method, enableOperators, snapshot, out var exactMatches))
         {
             return filter is null
-                ? PostingListOperations.MaterializeRecordIds(snapshot, exactMatches)
-                : FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches);
+                ? PostingListOperations.MaterializeRecordIds(snapshot, exactMatches, maxResults)
+                : FacetFilterEvaluator.MaterializeMatchingRecordIds(filter, snapshot, exactMatches, maxResults);
         }
 
         using var queryContext = new QueryContext(snapshot.OrdinalCount);
         var resultSet = Evaluate(snapshot, expression, method, enableOperators, filter, queryContext);
-        return resultSet is null ? [] : ResultMaterializer.Materialize(snapshot, resultSet, sortMode);
+        return resultSet is null ? [] : ResultMaterializer.Materialize(snapshot, resultSet, sortMode, maxResults);
     }
 
     // True when the query selects anything: a non-blank expression or a non-empty filter.

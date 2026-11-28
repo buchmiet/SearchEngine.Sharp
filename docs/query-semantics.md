@@ -364,6 +364,9 @@ The cost of filters depends on how many documents the text expression matches; s
 | `SnapshotOrder` | Document order within the current snapshot: the order the entries were added in, until an `IndexUpdater` removes or replaces one; after that it is not specified until the next `RebuildFrom` or `Clear` |
 | `NaturalSortAscending` | Natural order of `SortText` (`file2` before `file10`) |
 
+`Find` with `maxResults` returns the first `maxResults` ids of this order, so `Find(..., maxResults: n)` equals
+`Find(...)` cut to `n` elements, ties included.
+
 The natural order compares `SortText` part by part, the way file managers order names:
 
 - `-`, space, `_` and `/` separate parts and are otherwise ignored. Every run of letters

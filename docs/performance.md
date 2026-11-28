@@ -189,6 +189,21 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
   a larger result builds the permutation and walks it. Once the permutation exists, every result of more than 0.5%
   of the documents walks it, and only smaller results sort their hits.
 
+- `Find` with `maxResults` stops once it has the ids. A single term in `SnapshotOrder` reads only the first
+  postings, and any other query in `SnapshotOrder` copies only the first set bits of its bitset. `NaturalSortAscending`
+  with the permutation built walks it to the Nth hit, which reads about `maxResults * N / hits` documents, unless
+  the hits number `sqrt(maxResults * N / 12)` or fewer. In that case, and whenever the permutation is not built and the
+  result is up to 80% of the documents, it keeps the best `maxResults` hits in a heap instead of sorting all of them, one sort key per hit and no allocation for a hit that
+  does not enter the heap. A limit never builds the permutation by itself; the rule above for results of more than
+  80% of the documents still applies. The query still evaluates into the bitset, so a limit saves nothing on a
+  query whose evaluation dominates (`*port*`).
+
+  Measured at 10^6 names, `maxResults` 10, median of 3 interleaved runs (the ThreeWay benchmark, `Top10`, as built):
+  `jpg` (105,458 hits) 391 to 0.1 µs, `final` (13,505) 25 to 0.4 µs, `jpg OR png` (157,960) 860 to 150 µs,
+  `(jpg OR png) AND NOT img` 1,110 to 171 µs, `prefix` 1,483 to 1,314 µs, `*ing` and `*port*` unchanged. Natural sort,
+  first 10 of `jpg`: 57.5 ms to 16.4 ms with the permutation not built (8.5 MB to 6 KB allocated per call) and 2.0 ms
+  to 0.18 ms with it built (422 KB to 288 B); first 10 of `jpg OR png`: 105 ms to 30 ms and 2.1 ms to 0.25 ms.
+
 When you re-run a query after every publish and sort it naturally, each run pays the sort of its hits until
 some query builds the permutation, and a dense result pays that build once per full build of the index.
 

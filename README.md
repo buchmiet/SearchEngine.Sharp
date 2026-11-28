@@ -46,6 +46,8 @@ List<int> both = engine.Find("watch AND NOT analog", WordMatchMethod.Exact, enab
 List<int> glob = engine.Find("rep*", WordMatchMethod.Exact);                              // [3]
 List<int> sorted = engine.Find("watch", WordMatchMethod.Exact, enableOperators: false,
     SearchSortMode.NaturalSortAscending);                                                 // [1, 2]
+List<int> first = engine.Find("watch", WordMatchMethod.Exact, false,
+    SearchSortMode.NaturalSortAscending, filter: null, maxResults: 1);                    // [1]
 int count = engine.CountMatches("watch", WordMatchMethod.Exact);                          // 2
 ```
 

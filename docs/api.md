@@ -29,6 +29,7 @@ SearchEngineSharp(IIndexSnapshotProvider snapshotProvider);
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators = false);
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode);
 List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode, FacetFilter? filter);
+List<int> Find(string expression, WordMatchMethod method, bool enableOperators, SearchSortMode sortMode, FacetFilter? filter, int maxResults);
 int CountMatches(string expression, WordMatchMethod method, bool enableOperators = false);
 int CountMatches(string expression, WordMatchMethod method, bool enableOperators, FacetFilter? filter);
 int DocumentCount { get; }
@@ -37,6 +38,13 @@ int UniqueWordCount { get; }
 
 - `Find` returns the ids the caller indexed, in `sortMode` order (`SnapshotOrder` for the overloads without it).
   `CountMatches` returns the same number without building the list.
+- The overload with `maxResults` returns at most that many ids: the first `maxResults` of the list the same call
+  without it returns, in the same order. It stops looking once it has them, so a first page of 10 results of a query
+  with 100,000 matches does not build the other 99,990. `maxResults` of 0 returns an empty list, `int.MaxValue`
+  returns every match, and a negative value throws `ArgumentOutOfRangeException`. For a display of "the first N of M",
+  call `CountMatches` with the same arguments for M. `ISearchEngine` gives this overload a default implementation
+  that calls the overload without `maxResults` and cuts the list, so a type that implements the interface keeps
+  compiling and gets the same results, without the saving. See [Per query](performance.md#per-query) for the cost.
 - An empty or whitespace `expression` matches nothing, unless a non-empty `filter` is given; then every document
   that passes the filter matches. A `null` expression throws `ArgumentNullException`.
 - `enableOperators` turns on `AND`, `OR`, `NOT` and parentheses. It is ignored for `WordMatchMethod.Regex`.

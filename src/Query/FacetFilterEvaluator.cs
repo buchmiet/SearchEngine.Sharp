@@ -112,20 +112,26 @@ internal static class FacetFilterEvaluator
         return count;
     }
 
+    // The record ids of the first limit live postings that pass the filter.
     internal static List<int> MaterializeMatchingRecordIds(
         FacetFilter filter,
         IndexSnapshot snapshot,
-        LivePostings ordinals)
+        LivePostings ordinals,
+        int limit = int.MaxValue)
     {
         if (filter.IsEmpty)
-            return PostingListOperations.MaterializeRecordIds(snapshot, ordinals);
+            return PostingListOperations.MaterializeRecordIds(snapshot, ordinals, limit);
 
         var bound = new SnapshotFilter(filter, snapshot);
-        var results = new List<int>();
+        var results = limit < ordinals.UpperBound ? new List<int>(limit) : [];
         foreach (int ordinal in ordinals)
         {
             if (bound.Matches(ordinal))
+            {
                 results.Add(snapshot.RecordIdAt(ordinal));
+                if (results.Count >= limit)
+                    break;
+            }
         }
 
         return results;

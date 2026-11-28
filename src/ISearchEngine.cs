@@ -66,6 +66,49 @@ public interface ISearchEngine
         Filters.FacetFilter? filter);
 
     /// <summary>
+    /// Returns the ids of the first <paramref name="maxResults"/> documents that match
+    /// <paramref name="expression"/> and pass <paramref name="filter"/>, in the order given by
+    /// <paramref name="sortMode"/>.
+    /// </summary>
+    /// <param name="expression">The query.</param>
+    /// <param name="method">How terms match indexed tokens.</param>
+    /// <param name="enableOperators"><see langword="true"/> to recognize the operators described in the remarks of
+    /// <see cref="ISearchEngine"/>. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="sortMode">The order of the returned ids.</param>
+    /// <param name="filter">Facet predicates applied after the expression, or <see langword="null"/> for none.</param>
+    /// <param name="maxResults">The most ids to return. <see cref="int.MaxValue"/> returns all of them.</param>
+    /// <returns>A new list with the first <paramref name="maxResults"/> ids of
+    /// <see cref="Find(string, WordMatchMethod, bool, SearchSortMode, Filters.FacetFilter?)"/>, or all of them when
+    /// there are fewer. It is empty when nothing matches or <paramref name="maxResults"/> is 0.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxResults"/> is negative.</exception>
+    /// <remarks>
+    /// <para>Use <see cref="CountMatches(string, WordMatchMethod, bool, Filters.FacetFilter?)"/> to get the number of
+    /// all matches for a "first N of M" display.</para>
+    /// <para>The default implementation calls
+    /// <see cref="Find(string, WordMatchMethod, bool, SearchSortMode, Filters.FacetFilter?)"/> and cuts the list, so it
+    /// saves nothing; <see cref="SearchEngineSharp"/> stops early.</para>
+    /// </remarks>
+    List<int> Find(
+        string expression,
+        WordMatchMethod method,
+        bool enableOperators,
+        SearchSortMode sortMode,
+        Filters.FacetFilter? filter,
+        int maxResults)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxResults);
+        if (maxResults == 0)
+            return [];
+
+        var ids = Find(expression, method, enableOperators, sortMode, filter);
+        if (ids.Count > maxResults)
+            ids.RemoveRange(maxResults, ids.Count - maxResults);
+        return ids;
+    }
+
+    /// <summary>
     /// Returns the number of documents that match <paramref name="expression"/> without building the list of ids.
     /// </summary>
     /// <param name="expression">The query.</param>

@@ -61,12 +61,12 @@ internal readonly struct LivePostings
         }
     }
 
-    // Appends the record ids of the live documents, in ascending ordinal order, reading the ids of each segment
-    // directly instead of looking up the segment of every ordinal.
-    internal void AppendRecordIdsTo(List<int> results)
+    // Appends the record ids of the first live documents, in ascending ordinal order, until results holds limit ids,
+    // reading the ids of each segment directly instead of looking up the segment of every ordinal.
+    internal void AppendRecordIdsTo(List<int> results, int limit)
     {
         var segments = _snapshot.Segments;
-        for (int s = 0; s < segments.Length; s++)
+        for (int s = 0; s < segments.Length && results.Count < limit; s++)
         {
             if (!segments[s].ExactPostings.TryGetValue(_word, out var range))
                 continue;
@@ -76,6 +76,7 @@ internal readonly struct LivePostings
             var dead = _snapshot.Dead[s];
             if (dead is null)
             {
+                postings = postings[..Math.Min(postings.Length, limit - results.Count)];
                 foreach (int local in postings)
                     results.Add(recordIds[local]);
             }
@@ -83,6 +84,9 @@ internal readonly struct LivePostings
             {
                 foreach (int local in postings)
                 {
+                    if (results.Count >= limit)
+                        break;
+
                     if (!dead.Contains(local))
                         results.Add(recordIds[local]);
                 }

@@ -73,6 +73,115 @@ internal static class NaturalOrder
         }
     }
 
+    // Writes to destination the ordinals of the destination.Length first documents of hits in natural order (key, then
+    // record id), without sorting the others: a max-heap keeps the best destination.Length documents seen so far, and
+    // a document that does not beat its root is dropped after one comparison without allocating its key. Cost:
+    // one key per hit and a heap update for each hit that enters, so O(H + L log L log H) for H hits and L = limit.
+    // destination is not longer than the number of hits.
+    internal static void SelectFirst(Index.FastBitSet hits, IndexSnapshot snapshot, Span<int> destination)
+    {
+        int limit = destination.Length;
+        if (limit == 0)
+            return;
+
+        Item[] heap = ArrayPool<Item>.Shared.Rent(limit);
+        char[]? rented = null;
+        Span<char> buffer = stackalloc char[NaturalSortKeyBuilder.MaxStackKeyLength];
+        try
+        {
+            int size = 0;
+            foreach (int ordinal in hits.EnumerateSetBits())
+            {
+                int s = snapshot.SegmentIndexOf(ordinal);
+                var segment = snapshot.Segments[s];
+                int local = ordinal - snapshot.Offsets[s];
+                string text = segment.SortTexts[local];
+                int id = segment.RecordIds[local];
+
+                int maxLength = NaturalSortKeyBuilder.MaxKeyLength(text.Length);
+                Span<char> keyBuffer = buffer;
+                if (maxLength > keyBuffer.Length)
+                {
+                    if (rented is null || rented.Length < maxLength)
+                    {
+                        if (rented is not null)
+                            ArrayPool<char>.Shared.Return(rented);
+                        rented = null;
+                        rented = ArrayPool<char>.Shared.Rent(maxLength);
+                    }
+
+                    keyBuffer = rented;
+                }
+
+                ReadOnlySpan<char> key = keyBuffer[..NaturalSortKeyBuilder.BuildInto(text, keyBuffer)];
+                if (size == limit)
+                {
+                    if (Compare(key, id, heap[0].Key, heap[0].Id) >= 0)
+                        continue;
+
+                    heap[0] = new(new string(key), id, ordinal);
+                    SiftDown(heap, size);
+                }
+                else
+                {
+                    heap[size] = new(new string(key), id, ordinal);
+                    SiftUp(heap, size++);
+                }
+            }
+
+            Span<Item> best = heap.AsSpan(0, size);
+            best.Sort(new ItemComparer());
+            for (int i = 0; i < best.Length; i++)
+                destination[i] = best[i].Ordinal;
+        }
+        finally
+        {
+            ArrayPool<Item>.Shared.Return(heap, clearArray: true);
+            if (rented is not null)
+                ArrayPool<char>.Shared.Return(rented);
+        }
+    }
+
+    // The heap keeps its greatest item at the root.
+    private static void SiftUp(Item[] heap, int index)
+    {
+        var item = heap[index];
+        while (index > 0)
+        {
+            int parent = (index - 1) >> 1;
+            if (Compare(heap[parent].Key, heap[parent].Id, item.Key, item.Id) >= 0)
+                break;
+
+            heap[index] = heap[parent];
+            index = parent;
+        }
+
+        heap[index] = item;
+    }
+
+    private static void SiftDown(Item[] heap, int size)
+    {
+        var item = heap[0];
+        int index = 0;
+        while (true)
+        {
+            int child = 2 * index + 1;
+            if (child >= size)
+                break;
+
+            if (child + 1 < size && Compare(heap[child + 1].Key, heap[child + 1].Id, heap[child].Key, heap[child].Id) > 0)
+                child++;
+
+            if (Compare(heap[child].Key, heap[child].Id, item.Key, item.Id) <= 0)
+                break;
+
+            heap[index] = heap[child];
+            index = child;
+        }
+
+        heap[index] = item;
+    }
+
     // For each document given by its key and record id, the number of documents of the sort permutation of segment
     // (local ordinals) that come before it. The documents come in ascending order (as Sort leaves them), so each binary search starts
     // at the count of the one before. Cost: at most log2(permutation length) comparisons per document; each builds the

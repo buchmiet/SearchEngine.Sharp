@@ -24,6 +24,12 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ### Added
 
+- `ISearchEngine.Find(expression, method, enableOperators, sortMode, filter, maxResults)` returns the first
+  `maxResults` ids of the same `Find` without it, in the same order, and stops looking once it has them: a single
+  term and a snapshot-order result read only the first postings or bits, and a natural sort walks the sort permutation
+  to the Nth hit or keeps the best N hits in a heap instead of sorting all of them. `ISearchEngine` gives the method
+  a default implementation that cuts the unlimited list, so existing implementers keep compiling. Combine it with
+  `CountMatches` for "N of M" displays. See [Per query](docs/performance.md#per-query).
 - The library builds with [ZeroAlloc.Analyzers](https://github.com/ZeroAlloc-Net/ZeroAlloc.Analyzers) as a development
   dependency (nothing flows to consumers). `src/.editorconfig` raises every rule to a warning.
 
