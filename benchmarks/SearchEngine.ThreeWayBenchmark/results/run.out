@@ -1,0 +1,15 @@
+== sharp n=100000 run 1
+== lucene n=100000 run 1
+== tantivy n=100000 run 1
+== sharp n=100000 run 2
+== lucene n=100000 run 2
+== tantivy n=100000 run 2
+== sharp n=100000 run 3
+== lucene n=100000 run 3
+== tantivy n=100000 run 3
+== sharp n=1000000 run 1
+== lucene n=1000000 run 1
+== tantivy n=1000000 run 1
+== sharp n=1000000 run 2
+== lucene n=1000000 run 2
+== tantivy n=1000000 run 2
