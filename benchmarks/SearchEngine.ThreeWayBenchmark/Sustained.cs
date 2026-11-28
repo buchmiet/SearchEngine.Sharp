@@ -14,7 +14,7 @@ public static class Sustained
     public static int Run(string[] args)
     {
         string engineName = "sharp", label = "", outPath = "sustained.json", tmp = Path.Combine(Path.GetTempPath(), "threeway-sustained");
-        int n = 1_000_000, ops = 20_000, batch = 1, seed = 2026;
+        int n = 1_000_000, ops = 20_000, batch = 1, seed = 2026, rate = 0;
         bool reader = false, durable = false;
         for (int i = 0; i < args.Length; i++)
         {
@@ -29,6 +29,7 @@ public static class Sustained
                 case "--durable": durable = args[++i] == "1"; break;
                 case "--out": outPath = args[++i]; break;
                 case "--tmp": tmp = args[++i]; break;
+                case "--rate": rate = int.Parse(args[++i]); break; // calls per second, 0 = as fast as possible
             }
         }
 
@@ -58,7 +59,7 @@ public static class Sustained
             Directory.CreateDirectory(dir);
         }
 
-        Console.Error.WriteLine($"# {eng.Name}  n={n:N0} ops={ops:N0} batch={batch} reader={reader} durable={durable}");
+        Console.Error.WriteLine($"# {eng.Name}  n={n:N0} ops={ops:N0} batch={batch} reader={reader} durable={durable} rate={(rate == 0 ? "max" : rate + "/s")}");
         var buildWatch = Stopwatch.StartNew();
         try { eng.Build(baseNames, dir); }
         catch (NotSupportedException e) { Console.Error.WriteLine(e.Message); return 3; }
@@ -72,11 +73,16 @@ public static class Sustained
         var layoutSegments = new List<int>();
         var layoutDelta = new List<long>();
         var layoutLatency = new List<double>();
+        var layoutMerges = new List<long>();
+        // Write calls over 10 ms, as [start, end] in seconds from the start of the run: a reader query that overlaps one
+        // ran while the writer was stuck in a rebuild, a merge in the write path or a garbage collection.
+        var slowWrites = new List<double[]>();
         int errors = 0, idErrors = 0;
 
         // Concurrent reader: one thread cycling through three queries, timing each.
         var readerLatency = new List<double>(1 << 16);
         var readerStamp = new List<double>(1 << 16);
+        var readerMerge = new List<int>(1 << 16); // 1 = a background merge ran when the query started, 0 = none, -1 = not observable
         bool stop = false;
         Thread? readerThread = null;
         long runStart = 0;
@@ -87,10 +93,12 @@ public static class Sustained
                 int k = 0;
                 while (!Volatile.Read(ref stop))
                 {
+                    bool? merging = eng.MergeActive;
                     long a = Stopwatch.GetTimestamp();
                     eng.ReaderQuery(k++);
                     long b = Stopwatch.GetTimestamp();
                     readerLatency.Add((b - a) * 1e6 / Stopwatch.Frequency);
+                    readerMerge.Add(merging is null ? -1 : merging.Value ? 1 : 0);
                     readerStamp.Add((a - runStart) / (double)Stopwatch.Frequency);
                     Thread.Sleep(1);
                 }
@@ -99,7 +107,7 @@ public static class Sustained
 
         int sampleEvery = Math.Max(1, batches / 400);
         var (seg0, delta0) = eng.Layout();
-        layoutOp.Add(0); layoutSegments.Add(seg0); layoutDelta.Add(delta0); layoutLatency.Add(0);
+        layoutOp.Add(0); layoutSegments.Add(seg0); layoutDelta.Add(delta0); layoutLatency.Add(0); layoutMerges.Add(eng.Merges().Merges);
 
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         long rss0 = Proc.RssBytes();
@@ -116,16 +124,25 @@ public static class Sustained
             var names = new string[batch];
             Array.Copy(added, first, names, 0, batch);
             string probe = $"zqtok{n + first + batch - 1}x";
+            if (rate > 0)
+            {
+                long due = wall0 + (long)(b * (double)Stopwatch.Frequency / rate);
+                while (Stopwatch.GetTimestamp() < due)
+                    Thread.Sleep(0);
+            }
+
             long t0 = Stopwatch.GetTimestamp();
             long hits = eng.AddVisible(n + first, names, probe);
             long t1 = Stopwatch.GetTimestamp();
             latency[b] = (t1 - t0) * 1e6 / Stopwatch.Frequency;
             if (hits != 1)
                 errors++;
+            if (latency[b] > 10_000)
+                slowWrites.Add([(t0 - runStart) / (double)Stopwatch.Frequency, (t1 - runStart) / (double)Stopwatch.Frequency]);
             if (b % sampleEvery == 0)
             {
                 var (seg, delta) = eng.Layout();
-                layoutOp.Add(b + 1); layoutSegments.Add(seg); layoutDelta.Add(delta); layoutLatency.Add(latency[b]);
+                layoutOp.Add(b + 1); layoutSegments.Add(seg); layoutDelta.Add(delta); layoutLatency.Add(latency[b]); layoutMerges.Add(eng.Merges().Merges);
             }
 
             // Untimed: the hit really is the document that was just added, not only some document.
@@ -167,6 +184,26 @@ public static class Sustained
         double[] sorted = [.. latency.Order()];
         double P(double q) => sorted[Math.Min(sorted.Length - 1, (int)(q * sorted.Length))];
         var readerSorted = readerLatency.Order().ToArray();
+        object? Split(Func<int, bool> keep)
+        {
+            var part = new List<double>();
+            for (int i = 0; i < readerLatency.Count; i++)
+                if (keep(i)) part.Add(readerLatency[i]);
+            if (part.Count == 0) return null;
+            part.Sort();
+            double Q(double q) => part[Math.Min(part.Count - 1, (int)(q * part.Count))];
+            return new { queries = part.Count, p50 = Q(.5), p95 = Q(.95), p99 = Q(.99), max = part[^1] };
+        }
+        bool OverlapsSlowWrite(int i)
+        {
+            double s = readerStamp[i], e = s + readerLatency[i] / 1e6;
+            foreach (var w in slowWrites)
+                if (s < w[1] && e > w[0]) return true;
+            return false;
+        }
+        var events = eng.MergeEvents.Where(m => m.StartTimestamp >= runStart)
+            .Select(m => new { start = (m.StartTimestamp - runStart) / (double)Stopwatch.Frequency, ms = m.Milliseconds, docs = m.Documents }).ToList();
+        double[] eventMs = [.. events.Select(e => e.ms).Order()];
         double RP(double q) => readerSorted.Length == 0 ? double.NaN : readerSorted[Math.Min(readerSorted.Length - 1, (int)(q * readerSorted.Length))];
 
         var result = new
@@ -189,14 +226,26 @@ public static class Sustained
                 managedAllocatedMiB = allocated / 1048576.0,
                 gcPauseMilliseconds = pause.TotalMilliseconds, gen0Collections = gen0Count, gen2Collections = gen2Count,
             },
+            rate,
+            mergeEvents = events,
+            mergeDurationsMilliseconds = eventMs.Length == 0 ? null : new { count = eventMs.Length, p50 = eventMs[eventMs.Length / 2], p95 = eventMs[(int)(eventMs.Length * .95)], max = eventMs[^1], total = eventMs.Sum() },
+            slowWrites,
             merges = new { mergesDuring.Source, mergesDuring.Merges, mergesDuring.DocumentsWritten, mergesDuring.MergeSeconds, mergesDuring.Note,
                 writeAmplification = mergesDuring.DocumentsWritten > 0 ? mergesDuring.DocumentsWritten / (double)ops : (double?)null },
             layout = new { start = new { seg0, delta0 }, end = new { layoutEnd.Segments, layoutEnd.DeltaDocuments }, settled = new { layoutSettled.Segments, layoutSettled.DeltaDocuments } },
-            concurrentReader = reader ? new { queries = readerLatency.Count, p50 = RP(.5), p95 = RP(.95), p99 = RP(.99), p999 = RP(.999), max = readerSorted[^1] } : null,
-            readerSeries = reader ? new { seconds = readerStamp, microseconds = readerLatency } : null,
+            concurrentReader = reader ? new
+            {
+                queries = readerLatency.Count, p50 = RP(.5), p95 = RP(.95), p99 = RP(.99), p999 = RP(.999), max = readerSorted[^1],
+                duringBackgroundMerge = Split(i => readerMerge[i] == 1),
+                withoutBackgroundMerge = Split(i => readerMerge[i] == 0),
+                mergeNotObservable = readerMerge.All(m => m == -1),
+                overlappingSlowWrite = Split(OverlapsSlowWrite),
+                notOverlappingSlowWrite = Split(i => !OverlapsSlowWrite(i)),
+            } : null,
+            readerSeries = reader ? new { seconds = readerStamp, microseconds = readerLatency, merging = readerMerge } : null,
             errors = new { visibility = errors, idMismatch = idErrors },
             verification,
-            samples = new { op = layoutOp, segments = layoutSegments, deltaDocuments = layoutDelta, latencyMicroseconds = layoutLatency },
+            samples = new { op = layoutOp, segments = layoutSegments, deltaDocuments = layoutDelta, latencyMicroseconds = layoutLatency, merges = layoutMerges },
             latencySeries = latency,
         };
         File.WriteAllText(outPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));

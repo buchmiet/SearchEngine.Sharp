@@ -4,37 +4,53 @@ Starting index: 1,000,000 documents (the file-name corpus of the other three-way
 
 ## Findings
 
-All numbers below are from the tables in this report (1,000,000 documents, one VM, see Caveats).
+All numbers below are from the tables in this report (1,000,000 documents, one VM, see Caveats). "First run" is the run the plots show.
 
 1. **The 21 µs of the first benchmark was a property of the first 25 calls, not of sustained writing.** It came from 25 consecutive
    additions, when the old layout's delta held at most 25 documents. Over 20,000 additions the previous layout of SearchEngine.Sharp
-   has a median of 1.09 ms, a p99.9 of 322 ms, a slowest call of 2.16 s and 9 calls over a second: the delta grows with every call and
-   is rebuilt in full each time (the saw in the first plot), and the whole index is rebuilt about every 2,000 calls. That is the
-   amortised cost the question was about, and it is the reason `IndexUpdater` now writes segments.
-2. **Sustained, with segments:** SearchEngine.Sharp adds 20,000 documents in 1.0 s (20,700 documents/s): p50 33 µs, p99 144 µs,
-   p99.9 0.64 ms, slowest 62 to 104 ms over three runs, which is one garbage collection (GC pauses 104 ms in the first run). Lucene.NET:
-   1,650 documents/s, p50 449 µs, p99 2.9 ms. TantivyDotNet: 175 documents/s, p50 4.6 ms, p99 17.6 ms, p99.9 107 ms.
+   has a median of 1.1 to 1.3 ms, a p99.9 of 323 to 369 ms, a slowest call of 1.9 to 2.5 s and 9 calls over a second in every run: the
+   delta grows with every call and is rebuilt in full each time (the saw in the first plot), and the whole index is rebuilt about every
+   2,000 calls. That is the amortised cost the question was about, and it is the reason `IndexUpdater` now writes segments.
+2. **Sustained, with segments:** SearchEngine.Sharp adds 20,000 documents in 0.9 to 1.0 s (about 21,000 documents/s): p50 25 to 32 µs,
+   p99 148 to 229 µs, slowest call 62 to 104 ms over three runs, which is one garbage collection (101 ms of GC pauses in the first run).
+   Lucene.NET: about 1,800 documents/s, p50 407 to 466 µs, p99 2.5 to 3.1 ms. TantivyDotNet: about 190 documents/s, p50 4.3 to 4.4 ms,
+   p99 13 to 22 ms, p99.9 107 ms.
 3. **The earlier "338×" over Tantivy was inflated by the harness.** The first benchmark created and closed a Tantivy writer for every
-   addition (7.1 ms). Here one writer stays open for the run; the same operation takes 4.6 ms. The remaining gap to Sharp is structural
+   addition (7.1 ms). Here one writer stays open for the run; the same operation takes 4.3 ms. The remaining gap to Sharp is structural
    rather than a tuning artefact: Tantivy makes a document visible only through a commit (a new segment) and a searcher refresh,
-   which is 4 to 5 ms even into a RAM index; Lucene's near-real-time reader needs no commit.
-4. **Write amplification** (documents written by merges per document added): SearchEngine.Sharp 6.6×, measured by the updater;
-   Lucene.NET 104×, measured with a hook on its merge scheduler (2.1 million documents rewritten over 20,000 additions, 13 s of merge
-   threads). TantivyDotNet has no merge hook, so only a lower bound on the number of merges is shown.
-5. **Memory.** During the 20,000 additions the process RSS of SearchEngine.Sharp grew by 52 MiB and the managed allocations were
-   226 MiB. Lucene.NET allocated 19,800 MiB (about 1 MB per addition, most likely its near-real-time reopen) with 768 ms of GC pauses.
-   The previous layout allocated 19,800 MiB too and paused 21 s in garbage collections. TantivyDotNet allocates little managed memory
-   (65 MiB) and holds its index in native memory: its absolute RSS is the smallest of the three (295 MiB before, 365 MiB at the peak).
-6. **Batches.** From 10 to 10,000 documents per call SearchEngine.Sharp goes from 71,500 to 333,000 documents/s, Lucene.NET from
+   4 to 5 ms even into a RAM index; Lucene's near-real-time reader needs no commit.
+4. **Merge frequency, duration and write amplification** (first single run, writer as fast as it goes):
+   - SearchEngine.Sharp: 8,420 merges, 421 per 1,000 additions, 52 µs each on average (0.44 s in all), 6.6 documents rewritten per
+     document added. 5,168 of them ran inside the write call: at 21,000 additions per second the writer outran the background merges and
+     hit the 64-segment limit. At 120 additions per second (the paced run) all 6,664 merges ran in the background, none in the write call.
+     The updater counts merges and their total time but does not publish single merges, so there is no per-merge distribution.
+   - Lucene.NET (hook on its merge scheduler): 2,220 merges, 111 per 1,000 additions; one merge p50 1.1 ms, p95 36 ms, max 95 ms;
+     12.2 s of merge threads; 97 documents rewritten per document added. In the paced run the same 2,221 merges rewrote 21 million
+     documents (1,057×): with the default `TieredMergePolicy`, 1,604 merges of more than 5,000 documents rewrote the growing segment
+     that holds the added documents again and again. The policy was not tuned.
+   - TantivyDotNet exposes no merge hook: at least 83 merges (falls of the segment count between samples), no durations.
+5. **Memory** (first single run). Process RSS grew by 50 MiB for SearchEngine.Sharp (251 MiB of managed allocations, 101 ms of GC
+   pauses). Lucene.NET allocated 19,400 MiB, about 1 MB per addition, with 696 ms of GC pauses; in the paced run 88,500 MiB and 6.7 s
+   of pauses, following its merges. The previous layout allocated 19,800 MiB and paused 21.9 s in garbage collections. TantivyDotNet
+   allocates little managed memory (62 MiB) and holds its index in native memory; its absolute RSS is the smallest (292 MiB before,
+   361 MiB at the peak, against 408 and 458 MiB for Sharp).
+6. **Search during indexing and merges, same write load** (120 additions per second for 167 s, one reader thread):
+   - SearchEngine.Sharp: 70,100 queries, p50 139 µs, p99 4.9 ms, max 42 ms. Its merges are so short that only 83 queries started
+     during one, and those ran like the others (p50 137 µs). The p99 is the `rep*` prefix query, a third of the queries, with or
+     without merges (the three bands of the plot are the three queries).
+   - Previous layout: p50 141 µs, max 689 ms; 4,456 queries overlapped a write call over 10 ms, and those reach 0.69 s: the rebuilds
+     stall readers on this 4-core machine.
+   - Lucene.NET: p50 457 µs, p99 1.4 ms, max 66 ms; a merge ran during 48,241 of its 101,600 queries, at about the same latency
+     (p50 469 µs during, 448 µs without).
+   - TantivyDotNet: p50 204 µs, p99 1.8 ms, max 20 ms; merges are not observable.
+   The unpaced reader table further down ran for as long as each writer (1 s for Sharp, 107 s for Tantivy), so its sample counts and
+   tails are not comparable; the paced table is the comparison.
+7. **Batches.** From 10 to 10,000 documents per call SearchEngine.Sharp goes from 71,500 to 333,000 documents/s, Lucene.NET from
    6,700 to 165,000, TantivyDotNet from 1,800 to 104,000, the previous layout from 930 to 6,800. The advantage over Lucene.NET is 10.6×
    at 10 documents per batch and 2.0× at 10,000.
-7. **Durability costs are separate and large for the engines that have it.** With a commit that reaches the disk after every document
-   Lucene.NET takes 4.8 ms (against 0.45 ms in memory) and TantivyDotNet 17.3 ms (against 4.6 ms). SearchEngine.Sharp has no
+8. **Durability costs are separate and large for the engines that have it.** With a commit that reaches the disk after every document
+   Lucene.NET takes 4.8 ms (against 0.41 ms in memory) and TantivyDotNet 17.3 ms (against 4.3 ms). SearchEngine.Sharp has no
    persistent index, so it has no number here; comparing it with a durable engine means comparing different guarantees.
-8. **Readers during writes.** With one reader thread, SearchEngine.Sharp's median query is 237 µs against 149 µs in the previous layout
-   and 208 µs in Tantivy (Lucene.NET 614 µs): queries now visit every segment (14 to 16 of them), which costs a little. The reader ran
-   for the 1.1 s that the Sharp run lasted, so it has only 346 samples and its p99.9 and maximum should not be read as tails.
-   The previous layout's reader saw a 636 ms stall during a rebuild.
 
 ## Method
 
@@ -48,6 +64,12 @@ All numbers below are from the tables in this report (1,000,000 documents, one V
   probe token of the newest document has exactly one hit, and every 97th call that the hit is that document.
 - **Timing.** One call of `AddVisible` per sample (`Stopwatch`), nothing else in the timed region; layout and merge statistics are read
   between calls. Process RSS is sampled every 20 ms; managed allocations and GC pauses come from the runtime counters.
+- **Merges.** Sharp: the updater's own counters (count, documents written, total time), read through reflection, and its list of running
+  merges for tagging queries. Lucene.NET: a `ConcurrentMergeScheduler` subclass that times every merge and counts the running ones.
+  TantivyDotNet: falls of the segment count between samples only.
+- **Paced run.** The writer issues one call every 1/120 s (it never fell behind: 120 calls per second reached by every engine), so all
+  readers run 167 s under the same write load. The reader sleeps 1 ms between queries. A query is tagged "during a merge" when a
+  background merge was running as it started, and "overlapping a slow write" when it overlapped a write call of more than 10 ms.
 - **Tantivy writer.** The bulk build uses a 256 MB writer. For the additions the bulk writer is closed and a writer with a 50 MB heap
   and one thread takes over, because the large heap made every small commit slower (11 ms at 100,000 documents with 256 MB). Sweep on
   the 1,000,000-document index, 1,000 additions: 15 MB p50 4.6 ms, 30 MB 4.5 ms, 50 MB 4.0 ms (two threads need a larger minimum heap and
@@ -61,7 +83,8 @@ All numbers below are from the tables in this report (1,000,000 documents, one V
 - One 4-vCPU Xeon VM (2.1 GHz), not pinned, with the benchmark and the engines' background threads sharing the cores. Absolute numbers
   differ on other machines; the shapes (the saw, the flat lines, the ratios) are what the plots are for.
 - One run per cell, except the single-document scenario (three runs, listed). Tails move between runs: Lucene.NET's slowest call was
-  17 ms, 87 ms and 210 ms.
+  17 ms, 19 ms and 210 ms. The first single run and the paced runs were made after the other cells, with the same build of every
+  engine; the batch, durable and unpaced-reader cells are from the earlier pass.
 - RSS includes allocator slack, Lucene's RAM buffer and Tantivy's native memory, so differences of a few percent mean nothing and the
   engines start from different baselines.
 - Only additions of new ids and no updates or deletions. Updates and deletions add dead documents and, for Sharp, kill-logging during
@@ -74,7 +97,7 @@ After each run, the sorted ids of four result sets are read from the engines' ow
 
 | Scenario (docs added, batch) | SearchEngine.Sharp | Sharp, previous layout (base + delta) | Lucene.NET 4.8 | TantivyDotNet 1.0.0-rc.2 | Result |
 |---|---|---|---|---|---|
-| 20,000, batch 1 | vis 0, id 0 (4 runs) | vis 0, id 0 (4 runs) | vis 0, id 0 (4 runs) | vis 0, id 0 (4 runs) | ids identical in every run (final 13,775, freshdoc 20,000) |
+| 20,000, batch 1 | vis 0, id 0 (5 runs) | vis 0, id 0 (5 runs) | vis 0, id 0 (5 runs) | vis 0, id 0 (5 runs) | ids identical in every run (final 13,775, freshdoc 20,000) |
 | 20,000, batch 10 | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | ids identical in every run (final 13,775, freshdoc 20,000) |
 | 20,000, batch 100 | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | ids identical in every run (final 13,775, freshdoc 20,000) |
 | 20,000, batch 1000 | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | vis 0, id 0 (1 run) | ids identical in every run (final 13,775, freshdoc 20,000) |
@@ -90,10 +113,10 @@ Latency of one call that adds a document and returns when a query can see it.
 
 | Engine | Mean | p50 | p95 | p99 | p99.9 | Max | Calls >10 ms / >100 ms / >1 s | Elapsed | Docs/s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| SearchEngine.Sharp | 47 µs | 33 µs | 91 µs | 144 µs | 643 µs | 104 ms | 1 / 1 / 0 | 1.0 s | 20,744 |
-| Sharp, previous layout (base + delta) | 2.78 ms | 1.09 ms | 2.85 ms | 4.94 ms | 322 ms | 2.16 s | 106 / 73 / 9 | 55.7 s | 359 |
-| Lucene.NET 4.8 | 602 µs | 449 µs | 1.20 ms | 2.91 ms | 7.92 ms | 86.98 ms | 5 / 0 / 0 | 12.1 s | 1,654 |
-| TantivyDotNet 1.0.0-rc.2 | 5.70 ms | 4.58 ms | 6.61 ms | 17.60 ms | 107 ms | 314 ms | 296 / 186 / 0 | 114.3 s | 175 |
+| SearchEngine.Sharp | 46 µs | 25 µs | 77 µs | 229 µs | 2.46 ms | 102 ms | 1 / 1 / 0 | 0.9 s | 21,270 |
+| Sharp, previous layout (base + delta) | 2.96 ms | 1.27 ms | 2.67 ms | 3.99 ms | 369 ms | 1.91 s | 116 / 78 / 9 | 59.2 s | 338 |
+| Lucene.NET 4.8 | 552 µs | 407 µs | 1.12 ms | 2.51 ms | 7.56 ms | 18.96 ms | 7 / 0 / 0 | 11.1 s | 1,803 |
+| TantivyDotNet 1.0.0-rc.2 | 5.32 ms | 4.25 ms | 6.22 ms | 13.58 ms | 107 ms | 143 ms | 269 / 166 / 0 | 106.9 s | 187 |
 
 ### Repeat runs of the same scenario
 
@@ -101,16 +124,16 @@ The table above is the first run. Tails move from run to run (a garbage collecti
 
 | Engine | Run | p50 | p99 | p99.9 | Max | Elapsed |
 |---|---:|---:|---:|---:|---:|---:|
-| SearchEngine.Sharp | 1 | 33 µs | 144 µs | 643 µs | 104 ms | 1.0 s |
+| SearchEngine.Sharp | 1 | 25 µs | 229 µs | 2.46 ms | 102 ms | 0.9 s |
 | SearchEngine.Sharp | 2 | 32 µs | 148 µs | 381 µs | 62.45 ms | 0.9 s |
 | SearchEngine.Sharp | 3 | 32 µs | 171 µs | 458 µs | 104 ms | 1.0 s |
-| Sharp, previous layout (base + delta) | 1 | 1.09 ms | 4.94 ms | 322 ms | 2.16 s | 55.7 s |
+| Sharp, previous layout (base + delta) | 1 | 1.27 ms | 3.99 ms | 369 ms | 1.91 s | 59.2 s |
 | Sharp, previous layout (base + delta) | 2 | 1.14 ms | 4.23 ms | 330 ms | 2.48 s | 54.6 s |
 | Sharp, previous layout (base + delta) | 3 | 1.21 ms | 5.98 ms | 323 ms | 2.15 s | 59.0 s |
-| Lucene.NET 4.8 | 1 | 449 µs | 2.91 ms | 7.92 ms | 86.98 ms | 12.1 s |
+| Lucene.NET 4.8 | 1 | 407 µs | 2.51 ms | 7.56 ms | 18.96 ms | 11.1 s |
 | Lucene.NET 4.8 | 2 | 429 µs | 3.06 ms | 7.11 ms | 210 ms | 11.5 s |
 | Lucene.NET 4.8 | 3 | 466 µs | 2.86 ms | 8.14 ms | 16.56 ms | 12.2 s |
-| TantivyDotNet 1.0.0-rc.2 | 1 | 4.58 ms | 17.60 ms | 107 ms | 314 ms | 114.3 s |
+| TantivyDotNet 1.0.0-rc.2 | 1 | 4.25 ms | 13.58 ms | 107 ms | 143 ms | 106.9 s |
 | TantivyDotNet 1.0.0-rc.2 | 2 | 4.40 ms | 22.44 ms | 107 ms | 113 ms | 112.0 s |
 | TantivyDotNet 1.0.0-rc.2 | 3 | 4.29 ms | 12.87 ms | 107 ms | 115 ms | 107.5 s |
 
@@ -118,21 +141,25 @@ The table above is the first run. Tails move from run to run (a garbage collecti
 
 | Engine | RSS before | Peak RSS (growth) | Managed allocations | GC pauses | gen0 / gen2 | Segments start → end → settled | Docs outside the largest segment at the end |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| SearchEngine.Sharp | 409 MiB | 461 MiB (+52) | 226 MiB | 104 ms | 1 / 0 | 1 → 16 → 13 | 20,000 |
-| Sharp, previous layout (base + delta) | 436 MiB | 1281 MiB (+845) | 19,783 MiB | 21122 ms | 107 / 15 | 1 → 2 → 2 | 1,901 |
-| Lucene.NET 4.8 | 407 MiB | 409 MiB (+1) | 19,787 MiB | 768 ms | 157 / 0 | 1 → 21 → 21 | 20,000 |
-| TantivyDotNet 1.0.0-rc.2 | 295 MiB | 365 MiB (+70) | 65 MiB | 0 ms | 0 / 0 | 1 → 9 → 9 | 20,000 |
+| SearchEngine.Sharp | 408 MiB | 458 MiB (+50) | 251 MiB | 101 ms | 1 / 0 | 1 → 13 → 13 | 20,000 |
+| Sharp, previous layout (base + delta) | 446 MiB | 1278 MiB (+832) | 19,784 MiB | 21875 ms | 110 / 15 | 1 → 2 → 2 | 1,901 |
+| Lucene.NET 4.8 | 411 MiB | 413 MiB (+1) | 19,431 MiB | 696 ms | 154 / 0 | 1 → 21 → 21 | 20,000 |
+| TantivyDotNet 1.0.0-rc.2 | 292 MiB | 361 MiB (+69) | 62 MiB | 0 ms | 0 / 0 | 1 → 9 → 9 | 20,000 |
 
 ### Merges, same runs
 
-| Engine | How measured | Merges | Documents written by merges | Write amplification | Merge time | Note |
-|---|---|---:|---:|---:|---:|---|
-| SearchEngine.Sharp | exact | 6,705 | 131,440 | 6.6× | 0.73 s | 6292 background, 413 inside the write call |
-| Sharp, previous layout (base + delta) | n/a | 0 | 0 | – | 0.00 s | the previous layout rebuilds the delta and the base inside the write call, so every rebuild is a spike in AddEntry itself |
-| Lucene.NET 4.8 | exact (merge scheduler hook) | 2,220 | 2,075,163 | 103.8× | 13.02 s | background merge threads |
-| TantivyDotNet 1.0.0-rc.2 | inferred | 82 | 0 | – | 0.00 s | Tantivy exposes no merge hook: this counts the samples at which the segment count fell, a lower bound |
+| Engine | How measured | Merges | Per 1,000 additions | Documents written by merges | Write amplification | Merge time, total | Mean per merge | One merge: p50 / p95 / max | Note |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| SearchEngine.Sharp | exact | 8,420 | 421 | 131,691 | 6.6× | 0.44 s | 52 µs | not exposed | 3252 background, 5168 inside the write call |
+| Sharp, previous layout (base + delta) | n/a | 0 | – | 0 | – | – | – | not exposed | the previous layout rebuilds the delta and the base inside the write call, so every rebuild is a spike in AddEntry itself |
+| Lucene.NET 4.8 | exact (merge scheduler hook) | 2,220 | 111 | 1,947,138 | 97.4× | 12.20 s | 5.49 ms | 1.13 ms / 36.32 ms / 94.84 ms | background merge threads |
+| TantivyDotNet 1.0.0-rc.2 | inferred | 83 | 4 | 0 | – | – | – | not exposed | Tantivy exposes no merge hook: this counts the samples at which the segment count fell, a lower bound |
 
-### With a concurrent reader
+![merges over the run](merges-by-operation.png)
+
+Cumulative merges against the operation number (Sharp and Lucene counted exactly, Tantivy as falls of the segment count, a lower bound), and below the duration of every Lucene merge at the moment it started. Sharp does not publish single merges, only their count and total time, so its per-merge duration is the mean.
+
+### With a concurrent reader, writer unpaced (each run lasts as long as its writer; see the paced runs below for equal conditions)
 
 One reader thread cycles `final`, `report AND pdf` and `rep*` (counts) while the writer adds one document at a time.
 
@@ -160,6 +187,23 @@ One reader thread cycles `final`, `report AND pdf` and `rep*` (counts) while the
 | Sharp, previous layout (base + delta) | 422 MiB | 1288 MiB (+866) | 19,789 MiB | 19884 ms | 105 / 13 | 1 → 2 → 2 | 1,901 |
 | Lucene.NET 4.8 | 412 MiB | 413 MiB (+1) | 21,511 MiB | 1101 ms | 173 / 8 | 1 → 21 → 21 | 20,000 |
 | TantivyDotNet 1.0.0-rc.2 | 295 MiB | 361 MiB (+66) | 88 MiB | 0 ms | 0 / 0 | 1 → 9 → 9 | 20,000 |
+
+## Search during indexing and merges
+
+### Same write load for every engine
+
+The writer adds one document per call at 120 calls per second, a rate every engine sustains, for 20,000 calls, so every reader runs for the same time under the same write load. One reader thread cycles `final`, `report AND pdf` and `rep*` (counts), 1 ms apart. Each query is tagged when it starts: whether a background merge was running (where the engine exposes it) and, after the run, whether it overlapped a write call that took over 10 ms (a rebuild or merge inside the write path, or a garbage collection).
+
+| Engine | Writes/s reached | Queries | All: p50 / p99 / max | During a background merge: n, p50 / p99 / max | No merge running: p50 / p99 | Overlapping a write over 10 ms: n, p50 / max | Writer p50 / p99 / max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SearchEngine.Sharp | 120 | 70,095 | 139 µs / 4.92 ms / 42.36 ms | 83, 137 µs / 4.80 ms / 4.80 ms | 139 µs / 4.92 ms | 20, 158 µs / 24.19 ms | 30 µs / 89 µs / 31.72 ms |
+| Sharp, previous layout (base + delta) | 120 | 60,092 | 141 µs / 5.31 ms / 689 ms | not observable | – | 4,456, 145 µs / 689 ms | 1.25 ms / 6.82 ms / 1.99 s |
+| Lucene.NET 4.8 | 120 | 101,623 | 457 µs / 1.40 ms / 65.56 ms | 48,241, 469 µs / 1.14 ms / 65.56 ms | 448 µs / 1.60 ms | 32, 647 µs / 53.26 ms | 522 µs / 1.97 ms / 55.39 ms |
+| TantivyDotNet 1.0.0-rc.2 | 120 | 101,428 | 204 µs / 1.81 ms / 19.95 ms | not observable | – | 6,336, 207 µs / 19.95 ms | 5.18 ms / 10.45 ms / 109 ms |
+
+![reader latency over time](reader-paced.png)
+
+Every reader query of the paced runs over time; red points ran while a background merge was running, black crosses overlapped a write call over 10 ms.
 
 ## Batches
 

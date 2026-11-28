@@ -57,7 +57,10 @@ scripts/repeat-sustained.sh results/sustained 2 # two more runs of the single-do
 python3 scripts/report_sustained.py results/sustained   # report.md and the plots (needs matplotlib)
 ```
 
-Scenarios: 20,000 single-document additions (without and with a concurrent reader), batches of 10, 100, 1,000 and 10,000, and a
-durable disk-index run for the engines that have one. `PREV_DLL=<dll>` adds SearchEngine.Sharp built from another commit, as
+Scenarios: 20,000 single-document additions (without a reader, with a reader, and with a reader while the writer is paced at
+`PACED_RATE` calls per second so every engine runs under the same write load), batches of 10, 100, 1,000 and 10,000, and a durable
+disk-index run for the engines that have one. Reader queries are tagged when a background merge runs (Sharp, Lucene) and when they
+overlap a write call over 10 ms; merges are counted and, for Lucene, timed one by one. `ONLY="single single-reader-paced"` runs
+a subset. `PREV_DLL=<dll>` adds SearchEngine.Sharp built from another commit, as
 the report does for the layout before segments. The report is [results/sustained/report.md](results/sustained/report.md);
 `*.json` hold every call's latency, `*.log` the console output. The method and its caveats are in the report.

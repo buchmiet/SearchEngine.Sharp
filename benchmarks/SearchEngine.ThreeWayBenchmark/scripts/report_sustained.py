@@ -57,13 +57,20 @@ def merges(scen, title):
     rows = [(s, n, get(s, scen)) for s, n in SLUGS if get(s, scen)]
     if not rows: return
     w(f"### {title}\n")
-    w("| Engine | How measured | Merges | Documents written by merges | Write amplification | Merge time | Note |")
-    w("|---|---|---:|---:|---:|---:|---|")
+    w("| Engine | How measured | Merges | Per 1,000 additions | Documents written by merges | Write amplification | Merge time, total | Mean per merge | One merge: p50 / p95 / max | Note |")
+    w("|---|---|---:|---:|---:|---:|---:|---:|---:|---|")
     for s, n, r in rows:
         m = r["merges"]
         wa = f"{m['writeAmplification']:.1f}×" if m.get("writeAmplification") else "–"
-        w(f"| {n} | {m['Source']} | {m['Merges']:,} | {m['DocumentsWritten']:,} | {wa} | {m['MergeSeconds']:.2f} s | {m['Note']} |")
+        per = f"{m['Merges'] * 1000 / r['ops']:.0f}" if m["Merges"] else "–"
+        mean = us(m["MergeSeconds"] * 1e6 / m["Merges"]) if m["Merges"] and m["MergeSeconds"] else "–"
+        d = r.get("mergeDurationsMilliseconds")
+        one = f"{us(d['p50'] * 1000)} / {us(d['p95'] * 1000)} / {us(d['max'] * 1000)}" if d else "not exposed"
+        total = f"{m['MergeSeconds']:.2f} s" if m["MergeSeconds"] else "–"
+        w(f"| {n} | {m['Source']} | {m['Merges']:,} | {per} | {m['DocumentsWritten']:,} | {wa} | {total} | {mean} | {one} | {m['Note']} |")
     w("")
+    w("![merges over the run](merges-by-operation.png)\n")
+    w("Cumulative merges against the operation number (Sharp and Lucene counted exactly, Tantivy as falls of the segment count, a lower bound), and below the duration of every Lucene merge at the moment it started. Sharp does not publish single merges, only their count and total time, so its per-merge duration is the mean.\n")
 
 def reader(scen, title):
     rows = [(s, n, get(s, scen)) for s, n in SLUGS if get(s, scen) and get(s, scen).get("concurrentReader")]
@@ -127,9 +134,34 @@ if rep_rows:
     w("")
 memory("single", "Memory, GC and layout, same runs")
 merges("single", "Merges, same runs")
-reader("single-reader", "With a concurrent reader")
+reader("single-reader", "With a concurrent reader, writer unpaced (each run lasts as long as its writer; see the paced runs below for equal conditions)")
 table("single-reader", "Writer latency while the reader runs")
 memory("single-reader", "Memory, GC and layout, with the reader")
+
+def paced(scen, title):
+    rows = [(s, n, get(s, scen)) for s, n in SLUGS if get(s, scen) and get(s, scen).get("concurrentReader")]
+    if not rows: return
+    w(f"### {title}\n")
+    r0 = rows[0][2]
+    w(f"The writer adds one document per call at {r0['rate']} calls per second, a rate every engine sustains, for {r0['ops']:,} calls, so every reader runs for the same "
+      "time under the same write load. One reader thread cycles `final`, `report AND pdf` and `rep*` (counts), 1 ms apart. Each query is tagged when it starts: "
+      "whether a background merge was running (where the engine exposes it) and, after the run, whether it overlapped a write call that took over 10 ms "
+      "(a rebuild or merge inside the write path, or a garbage collection).\n")
+    w("| Engine | Writes/s reached | Queries | All: p50 / p99 / max | During a background merge: n, p50 / p99 / max | No merge running: p50 / p99 | Overlapping a write over 10 ms: n, p50 / max | Writer p50 / p99 / max |")
+    w("|---|---:|---:|---:|---:|---:|---:|---:|")
+    for s, n, r in rows:
+        c, l = r["concurrentReader"], r["latencyMicroseconds"]
+        dm, nm, ow = c.get("duringBackgroundMerge"), c.get("withoutBackgroundMerge"), c.get("overlappingSlowWrite")
+        during = "not observable" if c.get("mergeNotObservable") else (f"{dm['queries']:,}, {us(dm['p50'])} / {us(dm['p99'])} / {us(dm['max'])}" if dm else "0")
+        without = "–" if c.get("mergeNotObservable") or not nm else f"{us(nm['p50'])} / {us(nm['p99'])}"
+        over = f"{ow['queries']:,}, {us(ow['p50'])} / {us(ow['max'])}" if ow else "0"
+        w(f"| {n} | {r['callsPerSecond']:.0f} | {c['queries']:,} | {us(c['p50'])} / {us(c['p99'])} / {us(c['max'])} | {during} | {without} | {over} | {us(l['p50'])} / {us(l['p99'])} / {us(l['max'])} |")
+    w("")
+    w("![reader latency over time](reader-paced.png)\n")
+    w("Every reader query of the paced runs over time; red points ran while a background merge was running, black crosses overlapped a write call over 10 ms.\n")
+
+w("## Search during indexing and merges\n")
+paced("single-reader-paced", "Same write load for every engine")
 
 w("## Batches\n")
 w("Latency of one call that adds a batch and returns when its newest document is visible; the last column is documents per second over the whole run.\n")
@@ -184,4 +216,35 @@ for s, n in SLUGS:
 ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("documents per batch"); ax.set_ylabel("documents per second (batch added and visible)")
 ax.legend(fontsize=8); ax.grid(alpha=.3, which="both", linewidth=.4)
 fig.tight_layout(); fig.savefig(f"{d}/batch-latency.png", dpi=130); plt.close(fig)
+fig, (ax, ax2) = plt.subplots(2, 1, figsize=(11, 6.5), gridspec_kw={"height_ratios": [1.2, 1]})
+for s, n in SLUGS:
+    r = get(s, "single")
+    if r and r["samples"].get("merges") and max(r["samples"]["merges"]) > 0:
+        base = r["samples"]["merges"][0]
+        ax.plot(r["samples"]["op"], [m - base for m in r["samples"]["merges"]], label=n, color=COLOR[s])
+ax.set_ylabel("merges so far"); ax.set_xlabel("operation number"); ax.legend(fontsize=8); ax.grid(alpha=.3, linewidth=.4)
+r = get("lucene", "single")
+if r and r.get("mergeEvents"):
+    ev = r["mergeEvents"]
+    ax2.scatter([e["start"] for e in ev], [e["ms"] for e in ev], s=[max(4, min(80, e["docs"] / 2000)) for e in ev], color=COLOR["lucene"], alpha=.6)
+    ax2.set_yscale("log"); ax2.set_ylabel("Lucene merge duration, ms"); ax2.set_xlabel("seconds into the run (size of the point: documents merged)")
+    ax2.grid(alpha=.3, which="both", linewidth=.4)
+fig.tight_layout(); fig.savefig(f"{d}/merges-by-operation.png", dpi=130); plt.close(fig)
+
+pav = [(s, n) for s, n in SLUGS if get(s, "single-reader-paced")]
+if pav:
+    fig, axes = plt.subplots(len(pav), 1, figsize=(11, 2.4 * len(pav)), sharex=True, sharey=True)
+    if len(pav) == 1: axes = [axes]
+    for ax, (s, n) in zip(axes, pav):
+        r = get(s, "single-reader-paced"); rs = r["readerSeries"]
+        t, y, m = rs["seconds"], rs["microseconds"], rs["merging"]
+        ax.scatter([t[i] for i in range(len(t)) if m[i] != 1], [y[i] for i in range(len(t)) if m[i] != 1], s=2, color=COLOR[s], alpha=.5, linewidths=0)
+        ax.scatter([t[i] for i in range(len(t)) if m[i] == 1], [y[i] for i in range(len(t)) if m[i] == 1], s=3, color="#d62728", alpha=.6, linewidths=0)
+        slow = r.get("slowWrites") or []
+        ov = [i for i in range(len(t)) if any(t[i] < w1 and t[i] + y[i] / 1e6 > w0 for w0, w1 in slow)]
+        ax.scatter([t[i] for i in ov], [y[i] for i in ov], s=12, color="black", marker="x", linewidths=.7)
+        ax.set_yscale("log"); ax.set_ylabel("µs"); ax.grid(alpha=.3, which="both", linewidth=.4)
+        ax.set_title(f"{n}: reader p50 {us(r['concurrentReader']['p50'])}, p99 {us(r['concurrentReader']['p99'])}, max {us(r['concurrentReader']['max'])}", fontsize=9, loc="left")
+    axes[-1].set_xlabel("seconds into the run")
+    fig.tight_layout(); fig.savefig(f"{d}/reader-paced.png", dpi=130); plt.close(fig)
 print(f"wrote {d}/report.md; verification mismatches: {bad}")

@@ -5,6 +5,9 @@ namespace ThreeWay;
 /// <summary>What an engine reports about its own background merging.</summary>
 public sealed record MergeReport(string Source, long Merges, long DocumentsWritten, double MergeSeconds, string Note);
 
+/// <summary>One merge, where the engine lets it be observed: start (Stopwatch timestamp), duration and documents written.</summary>
+public sealed record MergeEvent(long StartTimestamp, double Milliseconds, long Documents);
+
 /// <summary>
 /// The operations of the sustained-indexing benchmark. Every engine gives the same guarantee: when
 /// <see cref="AddVisible"/> returns, a query on the freshest searcher sees every document that was added (read your own
@@ -36,6 +39,12 @@ public interface ISustained : IDisposable
     void Settle();
 
     MergeReport Merges();
+
+    /// <summary>Whether a background merge runs right now; null when the engine does not expose it.</summary>
+    bool? MergeActive { get; }
+
+    /// <summary>Every merge with its own duration, where the engine exposes merges one by one; empty otherwise.</summary>
+    IReadOnlyList<MergeEvent> MergeEvents { get; }
 }
 
 public static class ReaderQueries

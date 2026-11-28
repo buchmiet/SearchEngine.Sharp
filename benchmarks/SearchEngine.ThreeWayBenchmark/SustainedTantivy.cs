@@ -129,6 +129,9 @@ public sealed class SustainedTantivy : ISustained
     public MergeReport Merges()
         => new("inferred", _segmentDrops, 0, 0, "Tantivy exposes no merge hook: this counts the samples at which the segment count fell, a lower bound");
 
+    public bool? MergeActive => null;
+    public IReadOnlyList<MergeEvent> MergeEvents => [];
+
     private bool _disposed;
 
     public void Dispose()

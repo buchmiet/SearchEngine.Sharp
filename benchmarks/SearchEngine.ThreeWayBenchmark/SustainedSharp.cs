@@ -98,5 +98,21 @@ public sealed class SustainedSharp(string label) : ISustained
             $"{Get("BackgroundMerges")} background, {Get("SynchronousMerges")} inside the write call");
     }
 
+    private System.Collections.ICollection? _jobs;
+
+    // The updater's list of running merge jobs, read without its lock: a racy read of a count, good enough to tag a
+    // query sample. Null on the layout before segments, which has no background merges.
+    public bool? MergeActive
+    {
+        get
+        {
+            _jobs ??= _updater.GetType().GetField("_jobs", Any)?.GetValue(_updater) as System.Collections.ICollection;
+            return _jobs is null ? null : _jobs.Count > 0;
+        }
+    }
+
+    // The updater counts merges and their total time but does not publish each one.
+    public IReadOnlyList<MergeEvent> MergeEvents => [];
+
     public void Dispose() { }
 }

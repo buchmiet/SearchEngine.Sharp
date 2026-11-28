@@ -18,6 +18,10 @@ public sealed class SustainedLucene : ISustained
     private sealed class TimedMergeScheduler : ConcurrentMergeScheduler
     {
         private long _merges, _docs, _ticks;
+        private int _active;
+        private readonly List<MergeEvent> _events = [];
+        public bool Active => Volatile.Read(ref _active) > 0;
+        public IReadOnlyList<MergeEvent> Events { get { lock (_events) return [.. _events]; } }
         public long Merges => Interlocked.Read(ref _merges);
         public long Docs => Interlocked.Read(ref _docs);
         public TimeSpan Time => TimeSpan.FromTicks(Interlocked.Read(ref _ticks));
@@ -25,7 +29,10 @@ public sealed class SustainedLucene : ISustained
         protected override void DoMerge(MergePolicy.OneMerge merge)
         {
             long began = Stopwatch.GetTimestamp();
-            base.DoMerge(merge);
+            Interlocked.Increment(ref _active);
+            try { base.DoMerge(merge); }
+            finally { Interlocked.Decrement(ref _active); }
+            lock (_events) _events.Add(new MergeEvent(began, Stopwatch.GetElapsedTime(began).TotalMilliseconds, merge.TotalDocCount));
             Interlocked.Increment(ref _merges);
             Interlocked.Add(ref _docs, merge.TotalDocCount);
             Interlocked.Add(ref _ticks, Stopwatch.GetElapsedTime(began).Ticks);
@@ -152,6 +159,9 @@ public sealed class SustainedLucene : ISustained
     public void Settle() => _writer.WaitForMerges();
 
     public MergeReport Merges() => new("exact (merge scheduler hook)", _scheduler.Merges, _scheduler.Docs, _scheduler.Time.TotalSeconds, "background merge threads");
+
+    public bool? MergeActive => _scheduler.Active;
+    public IReadOnlyList<MergeEvent> MergeEvents => _scheduler.Events;
 
     private bool _disposed;
 
