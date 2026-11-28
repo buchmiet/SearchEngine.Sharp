@@ -50,6 +50,9 @@ number of returned ids.
 | `jpg`, natural sort | Exact | 10,555 | 4.3 ms | 105,458 | 65 ms |
 | `report`, natural sort | Within | 1,300 | 670 µs | 12,837 | 9.2 ms |
 
+The `rep*` row was measured before a glob with a literal prefix visited only the matching tokens; see
+[Per query](#per-query) for the change. The `img_*` and `dsc?????.jpg` rows of the next table too.
+
 `SearchTokenization.FileMask` (the whole name is one token, so the vocabulary is the set of distinct names: 78,000
 at 10^5 and 659,000 at 10^6). Every query also applies the facet filter "not a directory", as a file search
 dialog would. The 10^6 column is the median of three runs:
@@ -158,7 +161,7 @@ permutation are extra and exist only after their first use (see below).
 
 ### Work deferred to the first query
 
-Two structures are built on first use. Concurrent first callers wait for one build; every later query reuses it.
+Three structures are built on first use. Concurrent first callers wait for one build; every later query reuses it.
 They belong to a segment, so a change keeps those of every segment it does not touch: their cost comes back only
 for a segment that a `RebuildFrom` or a merge creates. A small segment has small ones, built by the first query that
 needs them. A natural sort places the documents of the smaller segments in the permutation of the largest one; that
@@ -167,9 +170,11 @@ placement is built once per published snapshot, by the first natural sort on it.
 | Structure | Built by | Measured at 10^5 | Measured at 10^6 |
 |---|---|---:|---:|
 | Bigram index | the first `Within` query with a term of two or more characters | 18 ms (109,000 tokens) to 90 ms (78,000 whole names) | 0.12 s (1 million tokens) to 0.46 s (659,000 whole names) |
+| Text order of the tokens (4 bytes per token) | the first glob query with a literal prefix (`rep*`, `dsc?????`) on a segment of 256 or more tokens | not measured | 0.10 s warm, 0.3 s in a new process (304,000 tokens) |
 | Natural sort permutation | the first `NaturalSortAscending` query whose result holds more than 80% of the documents | 0.18 s | 2.2 s |
 
-The permutation was measured on `SyntheticPathFeed` paths (6 to 7 tokens per sort text); the bigram index on both
+The text order was measured on a 4-vCPU Xeon VM, as the median of nine builds after one warm-up; a build also takes
+8 bytes per token of temporary memory. The permutation was measured on `SyntheticPathFeed` paths (6 to 7 tokens per sort text); the bigram index on both
 corpora. `Exact`, glob and regex queries never build the bigram index.
 
 ### Per query
@@ -179,8 +184,15 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
   into a bitset with one bit per document, so it pays at least a pass over N/64 words.
 - `Within` looks up candidate tokens by the first two characters of the term and searches each candidate with a
   vectorized `IndexOf`. A one-character term scans the vocabulary.
-- A glob term scans the vocabulary; tokens shorter than the pattern's minimum length are skipped. Patterns of the
-  shapes `abc*`, `*abc`, `*abc*` and `ab*cd` (no `?`) use vectorized string search.
+- A glob term with literal characters before its first `*` or `?` (`rep*`, `dsc?????`, `img_*`) binary-searches the
+  tokens of each segment, sorted by text, and tests only those that start with them. The answer is the same as
+  that of a scan, because a match must start with those characters. A pattern that starts with a wildcard (`*ing`,
+  `*port*`) scans the vocabulary, as does a segment of fewer than 256 tokens and a prefix that a fifth or more of the
+  tokens start with; tokens shorter than the pattern's minimum length are skipped. Patterns of the shapes `abc*`,
+  `*abc`, `*abc*` and `ab*cd` (no `?`) use vectorized string search. On a 4-vCPU Xeon VM at 10^6 names (the
+  `ThreeWayBenchmark`, medians of three interleaved runs, the machine shared with other jobs), `rep*` fell from 1.4 ms
+  to 0.03 ms for the count, from 1.6 ms to 0.2 ms for the ids, and the `dsc?????` count from 1.8 ms to 1.3 ms: most of
+  its time goes into adding 40,043 hits.
 - A regex runs `Regex.IsMatch` on every token of the vocabulary.
 - A facet filter checks only the hits when they are at most 75% of the documents, otherwise it scans the facet
   columns. A filter-only query always scans the columns and is then sorted like any other result.

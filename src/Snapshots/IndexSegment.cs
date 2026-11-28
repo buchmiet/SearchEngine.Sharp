@@ -29,8 +29,8 @@ namespace SearchEngine.Snapshots;
 // different place in the next snapshot after a merge (IndexSnapshot, Data layout, adds the offset).
 //
 // ── Thread safety ──
-// A segment is immutable after construction except for two derived structures built on first use: the bigram index
-// and the sort permutation. Each is built at most once per segment: the first caller builds it under a per-structure
+// A segment is immutable after construction except for three derived structures built on first use: the bigram index,
+// the tokens in text order and the sort permutation. Each is built at most once per segment: the first caller builds it under a per-structure
 // lock while concurrent first callers wait on that lock. A build that throws publishes nothing, so the next caller
 // builds again. Nothing is built at publish time. A segment outlives many snapshots
 // (IndexSnapshot), so its structures survive the publishes of changes that do not touch it.
@@ -98,6 +98,19 @@ internal sealed class IndexSegment
 
     // Number of times the bigram index was built on this segment (read by tests).
     internal int BigramBuildCount => Volatile.Read(ref _bigramBuildCount);
+
+    // Token indices sorted ordinally by token text (UTF-16 code units). The tokens that start with a given prefix form one
+    // contiguous run, which a glob with a literal prefix visits instead of every token (QueryMatcher.MatchGlob).
+    private int[]? _wordsByText;
+    private object? _wordsByTextBuildLock;
+    private int _wordsByTextBuildCount;
+
+    internal int[] WordsByText
+        => Volatile.Read(ref _wordsByText)
+           ?? LazyInitializer.EnsureInitialized(ref _wordsByText, ref _wordsByTextBuildLock, BuildWordsByText);
+
+    // Number of times the text order was built on this segment (read by tests).
+    internal int WordsByTextBuildCount => Volatile.Read(ref _wordsByTextBuildCount);
 
     // Sort permutation for NaturalSortAscending (GetSortedPermutation).
     private int[]? _sortedPermutation;
@@ -169,6 +182,82 @@ internal sealed class IndexSegment
 
         Interlocked.Increment(ref _bigramBuildCount);
         return built;
+    }
+
+    // Sorts by the first four characters packed into a ulong (a primitive sort), then orders the tokens that share them
+    // by full text.
+    private int[] BuildWordsByText()
+    {
+        int count = WordLengths.Length;
+        var order = new int[count];
+        var keys = new ulong[count];
+        for (int i = 0; i < count; i++)
+        {
+            order[i] = i;
+            keys[i] = TextKey(WordAt(i));
+        }
+
+        keys.AsSpan().Sort(order.AsSpan());
+        for (int start = 0; start < count;)
+        {
+            int end = start + 1;
+            while (end < count && keys[end] == keys[start])
+                end++;
+
+            if (end - start > 1)
+                order.AsSpan(start, end - start).Sort(new TextOrder(this));
+            start = end;
+        }
+
+        _wordsByTextBuildCount++; // runs under the build lock (Thread safety above)
+        return order;
+    }
+
+    // The first four characters, the first in the highest bits; a missing character is 0. Keys that differ order the
+    // tokens as the ordinal comparison does, because a shorter token sorts before a longer one with the same start and
+    // 0 is the lowest character; equal keys are settled by the full comparison.
+    private static ulong TextKey(ReadOnlySpan<char> word)
+    {
+        ulong key = 0;
+        for (int i = 0; i < 4; i++)
+            key = (key << 16) | (i < word.Length ? word[i] : (ulong)0);
+        return key;
+    }
+
+    // The positions in WordsByText of the first token that starts with the prefix and of the first token after the run.
+    // A token that is a proper prefix of the prefix sorts before the run, so it is not in it.
+    internal (int Start, int End) PrefixRange(ReadOnlySpan<char> prefix)
+    {
+        var order = WordsByText;
+        int start = FirstAtLeast(order, prefix, strict: false);
+        int end = FirstAtLeast(order, prefix, strict: true);
+        return (start, end);
+    }
+
+    // strict false: the first token that is not below the run of the prefix; strict true: the first token above it.
+    private int FirstAtLeast(int[] order, ReadOnlySpan<char> prefix, bool strict)
+    {
+        int low = 0;
+        int high = order.Length;
+        while (low < high)
+        {
+            int mid = (int)((uint)(low + high) >> 1);
+            var word = WordAt(order[mid]);
+            int cmp = word.Length >= prefix.Length
+                ? word[..prefix.Length].SequenceCompareTo(prefix)
+                : (word.SequenceCompareTo(prefix[..word.Length]) is var c && c != 0 ? c : -1);
+            if (strict ? cmp <= 0 : cmp < 0)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        return low;
+    }
+
+    private readonly struct TextOrder(IndexSegment segment) : IComparer<int>
+    {
+        public int Compare(int x, int y) => segment.WordAt(x).SequenceCompareTo(segment.WordAt(y));
     }
 
     // The sort permutation: the local ordinals of the segment in natural order (NaturalOrder), permutation[rank] = ordinal.
