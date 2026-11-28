@@ -90,34 +90,54 @@ What the tables show:
 | Full build, `Default` | linear in the number of tokens | 0.21 s | 2.0 s |
 | Full build, `FileMask` | linear in the number of names | 0.19 s | 2.1 s |
 | `RebuildFrom` | one full build | same | same |
-| `AddEntry`, `RemoveEntry`, `RefreshEntry`, `AddOrUpdateEntries`, `RemoveEntries` | a build of the entries changed since the last full build (the delta), or a full build when the changes pass the merge limit | see below | see below |
+| `AddEntry`, `RemoveEntry`, `RefreshEntry`, `AddOrUpdateEntries`, `RemoveEntries` | a build of one small segment from the entries changed; a merge of segments runs later, on a background thread | see below | see below |
 
 ### Keeping an index current
 
-A snapshot of an `IndexUpdater` has three parts: a base built from all entries, a delta built from the entries added
-or replaced since then, and the list of base documents removed or replaced since then. A change keeps the base of
-the previous snapshot and builds only a new delta, so its cost grows with the number of changes since the last full
-build, not with the size of the index. When the delta and the removed base documents together pass about
-`2 × √(entry count)`, the change builds the whole index instead (a merge), and the next changes start from an empty
-delta again:
+The index of an `IndexUpdater` is a list of immutable segments. `RebuildFrom` builds one segment from all entries. A
+change builds one more segment from the entries it adds or replaces, marks the documents it removes or replaces as
+removed in the segments that hold them (a bitmap per segment, copied in 512-byte chunks), and publishes the new list.
+Its cost therefore follows the size of the change, not the size of the index; the one lookup that finds the old copy
+of an id probes the id table of each segment.
 
-| Entries | Merge limit | Largest delta a change builds | Changes between two merges |
-|---:|---:|---:|---|
-| up to 16,000 | 256 | 256 | 128 to 256 |
-| 10^5 | 632 | 632 | 316 to 632 |
-| 10^6 | 2,000 | 2,000 | 1,000 to 2,000 |
-| 4.2 × 10^6 and more | 4,096 | 4,096 | 2,048 to 4,096 |
+Many small segments would slow every query down, so a background thread merges neighbouring segments of similar
+size. A merge concatenates the posting lists of its segments, drops the removed documents and renumbers the rest,
+without tokenizing any text again. A merge reads only immutable segments and replaces them with its result in one
+publish, so neither queries nor changes wait for it; a document that a change removes while its segment is being
+merged is marked removed in the merged segment when the merge completes. Segments of similar size merge when at
+least four of them are adjacent, so sizes grow by a factor of about four per merge and a document is rewritten
+about once per size class (7 to 11 times over 20,000 changes into an index of 10^6, see below). The index has
+typically 5 to 15 segments, and more while a writer outruns the merges. A segment in which 30% of the documents are
+removed is rewritten without them. If a writer outruns the merges and the list passes 64 segments, the change
+merges the newest small segments itself before it returns (a few milliseconds).
 
-Adding an entry counts one (its delta entry), replacing an entry of the base counts two (the new delta entry
-and the removed base document), removing one counts one, and changing an entry that is already in the delta
-again counts nothing. A merge costs a full build (0.2 s at 10^5, 2 s at
-10^6). One call with many changes publishes once: a batch larger than the merge limit is a full build, which is
-what `ProgressiveIndexIngestion` does with its large batches. Queries never wait for a change: they keep reading
-the previous snapshot until the new one is published. The async rebuild methods read their input before taking
-the updater's lock, so other writers wait only for the build itself.
+Measured on a 4-vCPU Xeon VM (2.1 GHz, AVX2) with 10^6 names, one thread making 20,000 changes, no query running.
+"Before" is the previous layout (a base, a delta rebuilt from every change since the last merge, and a full build
+every 1,000 to 2,000 changes); "after" is the segment layout, same machine, same corpus, same process settings:
 
-Every query pays a little for the delta and the removed documents: the delta is searched like a second, small
-index, and the removed documents are cleared from the result once.
+| Changes | | Throughput | Latency p50 | p99 | p99.9 | Slowest call | Calls over 1 s |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 20,000 `AddEntry`, as fast as possible | before | 661/s | 622 µs | 2.4 ms | 204 ms | 1.97 s | 9 |
+| | after | 18,350/s | 49 µs | 0.19 ms | 0.36 ms | 16 ms | 0 |
+| 1,000/s, 60% add, 30% replace, 10% remove | before | 551/s | 523 µs | 1.9 ms | 333 ms | 2.10 s | 12 |
+| | after | 1,000/s | 17 µs | 0.07 ms | 0.17 ms | 19 ms | 0 |
+
+The slowest call of the "after" rows is the one garbage collection of the run, which the 10^6-entry heap makes long
+(16 to 18 ms); no call rebuilds anything. The "before" rows spend 7.7 to 10.7 s of 30 to 36 s in garbage collections
+(a full build allocates about 590 MB at this size, see [Memory](#memory)); the "after" rows spend about 20 ms. With a
+query thread running on the same index, which allocates a result list of up to 158,000 ids per query, both layouts
+see long gen-2 pauses; the slowest write was then 22 to 125 ms after the change and 2.3 s before.
+
+A merge costs time on a background thread in proportion to the documents it writes: over runs of 12,000 to 20,000
+changes the merges wrote 7.5 to 11 documents per document changed (the write amplification) in 0.2 to 0.4 s in all.
+A change that arrives in a batch (`AddOrUpdateEntries`, `RemoveEntries`) builds one segment, so a large batch costs
+about what a build of that many entries costs, and is no longer a full build of the index.
+
+Every query visits every segment: it looks a token up in each one, and clears the removed documents of each from
+its result once. Single-segment indexes (after `RebuildFrom` or once the merges caught up with a small index) answer
+as before: on the same machine, three runs each, the queries of the [table above](#query-latency) at 10^6 names ran
+at 0.66 to 1.24 times their earlier time, in both directions, which is the noise of the measurement. Each extra
+segment adds one dictionary lookup per token a query resolves, and a pass over its removed documents.
 
 ### Memory
 
@@ -126,21 +146,23 @@ Measured after one full build with facets (one process per size):
 | | `Default` 10^5 | `FileMask` 10^5 | `Default` 10^6 | `FileMask` 10^6 |
 |---|---:|---:|---:|---:|
 | Snapshot, bytes per entry | 131 | 175 | 122 | 160 |
-| Entries kept by the updater (names, sort texts, facets) | 25 MB | 25 MB | 252 MB | 252 MB |
 | Allocated during the build | 62 MB | 45 MB | 588 MB | 383 MB |
 | Peak process memory (RSS) | 107 MB | 120 MB | 642 MB | 771 MB |
 
-Plan for about 400 bytes per indexed name with three facets (snapshot plus the updater's copy of the entries) and
-about 0.8 KB per name of peak memory while a build runs, because the old snapshot stays alive until the new one is
-published. Each facet adds 8 bytes per entry to the snapshot. The bigram index for `Within` and the natural sort
+The updater no longer keeps a copy of the entries: it keeps the segments only, plus an id table of 8 bytes per
+document. Managed memory after a build of 10^6 names without facets fell from 140 MB to 70 MB. Plan for about
+130 to 170 bytes per indexed name with three facets and about 0.8 KB per name of peak memory while a build runs,
+because the old snapshot stays alive until the new one is published. The "allocated" and "peak" rows were measured
+before the updater dropped its copy, so they are upper bounds. Each facet adds 8 bytes per entry to the snapshot. The bigram index for `Within` and the natural sort
 permutation are extra and exist only after their first use (see below).
 
 ### Work deferred to the first query
 
 Two structures are built on first use. Concurrent first callers wait for one build; every later query reuses it.
-They belong to the base of a snapshot, so a change that keeps the base keeps them too: their cost comes back only
-after a full build (`RebuildFrom` or a merge). The delta has its own small ones, built again after every change by
-the first query that needs them; a natural sort also places each delta document in the base permutation then.
+They belong to a segment, so a change keeps those of every segment it does not touch: their cost comes back only
+for a segment that a `RebuildFrom` or a merge creates. A small segment has small ones, built by the first query that
+needs them. A natural sort places the documents of the smaller segments in the permutation of the largest one; that
+placement is built once per published snapshot, by the first natural sort on it.
 
 | Structure | Built by | Measured at 10^5 | Measured at 10^6 |
 |---|---|---:|---:|
@@ -184,16 +206,16 @@ Both variants read each directory entry once with `FileSystemEnumerable`, as in 
 [file search guide](file-search-guide.md#index-or-plain-scan). A kept index answers a query over 1 million names
 in 0.1 to 17 ms (a regex up to 230 ms) instead of a 1.15 s rescan. Building it from disk costs about as much as
 5 to 9 rescans, so it pays off after about 5 to 9 queries on a tree that does not change in between. A change to
-the kept index builds only the entries changed since the last full build, and the whole index (about 2 s at 10^6)
-is built again once every 1,000 to 2,000 changes at 10^6.
+the kept index builds one small segment of the changed entries (tens of microseconds at 10^6) and never builds
+the whole index again.
 
 ## Tuning progressive ingestion
 
 `ProgressiveIndexIngestion` buffers the entries of a scan and publishes them through
-`IIndexUpdater.AddOrUpdateEntries`. A publish whose batch is larger than the merge limit of the updater (see
-[Keeping an index current](#keeping-an-index-current)) is a full rebuild. The batches of a fast scan are that
-large, so the number of publishes decides the total cost, and the time between publishes decides how stale the
-index is.
+`IIndexUpdater.AddOrUpdateEntries`. A publish builds one segment from its batch (see
+[Keeping an index current](#keeping-an-index-current)), so its cost follows the batch size and the total cost
+follows the number of entries; the number of publishes decides how many segments the background merges have to
+combine, and the time between publishes decides how stale the index is.
 
 ### Policies
 
@@ -205,24 +227,29 @@ settings it uses (the full list with defaults is in [the API reference](api.md#i
 | `Adaptive` (default) | the buffer reaches the batch cap; or `max(MinInterval, PublishMultiplier × last publish duration)` has passed and at least `MinTimerPublishBatch` entries wait; or the oldest entry has waited `MaxStaleness`. A timer drives the time-based publishes | scans of any speed and size |
 | `TimeDebounce` | `MinInterval` has passed since the last publish and the buffer is not empty; or the oldest entry has waited `MaxStaleness`. A timer drives both. The number of buffered entries never starts a publish | scans where you want a fixed refresh rate |
 | `FixedBatch` | the buffer reaches `BatchSize`; or an entry arrives while the oldest buffered entry has waited `MaxStaleness`. No timer, so an idle scanner leaves entries unpublished | tests and benchmarks |
-| `PerEntry` | after every entry | a baseline only: every publish builds the entries changed since the last full rebuild again, and the index is rebuilt every few hundred to few thousand entries |
+| `PerEntry` | after every entry | a baseline only: every publish builds a one-entry segment, which the background merges then combine |
 
 100,000 synthetic paths fed as fast as possible (`--ingestion-policy` benchmark, same machine):
 
-| Policy | Publishes | Total publish time | Publish time relative to one build | Longest observed staleness |
-|---|---:|---:|---:|---:|
-| `Adaptive` (defaults) | 7 | 0.62 s | 2.3 times | 0.25 s |
-| `Adaptive` with `GrowthAwareBatchCap = false` | 50 | 7.1 s | 25 times | 1.5 s |
-| `TimeDebounce`, 100 ms | 2 | 0.40 s | 1.5 times | 0.24 s |
-| `FixedBatch`, 2,000 | 50 | 9.9 s | 36 times | 1.7 s |
+Measured on the 4-vCPU VM of [Keeping an index current](#keeping-an-index-current). The "before" columns are the
+previous layout on the same machine:
+
+| Policy | Publishes | Total publish time, before | after | Publish time relative to one build, after | Longest observed staleness, after |
+|---|---:|---:|---:|---:|---:|
+| `Adaptive` (defaults) | 7 | 1.13 s | 0.62 s | 2.7 times | 0.47 s |
+| `Adaptive` with `GrowthAwareBatchCap = false` | 50 | 8.92 s | 0.40 s | 1.6 times | 0.15 s |
+| `TimeDebounce`, 100 ms | 3 | 0.92 s | 0.38 s | 0.9 times | 0.55 s |
+| `FixedBatch`, 2,000 | 50 | 9.07 s | 1.03 s | 2.3 times | 0.29 s |
 
 ### Options
 
 These are the settings of `Adaptive`, except where noted.
 
 - `GrowthAwareBatchCap` (default `true`) raises the batch cap after each publish to the number of
-  indexed documents. A fast scan then publishes at 2k, 4k, 8k, 16k and so on, which keeps the total rebuild work
-  near twice one full build. Leave it on unless you need publishes of a constant size.
+  indexed documents. A fast scan then publishes at 2k, 4k, 8k, 16k and so on, which keeps the number of segments
+  low. With segments a publish costs its batch and not the index, so the option no longer decides the total cost
+  (50 publishes of 2,000 take 0.40 s against 0.62 s for 7 growing ones in the table above); it still decides how
+  many merges follow. Turn it off if you want publishes of a constant size and a constant staleness.
 - `BatchCap` (default 2,000) is the first batch cap. `FixedBatch.BatchSize` (default 2,000) is the size of every
   batch under `FixedBatch`. Smaller values show the first results sooner and cost more rebuilds.
 - `MinInterval` (default 100 ms) is the shortest time between timer publishes. `TimeDebounce` has the same

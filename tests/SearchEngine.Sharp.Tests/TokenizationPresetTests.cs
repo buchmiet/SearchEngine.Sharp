@@ -188,8 +188,8 @@ public class TokenizationPresetTests
             new Dictionary<int, string> { [1] = lower, [2] = mixed },
             SearchTokenization.FileMask);
 
-        await Assert.That(snapshot.Base.ExactPostings.Keys).Contains(key => ReferenceEquals(key, lower));
-        await Assert.That(snapshot.Base.ExactPostings.Keys).Contains("report-final.pdf"); // lowercased copy of the mixed-case name
-        await Assert.That(snapshot.Base.ExactPostings.Keys).DoesNotContain(key => ReferenceEquals(key, mixed));
+        await Assert.That(snapshot.Segments[0].ExactPostings.Keys).Contains(key => ReferenceEquals(key, lower));
+        await Assert.That(snapshot.Segments[0].ExactPostings.Keys).Contains("report-final.pdf"); // lowercased copy of the mixed-case name
+        await Assert.That(snapshot.Segments[0].ExactPostings.Keys).DoesNotContain(key => ReferenceEquals(key, mixed));
     }
 }

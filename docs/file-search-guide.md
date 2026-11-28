@@ -78,7 +78,7 @@ Decide this first; it matters more than any tuning below.
 |-----------|-----|-----|
 | One-shot search of a tree ("find files named `*.pdf` under this folder"), result thrown away afterwards | Plain scan with `NameMatcher` | Every name has to be read from disk once anyway, and matching it while it is read costs less than indexing it. At 1 million files the scan takes about 1 s and a few tens of MB; scanning into an index takes over 10 s and close to 2 GB of allocations. |
 | An index kept and queried many times over the same tree (filter as you type, a drive kept in memory) | `IndexUpdater` and `SearchEngineSharp` | A query over 1 million names takes 0.1 to 17 ms instead of a rescan. Building the index costs about 5 to 9 rescans, so it pays off after that many queries on a tree that does not change in between. |
-| A kept index over files that change often | `IndexUpdater`, one call per change or per batch of changes | A change builds only the entries changed since the last full build of the index; the whole index (about 2 s at 1 million names) is built again once every 1,000 to 2,000 changes at that size. Changes that arrive together go in one `AddOrUpdateEntries` or `RemoveEntries` call. |
+| A kept index over files that change often | `IndexUpdater`, one call per change or per batch of changes | A change builds one small segment from the entries it changes, in tens of microseconds at 1 million names, and never rebuilds the index; segments are merged on a background thread. Changes that arrive together go in one `AddOrUpdateEntries` or `RemoveEntries` call. |
 
 The measurements behind these numbers: [Index or plain scan](performance.md#index-or-plain-scan).
 
@@ -135,8 +135,8 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
 
 ## Scanning into a persistent index
 
-Do not call `AddEntry` per file: each call publishes a snapshot, and the whole index is built again every few
-hundred to few thousand calls, so a long scan costs many full builds. Stream the scan through
+Do not call `AddEntry` per file: each call publishes a snapshot and adds a segment that the background merges then
+have to combine, so a long scan makes many segments and merges. Stream the scan through
 `ProgressiveIndexIngestion` instead. The scanner owns the id → path table and hands
 each path to the consumer through a thread-safe map; do not share a plain `List<string>` between the scanner
 (which runs on the ingestion's producer task) and the code that reads results:
@@ -321,7 +321,7 @@ of passing it through as a text expression.
 Name queries other than regexes take less than 2 ms at 100,000 names and less than 20 ms at 1 million
 ([Query latency](performance.md#query-latency)). Two costs show up in a live result list:
 
-- After a full build, the first `Within` query builds the bigram index, and the first natural sort of a result
+- After a full build or a merge, the first `Within` query builds the bigram index of the new segment, and the first natural sort of a result
   that holds more than 80% of the names builds the sort permutation. Publishes of small changes keep both
   ([Work deferred to the first query](performance.md#work-deferred-to-the-first-query)).
 - Until the permutation exists, `NaturalSortAscending` sorts the hits of every query: about 4 ms for 10,000 hits

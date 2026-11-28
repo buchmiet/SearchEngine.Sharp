@@ -113,8 +113,8 @@ public class WithinMatchingTests
         int bigramAn = ('a' << 16) | 'n';
         int bigramNa = ('n' << 16) | 'a';
 
-        bool hasAn = snapshot.Base.BigramWordIndices.TryGetValue(bigramAn, out int[]? anList);
-        bool hasNa = snapshot.Base.BigramWordIndices.TryGetValue(bigramNa, out int[]? naList);
+        bool hasAn = snapshot.Segments[0].BigramWordIndices.TryGetValue(bigramAn, out int[]? anList);
+        bool hasNa = snapshot.Segments[0].BigramWordIndices.TryGetValue(bigramNa, out int[]? naList);
 
         await Assert.That(hasAn).IsTrue();
         await Assert.That(hasNa).IsTrue();

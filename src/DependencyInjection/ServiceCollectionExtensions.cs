@@ -277,7 +277,7 @@ public static class ServiceCollectionExtensions
         services.AddKeyedSingleton<IIndexUpdater>(key, (sp, k) =>
         {
             var start = sp.GetRequiredKeyedService<StartingIndex>(k);
-            return new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, start.Entries, start.Snapshot);
+            return new IndexUpdater(sp.GetRequiredKeyedService<IndexSnapshotProvider>(k), tokenization, start.Snapshot);
         });
 
         services.AddKeyedSingleton<IIndexSnapshotProvider>(key, (sp, k) =>

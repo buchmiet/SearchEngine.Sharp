@@ -267,7 +267,9 @@ public class ProgressiveIndexIngestionTests
             .Because($"Expected fewer publishes with growth-aware cap (growth={growth.PublishCount}, fixed={fixedBatch.PublishCount}).");
         await Assert.That(growth.PublishCount).IsEqualTo(5);      // 2k, 4k, 8k, 16k, final 20k
         await Assert.That(fixedBatch.PublishCount).IsEqualTo(10); // every 2k
-        await Assert.That(growth.TotalPublishDuration).IsLessThan(fixedBatch.TotalPublishDuration);
+        // Total publish time is not compared: a publish builds one segment from its batch (IndexUpdater, Cost), so
+        // its cost follows the batch size and fewer, larger publishes no longer save time. Fewer publishes still mean
+        // fewer segments to merge.
     }
 
     [Test]

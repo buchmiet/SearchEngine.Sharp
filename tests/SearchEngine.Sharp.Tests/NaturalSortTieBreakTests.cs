@@ -9,7 +9,7 @@ namespace SearchEngine.Sharp.Tests;
 // Entries with equal natural sort keys come in ascending id order (SearchSortMode.NaturalSortAscending), so the same
 // query on the same entries always returns the same order, whichever way ResultMaterializer sorts: sort-K over the
 // hits, the cached sort permutation of the base, a filter-only or text-and-filter query, or the permutation with the
-// delta documents of an IndexUpdater snapshot placed into it (IndexSnapshot.DeltaOrder). The tie rule is what makes
+// delta documents of an IndexUpdater snapshot placed into it (IndexSnapshot.OtherOrder). The tie rule is what makes
 // the paths interchangeable, so the tests of which path a query takes (SelectivityThresholds.UseSortKPath) are here
 // too: a cheap query must not build the permutation, a built one must replace sorting large hit sets.
 public class NaturalSortTieBreakTests
@@ -36,8 +36,8 @@ public class NaturalSortTieBreakTests
 
     private static List<int> Expected(IndexSnapshot snapshot, Func<int, bool> isHit)
     {
-        var ids = snapshot.Base.RecordIds;
-        var sortTexts = snapshot.Base.SortTexts;
+        var ids = snapshot.Segments[0].RecordIds;
+        var sortTexts = snapshot.Segments[0].SortTexts;
         return Enumerable.Range(0, ids.Length)
             .Where(ordinal => isHit(ids[ordinal]))
             .OrderBy(ordinal => NaturalSortKeyBuilder.Build(sortTexts[ordinal]), StringComparer.Ordinal)
@@ -68,7 +68,7 @@ public class NaturalSortTieBreakTests
 
         await Assert.That(first).IsEquivalentTo(Expected(snapshot, _ => true), CollectionOrdering.Matching);
         await Assert.That(second).IsEquivalentTo(first, CollectionOrdering.Matching);
-        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(1);
+        await Assert.That(snapshot.Segments[0].SortedPermutationBuildCount).IsEqualTo(1);
     }
 
     [Test]
@@ -155,7 +155,7 @@ public class NaturalSortTieBreakTests
     {
         var cold = BuildStrategySnapshot();
         var warm = BuildStrategySnapshot();
-        _ = warm.Base.GetSortedPermutation();
+        _ = warm.Segments[0].GetSortedPermutation();
         FacetFilter? filter = filtered ? FacetFilter.Range("n", 1, 3_000) : null;
         var expected = Expected(cold, id => id % period == 0 && (!filtered || id <= 3_000));
 
@@ -168,11 +168,11 @@ public class NaturalSortTieBreakTests
         await Assert.That(warmResults).IsEquivalentTo(coldResults, CollectionOrdering.Matching);
     }
 
-    // Delta documents of an IndexUpdater snapshot are placed into the built permutation of the base. Half the sort
-    // texts are longer than NaturalSortKeyBuilder builds on the stack (341 characters), and base and delta documents
-    // share keys in forms that compare equal, so the placement breaks those ties by id.
+    // The documents of the smaller segments of an IndexUpdater snapshot are placed into the built permutation of the
+    // largest one. Half the sort texts are longer than NaturalSortKeyBuilder builds on the stack (341 characters), and
+    // documents of different segments share keys in forms that compare equal, so the placement breaks those ties by id.
     [Test]
-    public async Task Delta_documents_take_their_place_in_the_base_permutation()
+    public async Task Documents_of_smaller_segments_take_their_place_in_the_largest_permutation()
     {
         string longText = new('x', 400);
         IndexedEntry Entry(int id) => new("all", (id % 4) switch
@@ -183,12 +183,12 @@ public class NaturalSortTieBreakTests
             _ => $"{longText.ToUpperInvariant()}-0{id % 7}",
         });
 
-        var (engine, updater, provider) = TestIndex.Create();
+        var (engine, updater, provider) = TestIndex.Create(null, new MergePolicy { Background = false });
         var entries = new Dictionary<int, IndexedEntry>();
         for (int id = 2; id <= 400; id += 2)
             entries[id] = Entry(id);
         updater.RebuildFrom(entries);
-        _ = provider.Current.Base.GetSortedPermutation();
+        _ = provider.Current.Segments[0].GetSortedPermutation();
 
         // New odd ids fall between base ids of equal keys; replaced even ids leave a dead base document behind.
         var changes = new Dictionary<int, IndexedEntry>();
@@ -201,8 +201,8 @@ public class NaturalSortTieBreakTests
             entries[id] = entry;
 
         var snapshot = provider.Current;
-        await Assert.That(snapshot.Delta).IsNotNull();
-        await Assert.That(snapshot.DeadOrdinals.Length).IsGreaterThan(0);
+        await Assert.That(snapshot.Segments.Length).IsEqualTo(2);
+        await Assert.That(snapshot.Dead.Any(dead => dead is not null)).IsTrue();
 
         var results = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
 
@@ -230,8 +230,8 @@ public class NaturalSortTieBreakTests
 
         var expected = Expected(snapshot, filterOnly ? id => id <= StrategyDocumentCount / 10 : id => id % 10 == 0);
         await Assert.That(results).IsEquivalentTo(expected, CollectionOrdering.Matching);
-        await Assert.That(snapshot.Base.IsSortedPermutationBuilt).IsFalse();
-        await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(0);
+        await Assert.That(snapshot.Segments[0].IsSortedPermutationBuilt).IsFalse();
+        await Assert.That(snapshot.Segments[0].SortedPermutationBuildCount).IsEqualTo(0);
     }
 
     [Test]
@@ -247,7 +247,7 @@ public class NaturalSortTieBreakTests
         var results = engine.Find("zzzznotfound", WordMatchMethod.Within, enableOperators: true, SearchSortMode.NaturalSortAscending);
 
         await Assert.That(results).IsEmpty();
-        await Assert.That(provider.Current.Base.IsSortedPermutationBuilt).IsFalse();
+        await Assert.That(provider.Current.Segments[0].IsSortedPermutationBuilt).IsFalse();
     }
 
     [Test]
@@ -257,9 +257,9 @@ public class NaturalSortTieBreakTests
         int aboveLimit = (int)(StrategyDocumentCount * SelectivityThresholds.NaturalSortBuiltPermutationSortKMaxFraction) + 1;
 
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsTrue();
-        _ = snapshot.Base.GetSortedPermutation();
+        _ = snapshot.Segments[0].GetSortedPermutation();
 
-        await Assert.That(snapshot.Base.IsSortedPermutationBuilt).IsTrue();
+        await Assert.That(snapshot.Segments[0].IsSortedPermutationBuilt).IsTrue();
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit)).IsFalse();
         await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, aboveLimit - 1)).IsTrue();
     }

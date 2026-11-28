@@ -11,17 +11,27 @@ internal static class PostingListOperations
             return [];
 
         var results = new List<int>(ordinals.Length);
-        // One segment: the ordinal indexes RecordIds directly, with no SegmentOf per ordinal.
-        if (snapshot.Delta is null)
+        // One segment: the ordinal indexes RecordIds directly, with no SegmentIndexOf per ordinal.
+        if (snapshot.Segments.Length == 1)
         {
-            var recordIds = snapshot.Base.RecordIds.AsSpan();
+            var recordIds = snapshot.Segments[0].RecordIds.AsSpan();
             for (int i = 0; i < ordinals.Length; i++)
                 results.Add(recordIds[ordinals[i]]);
         }
         else
         {
+            // The ordinals of a query come in ascending or sorted order, so the segment of the previous ordinal is
+            // usually the segment of the next one.
+            var offsets = snapshot.Offsets;
+            var segments = snapshot.Segments;
+            int s = 0;
             for (int i = 0; i < ordinals.Length; i++)
-                results.Add(snapshot.RecordIdAt(ordinals[i]));
+            {
+                int ordinal = ordinals[i];
+                if (ordinal < offsets[s] || s + 1 < offsets.Length && ordinal >= offsets[s + 1])
+                    s = snapshot.SegmentIndexOf(ordinal);
+                results.Add(segments[s].RecordIds[ordinal - offsets[s]]);
+            }
         }
 
         return results;
@@ -33,14 +43,8 @@ internal static class PostingListOperations
         if (postings.TryGetSpan(out var ordinals))
             return MaterializeRecordIds(snapshot, ordinals);
 
-        int count = postings.Count;
-        if (count == 0)
-            return [];
-
-        var results = new List<int>(count);
-        foreach (int ordinal in postings)
-            results.Add(snapshot.RecordIdAt(ordinal));
-
+        var results = new List<int>(postings.UpperBound);
+        postings.AppendRecordIdsTo(results);
         return results;
     }
 }

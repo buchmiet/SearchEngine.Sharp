@@ -75,13 +75,14 @@ internal static class FacetFilterEvaluator
             return qc.RentAllTrueBitSet();
 
         var matching = qc.RentEmptyBitSet();
-        foreach (var segment in snapshot.Segments)
+        for (int s = 0; s < snapshot.Segments.Length; s++)
         {
+            var segment = snapshot.Segments[s];
             var bound = SegmentFilter.Bind(filter, segment);
             if (bound.MatchesNothing)
                 continue;
 
-            int first = segment.FirstOrdinal;
+            int first = snapshot.Offsets[s];
             for (int local = 0; local < segment.DocumentCount; local++)
             {
                 if (bound.Matches(local))
@@ -137,7 +138,7 @@ internal static class FacetFilterEvaluator
         FacetMask mask => (value & mask.MustHave) == mask.MustHave && (value & mask.MustNot) == 0,
     };
 
-    // A filter bound to the facet columns of one segment, read by ordinal - FirstOrdinal. A predicate on a facet
+    // A filter bound to the facet columns of one segment, read by local ordinal. A predicate on a facet
     // without a column is true or false for every document of the segment (value 0): a true one is dropped, a false one
     // makes the segment match nothing.
     private readonly struct SegmentFilter
@@ -191,30 +192,22 @@ internal static class FacetFilterEvaluator
     // A filter bound to every segment of a snapshot, read by snapshot ordinal.
     private readonly struct SnapshotFilter
     {
-        private readonly SegmentFilter _base;
-        private readonly SegmentFilter _delta;
-        private readonly int _deltaStart;
+        private readonly SegmentFilter[] _segments;
+        private readonly IndexSnapshot _snapshot;
 
         internal SnapshotFilter(FacetFilter filter, IndexSnapshot snapshot)
         {
-            _base = SegmentFilter.Bind(filter, snapshot.Base);
-            if (snapshot.Delta is { } delta)
-            {
-                _delta = SegmentFilter.Bind(filter, delta);
-                _deltaStart = delta.FirstOrdinal;
-            }
-            else
-            {
-                _deltaStart = int.MaxValue;
-            }
+            _snapshot = snapshot;
+            _segments = new SegmentFilter[snapshot.Segments.Length];
+            for (int s = 0; s < _segments.Length; s++)
+                _segments[s] = SegmentFilter.Bind(filter, snapshot.Segments[s]);
         }
 
         internal bool Matches(int ordinal)
         {
-            if (ordinal >= _deltaStart)
-                return !_delta.MatchesNothing && _delta.Matches(ordinal - _deltaStart);
-
-            return !_base.MatchesNothing && _base.Matches(ordinal);
+            int s = _snapshot.SegmentIndexOf(ordinal);
+            var bound = _segments[s];
+            return !bound.MatchesNothing && bound.Matches(ordinal - _snapshot.Offsets[s]);
         }
     }
 }

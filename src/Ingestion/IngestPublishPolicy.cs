@@ -61,7 +61,7 @@ public closed record class IngestPublishPolicy
         /// <summary>
         /// Gets whether the batch cap grows with the index. When <see langword="true"/> (the default), the cap
         /// becomes, after each publish, <c>max(BatchCap, number of entries the updater holds)</c>, so the number of
-        /// publishes stays low as the index grows (a batch that large makes the updater run a full build).
+        /// publishes, and so the number of segments the updater has to merge, stays low as the index grows.
         /// When <see langword="false"/>, the cap stays at <see cref="BatchCap"/>.
         /// </summary>
         public bool GrowthAwareBatchCap { get; init; } = true;
@@ -143,7 +143,7 @@ public closed record class IngestPublishPolicy
         /// Gets whether a publish starts as soon as the oldest buffered entry exceeds <see cref="MaxStaleness"/>,
         /// even when that means starting a publish immediately after the previous one. Once a single publish
         /// takes longer than <see cref="MaxStaleness"/>, every batch is stale when the previous publish ends, so with
-        /// this set full builds run back to back and their total work grows with the square of the index size.
+        /// this set publishes run back to back and make many small segments for the updater to merge.
         /// Defaults to <see langword="false"/>, which applies the pacing described under
         /// <see cref="MaxStaleness"/>.
         /// </summary>
@@ -214,9 +214,8 @@ public closed record class IngestPublishPolicy
     }
 
     /// <summary>
-    /// Publishes after every entry. It has no settings. Meant only as a baseline for small collections: every
-    /// publish builds the entries changed since the last full build again, and the updater runs a full build every
-    /// few hundred to few thousand entries, so total cost grows faster than the entry count.
+    /// Publishes after every entry. It has no settings. Meant only as a baseline: every publish builds a one-entry
+    /// segment, so a scan makes as many segments as it has entries, and the updater has to merge them.
     /// </summary>
     public sealed record class PerEntry : IngestPublishPolicy;
 

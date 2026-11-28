@@ -5,24 +5,47 @@ using SearchEngine.Snapshots;
 namespace SearchEngine.Sorting;
 
 // The order of SearchSortMode.NaturalSortAscending: natural sort key, then record id ascending. The sort of the hits
-// of one query, the sort permutation of a segment and the placement of delta documents in it all use it, so ties
-// come out alike on every path.
+// of one query, the sort permutation of a segment and the placement of the documents of the other segments in it all
+// use it, so ties come out alike on every path.
 internal static class NaturalOrder
 {
-    // Sorts snapshot ordinals in place by the natural sort key of their sort text, equal keys by record id. first and
-    // second split the ordinals as the base and the delta do in IndexSnapshot.SegmentOf.
-    internal static void Sort(Span<int> ordinals, IndexSegment first, IndexSegment? second)
-        => Sort(ordinals, first, second, keys: default);
+    // Sorts the local ordinals of one segment in place by the natural sort key of their sort text, equal keys by record
+    // id.
+    internal static void Sort(Span<int> ordinals, IndexSegment segment)
+    {
+        if (ordinals.Length < 2)
+            return;
+
+        Item[] items = ArrayPool<Item>.Shared.Rent(ordinals.Length);
+        try
+        {
+            Span<Item> span = items.AsSpan(0, ordinals.Length);
+            for (int i = 0; i < span.Length; i++)
+                span[i] = new(NaturalSortKeyBuilder.Build(segment.SortTexts[ordinals[i]]), segment.RecordIds[ordinals[i]], ordinals[i]);
+
+            span.Sort(new ItemComparer());
+            for (int i = 0; i < span.Length; i++)
+                ordinals[i] = span[i].Ordinal;
+        }
+        finally
+        {
+            ArrayPool<Item>.Shared.Return(items, clearArray: true);
+        }
+    }
+
+    // Sorts snapshot ordinals in place by the natural sort key of their sort text, equal keys by record id.
+    internal static void Sort(Span<int> ordinals, IndexSnapshot snapshot)
+        => Sort(ordinals, snapshot, keys: default);
 
     // Sort, which also writes the key of each ordinal to keys in the sorted order when keys is not empty (then it is
     // as long as ordinals), so a caller that needs the keys does not build them again.
-    internal static void Sort(Span<int> ordinals, IndexSegment first, IndexSegment? second, Span<string> keys)
+    internal static void Sort(Span<int> ordinals, IndexSnapshot snapshot, Span<string> keys)
     {
         Debug.Assert(keys.IsEmpty || keys.Length == ordinals.Length);
         if (ordinals.Length < 2)
         {
-            if (!keys.IsEmpty)
-                keys[0] = ItemOf(ordinals[0], first, second).Key;
+            if (!keys.IsEmpty && ordinals.Length == 1)
+                keys[0] = ItemOf(ordinals[0], snapshot).Key;
             return;
         }
 
@@ -31,7 +54,7 @@ internal static class NaturalOrder
         {
             Span<Item> span = items.AsSpan(0, ordinals.Length);
             for (int i = 0; i < span.Length; i++)
-                span[i] = ItemOf(ordinals[i], first, second);
+                span[i] = ItemOf(ordinals[i], snapshot);
 
             span.Sort(new ItemComparer());
 
@@ -51,7 +74,7 @@ internal static class NaturalOrder
     }
 
     // For each document given by its key and record id, the number of documents of the sort permutation of segment
-    // that come before it. The documents come in ascending order (as Sort leaves them), so each binary search starts
+    // (local ordinals) that come before it. The documents come in ascending order (as Sort leaves them), so each binary search starts
     // at the count of the one before. Cost: at most log2(permutation length) comparisons per document; each builds the
     // key of a segment document into one buffer reused for all documents, so the comparisons allocate no strings.
     internal static void CountBefore(int[] permutation, IndexSegment segment, ReadOnlySpan<string> keys, ReadOnlySpan<int> ids, Span<int> counts)
@@ -68,7 +91,7 @@ internal static class NaturalOrder
                 while (low < high)
                 {
                     int middle = low + ((high - low) >> 1);
-                    int local = permutation[middle] - segment.FirstOrdinal;
+                    int local = permutation[middle];
                     string text = segment.SortTexts[local];
                     int maxLength = NaturalSortKeyBuilder.MaxKeyLength(text.Length);
                     Span<char> buffer = stackBuffer;
@@ -102,10 +125,11 @@ internal static class NaturalOrder
         }
     }
 
-    private static Item ItemOf(int ordinal, IndexSegment first, IndexSegment? second)
+    private static Item ItemOf(int ordinal, IndexSnapshot snapshot)
     {
-        var segment = second is not null && ordinal >= second.FirstOrdinal ? second : first;
-        int local = ordinal - segment.FirstOrdinal;
+        int s = snapshot.SegmentIndexOf(ordinal);
+        var segment = snapshot.Segments[s];
+        int local = ordinal - snapshot.Offsets[s];
         return new(NaturalSortKeyBuilder.Build(segment.SortTexts[local]), segment.RecordIds[local], ordinal);
     }
 

@@ -43,7 +43,7 @@ internal sealed class QueryContext(int recordCount) : IDisposable
 
     public void Dispose()
     {
-        foreach (var buffer in _leasedBuffers)
+        foreach (var buffer in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_leasedBuffers))
             _pool.Return(buffer, clearArray: false);
         _leasedBuffers.Clear();
     }

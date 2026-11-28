@@ -33,10 +33,11 @@ internal static class ResultMaterializer
     }
 
     // The natural sort strategy for hitCount hits: true sorts the hits, false walks the permutation. The state of the
-    // base's sort permutation is read once, so a build by another thread in between only changes the cost. The natural
-    // order of the delta is not counted; it is built once per snapshot, on first use (IndexSnapshot.DeltaOrder).
+    // permutation of the largest segment is read once, so a build by another thread in between only changes the cost.
+    // The natural order of the other segments is not counted; it is built once per snapshot, on first use
+    // (IndexSnapshot.OtherOrder).
     internal static bool UsesSortKPath(IndexSnapshot snapshot, int hitCount)
-        => SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount, snapshot.Base.IsSortedPermutationBuilt);
+        => SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount, snapshot.Primary.IsSortedPermutationBuilt);
 
     private static List<int> MaterializeSnapshotOrder(
         IndexSnapshot snapshot,
@@ -55,43 +56,43 @@ internal static class ResultMaterializer
         }
     }
 
-    // Walks the sort permutation of the base and keeps the hits, placing each delta document before the base
-    // document of its rank (DeltaNaturalOrder): cost grows with the document count.
+    // Walks the sort permutation of the largest segment and keeps the hits, placing each document of the other segments
+    // before the document of its rank (OtherNaturalOrder): cost grows with the document count.
     internal static List<int> MaterializeNaturalSortFullPermutation(
         IndexSnapshot snapshot,
         FastBitSet resultSet,
         int hitCount)
     {
         var results = new List<int>(hitCount);
-        var baseIds = snapshot.Base.RecordIds;
-        var permutation = snapshot.Base.GetSortedPermutation();
-        var delta = snapshot.DeltaOrder;
-        if (delta is null)
+        var primary = snapshot.Primary;
+        var primaryIds = primary.RecordIds;
+        int primaryOffset = snapshot.Offsets[snapshot.PrimaryIndex];
+        var permutation = primary.GetSortedPermutation();
+        var other = snapshot.OtherOrder;
+        if (other is null)
         {
-            foreach (int ordinal in permutation)
+            foreach (int local in permutation)
             {
-                if (resultSet.Get(ordinal))
-                    results.Add(baseIds[ordinal]);
+                if (resultSet.Get(primaryOffset + local))
+                    results.Add(primaryIds[local]);
             }
 
             return results;
         }
 
-        var deltaOrdinals = delta.Ordinals;
-        var baseRanks = delta.BaseRanks;
-        var deltaIds = snapshot.Delta!.RecordIds;
-        int deltaStart = snapshot.Delta.FirstOrdinal;
+        var otherOrdinals = other.Ordinals;
+        var primaryRanks = other.PrimaryRanks;
         int next = 0;
         for (int rank = 0; rank <= permutation.Length; rank++)
         {
-            for (; next < deltaOrdinals.Length && baseRanks[next] == rank; next++)
+            for (; next < otherOrdinals.Length && primaryRanks[next] == rank; next++)
             {
-                if (resultSet.Get(deltaOrdinals[next]))
-                    results.Add(deltaIds[deltaOrdinals[next] - deltaStart]);
+                if (resultSet.Get(otherOrdinals[next]))
+                    results.Add(snapshot.RecordIdAt(otherOrdinals[next]));
             }
 
-            if (rank < permutation.Length && resultSet.Get(permutation[rank]))
-                results.Add(baseIds[permutation[rank]]);
+            if (rank < permutation.Length && resultSet.Get(primaryOffset + permutation[rank]))
+                results.Add(primaryIds[permutation[rank]]);
         }
 
         return results;
@@ -107,7 +108,7 @@ internal static class ResultMaterializer
         try
         {
             int count = resultSet.CopySetBitOrdinals(ordinals.AsSpan(0, hitCount));
-            NaturalOrder.Sort(ordinals.AsSpan(0, count), snapshot.Base, snapshot.Delta);
+            NaturalOrder.Sort(ordinals.AsSpan(0, count), snapshot);
             return PostingListOperations.MaterializeRecordIds(snapshot, ordinals.AsSpan(0, count));
         }
         finally

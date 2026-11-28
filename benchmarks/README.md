@@ -1,6 +1,6 @@
 # Benchmarks
 
-Four projects measure the library. Run them with `-c Release` on an otherwise idle machine; on Linux, pin a run to
+Six projects measure the library. Run them with `-c Release` on an otherwise idle machine; on Linux, pin a run to
 one CPU with `taskset -c N` when you compare single-thread numbers. Measured results and what they mean for users
 are in [docs/performance.md](../docs/performance.md).
 
@@ -10,6 +10,8 @@ are in [docs/performance.md](../docs/performance.md).
 | `SearchEngine.Sharp.MicroBenchmarks` | Single operations with BenchmarkDotNet | yes |
 | [`SearchEngine.Sharp.Profiling`](SearchEngine.Sharp.Profiling/README.md) | File search end to end on a generated tree, latency of every query path, build cost and memory | no |
 | [`SearchEngine.CompetitorBenchmarks`](SearchEngine.CompetitorBenchmarks/README.md) | The same file-name workloads in Tantivy, MiniSearch and Bleve | no |
+| [`SearchEngine.ThreeWayBenchmark`](SearchEngine.ThreeWayBenchmark/README.md) | The same file-name workloads in SearchEngine.Sharp, Lucene.NET and TantivyDotNet, with matching hit counts | no |
+| `SearchEngine.WriteLatencyBenchmark` | Latency of every `IndexUpdater` call while an index of 10^6 names changes, merges and garbage collections | no |
 
 ## SearchEngine.Sharp.Benchmarks
 
@@ -76,3 +78,18 @@ strategy runs at every density, also where the pipeline would not choose it.
 The cold benchmarks build a new snapshot before each call and run one call per iteration, so they take longer
 than the others. To read a crossover, compare the two strategy rows at each density: the threshold belongs between
 the last density where the hits-only strategy is faster and the first where it is slower.
+
+## SearchEngine.WriteLatencyBenchmark
+
+```bash
+dotnet run -c Release --project benchmarks/SearchEngine.WriteLatencyBenchmark -- --n 1000000 --ops 20000 --mix mixed --rate 1000 --readers 0
+```
+
+Builds an index of `--n` generated names, then makes `--ops` changes and times each call: percentiles, the slowest
+call, how many calls took over 10 ms, 100 ms and 1 s, the garbage collections during the run and the slowest calls with
+the collections that overlapped them. `--mix add` only adds new ids; `--mix mixed` is 60% add, 30% replace and 10%
+remove. `--rate` limits the changes per second (default: as fast as possible), `--readers` starts that many threads
+that query while the writer runs, and `--fanout` and `--ratio` change the merge policy. It prints the merges, the write
+amplification (documents the merges wrote per document changed) and the number of segments. The numbers in
+[Keeping an index current](../docs/performance.md#keeping-an-index-current) come from this project, run on the
+previous commit and on this one.

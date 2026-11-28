@@ -6,7 +6,8 @@ namespace SearchEngine.Sharp.Tests;
 
 // After every change of a random sequence, the snapshot the updater published must answer every query like a
 // snapshot built from scratch with the same entries (IndexSnapshotBuilder). Small words over a small alphabet make
-// tokens, bigrams and natural sort keys collide; enough changes run for the updater to merge several times.
+// tokens, bigrams and natural sort keys collide; enough changes run for the updater to merge several times, once
+// with merges on a background thread and once with merges at points the test chooses.
 public class IndexUpdaterDifferentialTests
 {
     private static readonly string[] Words = ["a", "b", "ab", "ba", "abc", "cab", "bca", "a1", "a2", "b10", "aab", "abab"];
@@ -35,16 +36,20 @@ public class IndexUpdaterDifferentialTests
         FacetFilter.Range("missing", 1, 1),
     ];
 
-    // Large enough for the delta and the dead ordinals to pass IndexUpdater.MergeThreshold (at least 256) between
-    // two calls of RebuildFrom or Clear.
     private const int InitialCount = 400;
 
-    public static IEnumerable<(string Preset, int Seed)> Cases()
+    // A small fan-out and segment limit make merges frequent. "manual" merges only where the test calls MergeNow, so
+    // every layout between two merges is checked.
+    public static IEnumerable<(string Preset, int Seed, string Merging)> Cases()
     {
         foreach (string preset in new[] { "Default", "FileMask", "DefaultCaseFold" })
         foreach (int seed in new[] { 1, 2 })
-            yield return (preset, seed);
+        foreach (string merging in new[] { "background", "manual" })
+            yield return (preset, seed, merging);
     }
+
+    private static MergePolicy PolicyFor(string merging)
+        => new() { FanOut = 3, MaxSegments = 12, Background = merging == "background" };
 
     private static SearchTokenization Preset(string name) => name switch
     {
@@ -55,11 +60,11 @@ public class IndexUpdaterDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task Every_published_snapshot_answers_like_a_full_build(string presetName, int seed)
+    public async Task Every_published_snapshot_answers_like_a_full_build(string presetName, int seed, string merging)
     {
         var tokenization = Preset(presetName);
         var random = new Random(seed);
-        var (engine, updater, provider) = TestIndex.Create(tokenization);
+        var (engine, updater, provider) = TestIndex.Create(tokenization, PolicyFor(merging));
         var expected = new Dictionary<int, IndexedEntry>();
         int nextId = 0;
         // SnapshotOrder is specified only while the entries were added and never removed or replaced.
@@ -76,40 +81,64 @@ public class IndexUpdaterDifferentialTests
         int merges = 0;
         for (int step = 0; step < 700 && mismatch is null; step++)
         {
-            var before = provider.Current;
+            int segmentsBefore = updater.SegmentCount;
             string operation = ApplyRandomChange(random, updater, expected, ref nextId, ref orderSpecified);
-            var after = provider.Current;
-            if (IsMerge(operation, before, after))
+            if (merging == "manual" && random.Next(6) == 0)
+            {
+                updater.MergeNow();
+                operation += "+merge";
+            }
+
+            int segmentsAfter = updater.SegmentCount;
+            // A change adds at most one segment, so fewer segments than before means a merge ran (or a rebuild).
+            if (segmentsAfter < segmentsBefore && !operation.StartsWith("rebuild", StringComparison.Ordinal) && !operation.StartsWith("clear", StringComparison.Ordinal))
                 merges++;
-            mismatch = CheckSegments(after) ?? Compare(engine, after, expected, tokenization, orderSpecified);
+
+            var after = provider.Current;
+            mismatch = CheckSegments(after, expected) ?? Compare(engine, after, expected, tokenization, orderSpecified);
             if (mismatch is not null)
                 mismatch = $"step {step} ({operation}): {mismatch}";
         }
 
+        if (merging == "background")
+            updater.WaitForMerges();
+        await Assert.That(updater.MergeFault).IsNull();
+        mismatch ??= CheckSegments(provider.Current, expected) ?? Compare(engine, provider.Current, expected, tokenization, orderSpecified);
         await Assert.That(mismatch).IsNull();
-        await Assert.That(merges).IsPositive();
+        if (merging == "manual")
+            await Assert.That(merges).IsPositive();
     }
 
-    // A change that rebuilt the base from all entries although the previous snapshot had a delta or dead ordinals.
-    private static bool IsMerge(string operation, IndexSnapshot before, IndexSnapshot after)
-        => !operation.StartsWith("rebuild", StringComparison.Ordinal) && operation != "clear"
-           && !ReferenceEquals(before.Base, after.Base)
-           && after.Delta is null && after.DeadOrdinals.Length == 0 && after.DocumentCount > 0
-           && (before.Delta is not null || before.DeadOrdinals.Length > 0);
-
-    // The layout every snapshot keeps: the delta starts right after the base, and the dead ordinals are distinct
-    // base ordinals in ascending order.
-    private static string? CheckSegments(IndexSnapshot snapshot)
+    // The layout every snapshot keeps: segments start on multiples of 64 and do not overlap, a dead set lies inside its
+    // segment and leaves a live document unless a merge still reads the segment, and the live documents carry
+    // exactly the ids the test expects, each once.
+    private static string? CheckSegments(IndexSnapshot snapshot, Dictionary<int, IndexedEntry> expected)
     {
-        if (snapshot.Delta is { } delta && delta.FirstOrdinal != snapshot.Base.DocumentCount)
-            return $"delta starts at {delta.FirstOrdinal}, base has {snapshot.Base.DocumentCount} documents";
-
-        var dead = snapshot.DeadOrdinals;
-        for (int i = 0; i < dead.Length; i++)
+        var live = new HashSet<int>();
+        int end = 0;
+        for (int s = 0; s < snapshot.Segments.Length; s++)
         {
-            if (dead[i] < 0 || dead[i] >= snapshot.Base.DocumentCount || i > 0 && dead[i] <= dead[i - 1])
-                return $"dead ordinals not ascending base ordinals: [{string.Join(", ", dead)}]";
+            var segment = snapshot.Segments[s];
+            if (snapshot.Offsets[s] % 64 != 0 || snapshot.Offsets[s] < end)
+                return $"segment {s} starts at {snapshot.Offsets[s]} after {end}";
+            end = snapshot.Offsets[s] + segment.DocumentCount;
+            if (segment.DocumentCount == 0)
+                return $"segment {s} is empty";
+
+            var dead = snapshot.Dead[s];
+            for (int local = 0; local < segment.DocumentCount; local++)
+            {
+                if (dead is not null && dead.Contains(local))
+                    continue;
+                if (!live.Add(segment.RecordIds[local]))
+                    return $"id {segment.RecordIds[local]} is live twice";
+            }
         }
+
+        if (live.Count != expected.Count || !live.SetEquals(expected.Keys))
+            return $"live ids differ: {live.Count} in the snapshot, {expected.Count} expected";
+        if (snapshot.DocumentCount != expected.Count)
+            return $"DocumentCount {snapshot.DocumentCount}, expected {expected.Count}";
 
         return null;
     }

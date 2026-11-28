@@ -29,8 +29,8 @@ internal static class QueryMatcher
     internal static FastBitSet MatchExact(string word, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
-        foreach (var segment in snapshot.Segments)
-            result.AddAll(segment.PostingsOf(word));
+        for (int s = 0; s < snapshot.Segments.Length; s++)
+            result.AddAll(snapshot.Segments[s].PostingsOf(word), snapshot.Offsets[s]);
         return result;
     }
 
@@ -40,12 +40,12 @@ internal static class QueryMatcher
     {
         var result = qc.RentEmptyBitSet();
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
-        foreach (var segment in snapshot.Segments)
-            MatchWithin(word, segment, graphemeBoundaries, result);
+        for (int s = 0; s < snapshot.Segments.Length; s++)
+            MatchWithin(word, snapshot.Segments[s], snapshot.Offsets[s], graphemeBoundaries, result);
         return result;
     }
 
-    private static void MatchWithin(string word, IndexSegment segment, bool graphemeBoundaries, FastBitSet result)
+    private static void MatchWithin(string word, IndexSegment segment, int offset, bool graphemeBoundaries, FastBitSet result)
     {
         int wordLength = word.Length;
         var wordLengths = segment.WordLengths.AsSpan();
@@ -65,7 +65,7 @@ internal static class QueryMatcher
                     break;
 
                 if (ContainsWithin(segment.WordAt(wordIndex), word, graphemeBoundaries))
-                    result.AddAll(segment.PostingsAt(wordIndex));
+                    result.AddAll(segment.PostingsAt(wordIndex), offset);
             }
 
             return;
@@ -75,7 +75,7 @@ internal static class QueryMatcher
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= wordLength; wordIndex++)
         {
             if (ContainsWithin(segment.WordAt(wordIndex), word, graphemeBoundaries))
-                result.AddAll(segment.PostingsAt(wordIndex));
+                result.AddAll(segment.PostingsAt(wordIndex), offset);
         }
     }
 
@@ -88,18 +88,20 @@ internal static class QueryMatcher
         int maxLength = GlobMatcher.MaxMatchLength(pattern, graphemeBoundaries);
         var shape = new GlobMatcher.Shape(pattern, graphemeBoundaries);
         var result = qc.RentEmptyBitSet();
-        foreach (var segment in snapshot.Segments)
+        for (int s = 0; s < snapshot.Segments.Length; s++)
         {
+            var segment = snapshot.Segments[s];
+            int offset = snapshot.Offsets[s];
             if (shape.IsSpecialized)
-                MatchGlobSpecialized(shape, minLength, maxLength, segment, result);
+                MatchGlobSpecialized(shape, minLength, maxLength, segment, offset, result);
             else
-                MatchGlobGeneral(pattern, minLength, maxLength, graphemeBoundaries, segment, result);
+                MatchGlobGeneral(pattern, minLength, maxLength, graphemeBoundaries, segment, offset, result);
         }
 
         return result;
     }
 
-    private static void MatchGlobSpecialized(GlobMatcher.Shape shape, int minLength, int maxLength, IndexSegment segment, FastBitSet result)
+    private static void MatchGlobSpecialized(GlobMatcher.Shape shape, int minLength, int maxLength, IndexSegment segment, int offset, FastBitSet result)
     {
         var wordLengths = segment.WordLengths.AsSpan();
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= minLength; wordIndex++)
@@ -108,14 +110,14 @@ internal static class QueryMatcher
                 continue;
 
             if (shape.IsMatch(segment.WordAt(wordIndex)))
-                result.AddAll(segment.PostingsAt(wordIndex));
+                result.AddAll(segment.PostingsAt(wordIndex), offset);
         }
     }
 
     // Kept apart from the specialized scan: one loop that picks the matcher per token is slower for general patterns.
     // Most tokens are rejected after one character, so the tokens are sliced from spans hoisted out of the loop;
     // IndexSegment.WordAt costs more per token on this loop.
-    private static void MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, IndexSegment segment, FastBitSet result)
+    private static void MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, IndexSegment segment, int offset, FastBitSet result)
     {
         var wordLengths = segment.WordLengths.AsSpan();
         var wordEnds = segment.WordEnds.AsSpan();
@@ -127,7 +129,7 @@ internal static class QueryMatcher
                 continue;
 
             if (GlobMatcher.IsWholeWordMatch(pattern, words.Slice(wordEnds[wordIndex] - wordLength, wordLength), graphemeBoundaries))
-                result.AddAll(segment.PostingsAt(wordIndex));
+                result.AddAll(segment.PostingsAt(wordIndex), offset);
         }
     }
 

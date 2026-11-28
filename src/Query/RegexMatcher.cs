@@ -17,12 +17,13 @@ internal static class RegexMatcher
 
         try
         {
-            foreach (var segment in snapshot.Segments)
+            for (int s = 0; s < snapshot.Segments.Length; s++)
             {
+                var segment = snapshot.Segments[s];
                 for (int wordIndex = 0; wordIndex < segment.WordCount; wordIndex++)
                 {
                     if (regex.IsMatch(segment.WordAt(wordIndex)))
-                        result.AddAll(segment.PostingsAt(wordIndex));
+                        result.AddAll(segment.PostingsAt(wordIndex), snapshot.Offsets[s]);
                 }
             }
         }

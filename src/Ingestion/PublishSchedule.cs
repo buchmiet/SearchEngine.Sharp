@@ -49,9 +49,9 @@ internal sealed class PublishSchedule
 
         // Once one publish takes longer than MaxStaleness, every batch is stale when the previous publish finishes,
         // and staleness alone would start the publishes back to back. With a scan that fills the channel during a
-        // publish, each batch then holds about ChannelCapacity entries (10,000 by default), more than
-        // IndexUpdater.MergeThreshold (at most 4,096), so every publish is a merge and the total work grows with the
-        // square of the entry count. The pacing that prevents it: IngestPublishPolicy.Adaptive.StrictMaxStaleness.
+        // publish, each batch then holds about ChannelCapacity entries (10,000 by default), and the updater gets a new
+        // segment of that size right after the last one, faster than it merges them. The pacing that prevents it:
+        // IngestPublishPolicy.Adaptive.StrictMaxStaleness.
         if (_policy is IngestPublishPolicy.Adaptive { StrictMaxStaleness: false } paced)
             untilStale = Max(untilStale, _lastPublishDuration * paced.PublishMultiplier - sinceLastPublish);
 

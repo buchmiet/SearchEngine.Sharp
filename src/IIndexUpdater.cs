@@ -7,14 +7,14 @@ namespace SearchEngine;
 /// <remarks>
 /// <para>Calls are serialized. Queries never wait for them: they keep reading the last published snapshot
 /// until the new one is published.</para>
-/// <para>A call that throws leaves the stored entries and the published snapshot as they were.</para>
+/// <para>A call that throws leaves the entries and the published snapshot as they were.</para>
 /// <para>A method that takes a sequence reads it to the end before it takes the updater's lock, so other changes
 /// do not wait while it is read.</para>
-/// <para>A change keeps most of the previous snapshot: it builds only the entries added or replaced since the last
-/// full build, so its cost grows with the number of changes since then, not with the size of the index. Once those
-/// changes, removed and replaced entries included, pass about twice the square root of the entry count (at least
-/// 256, at most 4,096), the change is a full build, which is linear in the size of the index;
-/// <see cref="RebuildFrom(IDictionary{int, string})"/> is always one. Change many entries with one call to
+/// <para>A change builds one small segment from the entries it adds or replaces, marks the documents it removes or
+/// replaces as removed where they are, and publishes the new list of segments. Its cost grows with the size of the
+/// change, not with the size of the index, and a change never rebuilds the index. Neighbouring segments of similar
+/// size are merged on a background thread that neither queries nor changes wait for; the merge also drops the removed
+/// documents. <see cref="RebuildFrom(IDictionary{int, string})"/> builds the whole index. Change many entries with one call to
 /// <see cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, IndexedEntry}})"/> or <see cref="RemoveEntries"/>,
 /// or feed a running scan through <see cref="Ingestion.ProgressiveIndexIngestion"/>.</para>
 /// <para>A <see langword="string"/> entry is indexed as <c>new IndexedEntry(text, text)</c>: the same text is searched

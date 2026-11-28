@@ -75,7 +75,7 @@ public static class IndexSnapshotBuilder
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(tokenization);
-        return Snapshot(BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, firstOrdinal: 0, progress), tokenization);
+        return Snapshot(BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, progress), tokenization);
     }
 
     /// <summary>Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/>
@@ -109,7 +109,7 @@ public static class IndexSnapshotBuilder
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(tokenization);
-        return Snapshot(BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, firstOrdinal: 0, progress), tokenization);
+        return Snapshot(BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, progress), tokenization);
     }
 
     // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry).
@@ -118,33 +118,31 @@ public static class IndexSnapshotBuilder
         SearchTokenization tokenization,
         IProgress<float>? progress = null)
     {
-        return Snapshot(BuildFoldedSegment(entries, static entry => entry, tokenization, firstOrdinal: 0, progress), tokenization);
+        return Snapshot(BuildFoldedSegment(entries, static entry => entry, tokenization, progress), tokenization);
     }
 
-    // A segment whose documents get the ordinals from firstOrdinal on (see IndexSnapshot), from entries that hold a
-    // folded IndexedEntry (entryOf). No entries give IndexSegment.Empty.
+    // A segment from entries that hold a folded IndexedEntry (entryOf); its documents are numbered from 0 in the order
+    // of the entries (IndexSegment). No entries give IndexSegment.Empty.
     internal static IndexSegment BuildFoldedSegment<TEntry>(
         IEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<TEntry, IndexedEntry> entryOf,
         SearchTokenization tokenization,
-        int firstOrdinal,
         IProgress<float>? progress = null)
     {
-        return BuildCore(entries, entry => entryOf(entry).SearchText, entry => entryOf(entry).SortText, entry => entryOf(entry).Facets, tokenization, firstOrdinal, progress);
+        return BuildCore(entries, entry => entryOf(entry).SearchText, entry => entryOf(entry).SortText, entry => entryOf(entry).Facets, tokenization, progress);
     }
 
     private static IndexSnapshot Snapshot(IndexSegment segment, SearchTokenization tokenization)
-        => segment.DocumentCount == 0 ? IndexSnapshot.EmptyFor(tokenization) : new IndexSnapshot(segment, null, [], tokenization);
+        => segment.DocumentCount == 0 ? IndexSnapshot.EmptyFor(tokenization) : new IndexSnapshot([segment], [null], tokenization);
 
-    // getSearchText returns the folded search text of an entry. The documents get the ordinals from firstOrdinal on,
-    // in the order of entries.
+    // getSearchText returns the folded search text of an entry. The documents are numbered from 0, in the order of
+    // entries.
     private static IndexSegment BuildCore<TEntry>(
         IEnumerable<KeyValuePair<int, TEntry>> entries,
         Func<TEntry, string> getSearchText,
         Func<TEntry, string> getSortText,
         Func<TEntry, FacetValues?> getFacets,
         SearchTokenization tokenization,
-        int firstOrdinal,
         IProgress<float>? progress)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -186,7 +184,7 @@ public static class IndexSnapshotBuilder
             // can accumulate running totals (TotalWordsLength, TotalPostings)
             // without boxing or heap allocation.
             var buildState = new BuildWordState(
-                firstOrdinal + documentIndex,
+                documentIndex,
                 stringPool,
                 invertedIndex,
                 totalWordsLength,
@@ -253,6 +251,37 @@ public static class IndexSnapshotBuilder
 
         reporter.Report(50.0f);
 
+        var segment = Pack(invertedIndex, totalWordsLength, totalPostings, recordIds.ToArray(), [.. sortTexts],
+            BuildFacetColumns(recordIds.Count, facetKeys, pendingFacetValues, directFacetColumns), ref reporter);
+
+        reporter.Complete();
+        return segment;
+    }
+
+    // Phases 2 and 3: sorts the tokens by descending length and packs tokens and posting lists into the flat arrays of
+    // a segment (IndexSegment, Data layout). The posting lists hold local ordinals, ascending. Shared by a build from
+    // entries and a merge of segments (SegmentMerger).
+    internal static IndexSegment Pack(
+        Dictionary<string, List<int>> invertedIndex,
+        int totalWordsLength,
+        int totalPostings,
+        int[] recordIds,
+        string[] sortTexts,
+        Dictionary<string, long[]> facetColumns)
+    {
+        var reporter = new PercentReporter(null);
+        return Pack(invertedIndex, totalWordsLength, totalPostings, recordIds, sortTexts, facetColumns, ref reporter);
+    }
+
+    private static IndexSegment Pack(
+        Dictionary<string, List<int>> invertedIndex,
+        int totalWordsLength,
+        int totalPostings,
+        int[] recordIds,
+        string[] sortTexts,
+        Dictionary<string, long[]> facetColumns,
+        ref PercentReporter reporter)
+    {
         List<WordDescription> wordDescriptions = [with(capacity: invertedIndex.Count)];
         foreach (var (word, docIds) in invertedIndex)
             wordDescriptions.Add(new(word, docIds));
@@ -288,8 +317,8 @@ public static class IndexSnapshotBuilder
             postingOffsets[i] = postingOffset;
             exactPostings[word] = new(postingOffset, docIds.Count);
 
-            foreach (var docId in docIds)
-                postingsSpan[postingOffset++] = docId;
+            CollectionsMarshal.AsSpan(docIds).CopyTo(postingsSpan[postingOffset..]);
+            postingOffset += docIds.Count;
 
             wordsOffset += word.Length;
             wordLengths[i] = word.Length;
@@ -298,12 +327,8 @@ public static class IndexSnapshotBuilder
             reporter.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
         }
 
-        var recordIdsArr = recordIds.ToArray();
-        var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues, directFacetColumns);
-
-        var segment = new IndexSegment(
-            firstOrdinal: firstOrdinal,
-            recordIds: recordIdsArr,
+        return new IndexSegment(
+            recordIds: recordIds,
             exactPostings: exactPostings,
             wordsArray: wordsArray,
             postingDocIds: postingDocIds,
@@ -311,17 +336,14 @@ public static class IndexSnapshotBuilder
             wordEnds: wordEnds,
             wordLengths: wordLengths,
             postingCounts: postingCounts,
-            sortTexts: [.. sortTexts],
-            facetColumns: facetColumns
-        );
-
-        reporter.Complete();
-        return segment;
+            sortTexts: sortTexts,
+            facetColumns: facetColumns);
     }
+
 
     // Passes a percentage on only when it reaches the next whole percent, so the number of reports does not grow
     // with the number of entries or tokens.
-    private struct PercentReporter(IProgress<float>? progress)
+    internal struct PercentReporter(IProgress<float>? progress)
     {
         private int _nextWholePercent;
 
@@ -361,7 +383,7 @@ public static class IndexSnapshotBuilder
                 facetColumns[facetName] = new long[documentCount];
         }
 
-        foreach (var pending in pendingFacetValues)
+        foreach (var pending in CollectionsMarshal.AsSpan(pendingFacetValues))
             facetColumns[pending.FacetName][pending.DocumentIndex] = pending.Value;
 
         return facetColumns;

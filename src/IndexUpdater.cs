@@ -1,33 +1,37 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine;
 
-// IndexUpdater owns the mutable source of truth (_entries) and is the only place that calls
-// IndexSnapshotProvider.Publish.
+// IndexUpdater owns the list of segments and is the only place that calls IndexSnapshotProvider.Publish.
 //
 // ── Cost ──
-// The structures of a segment (flat arrays, sorted token list, bigram index) cannot be updated in place, so a snapshot
-// is a base segment plus a small delta segment plus the dead base ordinals (IndexSnapshot). A change keeps the base of
-// the published snapshot, marks the base documents it removes or replaces as dead and builds a new delta from every
-// entry stored since the base was built. When the delta and the dead ordinals together pass MergeThreshold, the
-// change is a merge: it builds a new base from all entries, and the next snapshot starts with an empty delta.
-// RebuildFrom always builds a new base.
+// The structures of a segment (flat arrays, sorted token list, bigram index) cannot be updated in place, so an index
+// is a list of immutable segments (IndexSnapshot). A change builds one small segment from the entries it adds or
+// replaces, marks the documents it removes or replaces as dead in the segments that hold them (DeadSet) and publishes
+// the list with the new segment last. Its cost depends on the size of the change, not on the size of the index: it
+// rebuilds nothing that exists.
+//
+// Many small segments would slow every query down, so neighbouring segments of about the same size are merged
+// (MergePolicy). A merge runs on a background thread, reads only immutable segments and replaces the segments it
+// read with one segment in a single publish. A change that arrives while a merge runs is not lost: a document of a
+// merged segment that the change removes or replaces is marked dead in the merged segment when the merge completes
+// (MergeJob.KilledIds). The merge also drops the dead documents of its segments, so the index does not keep what was
+// removed. RebuildFrom builds one segment and replaces everything.
 //
 // ── Invariants ──
-// _entries holds every entry with the ordinal of its document in the base of the published snapshot, or NotInBase
-// when the entry was stored after that base was built. The delta ids and the dead ordinals of the next snapshot are
-// derived from the published snapshot (_published) and the changes, so nothing else has to be kept in step.
+// An id is live in at most one segment. Segment.Ids finds the copy of an id in a segment, and the dead set of the
+// segment says whether that copy is still live. Every segment in _segments has at least one live document, except
+// while it is an input of a running merge. _liveCount is the number of live documents.
 //
 // ── Thread safety ──
-// _gate serializes all writes to _entries and _published and every Publish.
+// _gate serializes all reads and writes of _segments, _dead, _liveCount and the merge bookkeeping, and every Publish.
+// A merge builds its segment outside the lock and takes the lock to complete.
 //
 // ── Atomicity ──
-// A change either completes (_entries updated, new snapshot published) or leaves both as they were. The callers of
-// Apply read the caller's sequence before the lock (Apply has the reason); Apply records the previous value of every
-// id it changes and restores it when the build throws, and base ordinals are written only after a build succeeded
-// (AssignBaseOrdinals). RebuildFrom swaps in its new dictionary only after the build succeeded (ReplaceAll).
+// A change either completes (segment built, new list published) or leaves everything as it was: the segment is built
+// before any state changes, and the state is replaced in one step. RebuildFrom swaps in its new segment only after
+// the build succeeded.
 
 /// <summary>
 /// Keeps the entries of an index and publishes a new snapshot to the <see cref="IndexSnapshotProvider"/> after
@@ -36,16 +40,31 @@ namespace SearchEngine;
 /// <remarks>All members are safe to call from several threads.</remarks>
 public sealed class IndexUpdater : IIndexUpdater
 {
-    // The base ordinal of an entry stored after the base of the published snapshot was built.
-    private const int NotInBase = -1;
-
     private readonly IndexSnapshotProvider _provider;
     private readonly SearchTokenization _tokenization;
+    private readonly MergePolicy _policy;
     private readonly Lock _gate = new();
-    // Every entry, with its SearchText folded (SearchTokenization.FoldEntry).
-    private Dictionary<int, StoredEntry> _entries;
-    // The last snapshot this updater published, or the one the provider started with.
-    private IndexSnapshot _published;
+
+    // The published segments in snapshot order and the dead documents of each. Replaced, never changed in place: a
+    // published IndexSnapshot keeps the arrays it was built with.
+    private IndexSegment[] _segments = [];
+    private DeadSet?[] _dead = [];
+    private int _liveCount;
+
+    // Merge bookkeeping. A segment in _merging is an input of a running merge. _epoch changes when the index is
+    // replaced as a whole, which discards the merges that started before.
+    private readonly HashSet<IndexSegment> _merging = [with(ReferenceEqualityComparer.Instance)];
+    private readonly List<MergeJob> _jobs = [];
+    private readonly bool[] _laneActive = new bool[2];
+    private long _epoch;
+    private Exception? _mergeFault;
+
+    // What the merges did so far, for tests and benchmarks.
+    internal MergeStatistics Statistics { get; } = new();
+
+    // Called on the background thread after a merge built its segment and before it takes the lock to complete (tests
+    // hold a merge here while changes arrive).
+    internal Action? OnMergeBuilt { get; set; }
 
     /// <summary>Creates an empty updater and publishes an empty snapshot with its preset to
     /// <paramref name="provider"/>, so queries use that preset from the start.</summary>
@@ -58,58 +77,51 @@ public sealed class IndexUpdater : IIndexUpdater
     /// <remarks>The updater does not read the snapshot that <paramref name="provider"/> already holds: it replaces
     /// it with an empty one, and every later snapshot is built only from the entries given to the updater.</remarks>
     public IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null)
+        : this(provider, tokenization, MergePolicy.Default)
+    {
+    }
+
+    internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization, MergePolicy policy)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _tokenization = tokenization ?? SearchTokenization.Default;
-        _entries = [];
-        _published = IndexSnapshot.EmptyFor(_tokenization);
-        _provider.Publish(_published);
+        _policy = policy;
+        _provider.Publish(IndexSnapshot.EmptyFor(_tokenization));
     }
 
-    // Dependency injection: the provider already holds seedSnapshot, built from seed with tokenization
-    // (IndexSnapshotBuilder.BuildFolded), so nothing is published here and the first change keeps its base. The
-    // entries of seed are folded with tokenization already (SearchTokenization.FoldEntry).
-    internal IndexUpdater(
-        IndexSnapshotProvider provider,
-        SearchTokenization tokenization,
-        IReadOnlyDictionary<int, IndexedEntry> seed,
-        IndexSnapshot seedSnapshot)
+    // Dependency injection: the provider already holds seedSnapshot, built with tokenization
+    // (IndexSnapshotBuilder.BuildFolded), so nothing is published here and the first change keeps its segment.
+    internal IndexUpdater(IndexSnapshotProvider provider, SearchTokenization tokenization, IndexSnapshot seedSnapshot)
     {
-        Debug.Assert(seedSnapshot.Delta is null && seedSnapshot.Base.DocumentCount == seed.Count);
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _tokenization = tokenization;
-        _entries = new Dictionary<int, StoredEntry>(seed.Count);
-        foreach (var (id, entry) in seed)
-            _entries[id] = new(entry, NotInBase);
-        AssignBaseOrdinals(_entries, seedSnapshot.Base);
-        _published = seedSnapshot;
+        _policy = MergePolicy.Default;
+        _segments = [.. seedSnapshot.Segments];
+        _dead = new DeadSet?[_segments.Length];
+        foreach (var segment in _segments)
+            _ = segment.Ids;
+        _liveCount = seedSnapshot.DocumentCount;
     }
 
     /// <inheritdoc />
     public int EntryCount
     {
-        get { lock (_gate) return _entries.Count; }
+        get { lock (_gate) return _liveCount; }
     }
 
     /// <inheritdoc />
     public bool ContainsEntry(int id)
     {
-        lock (_gate) return _entries.ContainsKey(id);
+        lock (_gate) return TryFindLive(id, out _, out _);
     }
-
-    // The number of delta entries plus dead base ordinals past which a change is a merge. A change costs a build of
-    // the delta, and every query pays a little for the delta and the dead ordinals, while a merge costs a build of
-    // all entries; about 2 * sqrt(entries) keeps both small. The IIndexUpdater remarks and docs/performance.md
-    // (Keeping an index current) quote 2 * sqrt(entries), 256 and 4,096: change them with this line.
-    internal static int MergeThreshold(int entryCount) => Math.Clamp((int)(2 * Math.Sqrt(entryCount)), 256, 4096);
 
     /// <inheritdoc />
     public void RebuildFrom(IDictionary<int, string> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var next = new Dictionary<int, StoredEntry>(entries.Count);
+        var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = new(_tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries))), NotInBase);
+            next[key] = _tokenization.FoldEntry(IndexedEntry.FromText(key, value, nameof(entries)));
 
         lock (_gate)
             ReplaceAll(next);
@@ -126,9 +138,9 @@ public sealed class IndexUpdater : IIndexUpdater
     public void RebuildFrom(IDictionary<int, IndexedEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var next = new Dictionary<int, StoredEntry>(entries.Count);
+        var next = new Dictionary<int, IndexedEntry>(entries.Count);
         foreach (var (key, value) in entries)
-            next[key] = new(_tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries))), NotInBase);
+            next[key] = _tokenization.FoldEntry(IndexedEntry.Require(key, value, nameof(entries)));
 
         lock (_gate)
             ReplaceAll(next);
@@ -149,9 +161,9 @@ public sealed class IndexUpdater : IIndexUpdater
         IProgress<float>? progress,
         CancellationToken ct)
     {
-        var buffer = new Dictionary<int, StoredEntry>();
+        var buffer = new Dictionary<int, IndexedEntry>();
         await foreach (var (key, value) in entries.WithCancellation(ct).ConfigureAwait(false))
-            buffer[key] = new(_tokenization.FoldEntry(toEntry(key, value)), NotInBase);
+            buffer[key] = _tokenization.FoldEntry(toEntry(key, value));
 
         lock (_gate)
             ReplaceAll(buffer, progress);
@@ -172,7 +184,7 @@ public sealed class IndexUpdater : IIndexUpdater
     }
 
     /// <inheritdoc />
-    public bool RemoveEntry(int id) => Apply([new(id, null)]).Count > 0;
+    public bool RemoveEntry(int id) => Apply([new(id, null)])[0];
 
     /// <inheritdoc />
     public bool RefreshEntry(int id, string text)
@@ -185,7 +197,7 @@ public sealed class IndexUpdater : IIndexUpdater
     public bool RefreshEntry(int id, IndexedEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return Apply([new(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
+        return Apply([new(id, _tokenization.FoldEntry(entry))])[0];
     }
 
     /// <inheritdoc />
@@ -218,7 +230,14 @@ public sealed class IndexUpdater : IIndexUpdater
         foreach (int id in ids)
             changes.Add(new(id, null));
 
-        return Apply(CollectionsMarshal.AsSpan(changes)).Count;
+        int removed = 0;
+        foreach (bool existed in Apply(CollectionsMarshal.AsSpan(changes)))
+        {
+            if (existed)
+                removed++;
+        }
+
+        return removed;
     }
 
     /// <inheritdoc />
@@ -226,174 +245,488 @@ public sealed class IndexUpdater : IIndexUpdater
     {
         lock (_gate)
         {
-            _entries.Clear();
-            Publish(IndexSnapshot.EmptyFor(_tokenization));
+            _epoch++;
+            _merging.Clear();
+            _segments = [];
+            _dead = [];
+            _liveCount = 0;
+            Publish();
         }
     }
 
-    private void Publish(IndexSnapshot snapshot)
+    // The number of segments of the published snapshot (tests).
+    internal int SegmentCount
     {
-        _provider.Publish(snapshot);
-        _published = snapshot;
+        get { lock (_gate) return _segments.Length; }
     }
 
-    // RebuildFrom: the new entries become the source of truth only after their snapshot was built.
-    private void ReplaceAll(Dictionary<int, StoredEntry> next, IProgress<float>? progress = null)
+    // The first exception a background merge threw, or null. After one, merges run only through the MaxSegments rule.
+    internal Exception? MergeFault
     {
-        var snapshot = BuildBase(next, progress);
-        AssignBaseOrdinals(next, snapshot.Base);
-        Publish(snapshot);
-        _entries = next;
+        get { lock (_gate) return _mergeFault; }
     }
 
-    // A merge: a new base from all entries, without delta or dead ordinals.
-    private void Merge()
+    // Blocks until no merge runs and none is due (tests, benchmarks).
+    internal void WaitForMerges()
     {
-        var snapshot = BuildBase(_entries, progress: null);
-        AssignBaseOrdinals(_entries, snapshot.Base);
-        Publish(snapshot);
-    }
-
-    private IndexSnapshot BuildBase(Dictionary<int, StoredEntry> entries, IProgress<float>? progress)
-    {
-        var @base = IndexSnapshotBuilder.BuildFoldedSegment(entries, static stored => stored.Entry, _tokenization, firstOrdinal: 0, progress);
-        return @base.DocumentCount == 0 ? IndexSnapshot.EmptyFor(_tokenization) : new IndexSnapshot(@base, null, [], _tokenization);
-    }
-
-    // Records the ordinal of each entry in a base just built from entries. Called only after the build succeeded,
-    // and it cannot throw, so a failed build leaves every base ordinal as it was.
-    private static void AssignBaseOrdinals(Dictionary<int, StoredEntry> entries, IndexSegment @base)
-    {
-        var ids = @base.RecordIds;
-        for (int ordinal = 0; ordinal < ids.Length; ordinal++)
+        while (true)
         {
-            ref var stored = ref CollectionsMarshal.GetValueRefOrNullRef(entries, ids[ordinal]);
-            stored = stored with { BaseOrdinal = ordinal };
-        }
-    }
-
-    // Publishes the snapshot after the changes in undo were applied to _entries: the base of the published snapshot,
-    // its dead ordinals plus the base documents of the changed entries, and a delta built from every entry stored
-    // since that base was built; or a merge when the delta and the dead ordinals pass MergeThreshold.
-    private void PublishChanges(List<Undo> undo)
-    {
-        if (_entries.Count == 0)
-        {
-            Publish(IndexSnapshot.EmptyFor(_tokenization));
-            return;
-        }
-
-        var previous = _published;
-        int[] dead = WithNewDeadOrdinals(previous.DeadOrdinals, undo);
-
-        // The delta keeps the order of the previous one, then takes the changed entries in the order of the changes.
-        List<int> deltaIds = [];
-        HashSet<int> inDelta = [];
-        if (previous.Delta is not null)
-        {
-            foreach (int id in previous.Delta.RecordIds)
+            lock (_gate)
             {
-                if (_entries.ContainsKey(id) && inDelta.Add(id))
-                    deltaIds.Add(id);
+                if (_jobs.Count == 0 && !_laneActive[0] && !_laneActive[1] && (_mergeFault is not null || !_policy.Background || PickRun(int.MaxValue) is null))
+                    return;
             }
-        }
 
-        foreach (var change in undo)
-        {
-            if (_entries.ContainsKey(change.Id) && inDelta.Add(change.Id))
-                deltaIds.Add(change.Id);
+            Thread.Sleep(1);
         }
-
-        if (deltaIds.Count + dead.Length > MergeThreshold(_entries.Count))
-        {
-            Merge();
-            return;
-        }
-
-        IndexSegment? delta = null;
-        if (deltaIds.Count > 0)
-        {
-            var deltaEntries = new List<KeyValuePair<int, IndexedEntry>>(deltaIds.Count);
-            foreach (int id in deltaIds)
-                deltaEntries.Add(new(id, _entries[id].Entry));
-            delta = IndexSnapshotBuilder.BuildFoldedSegment(deltaEntries, static entry => entry, _tokenization, previous.Base.DocumentCount);
-        }
-
-        Publish(new IndexSnapshot(previous.Base, delta, dead, _tokenization));
     }
 
-    // The dead ordinals of the previous snapshot plus the base ordinals of the entries the changes removed or
-    // replaced, ascending. An entry with a base ordinal is live in the base, so the two sets do not overlap.
-    private static int[] WithNewDeadOrdinals(int[] previousDead, List<Undo> undo)
-    {
-        List<int> added = [];
-        foreach (var change in undo)
-        {
-            if (change.Previous is { BaseOrdinal: >= 0 } previous)
-                added.Add(previous.BaseOrdinal);
-        }
-
-        if (added.Count == 0)
-            return previousDead;
-
-        var dead = new int[previousDead.Length + added.Count];
-        previousDead.CopyTo(dead, 0);
-        added.CopyTo(dead, previousDead.Length);
-        Array.Sort(dead);
-        return dead;
-    }
-
-    // Applies the changes in order under the lock and publishes one snapshot when any entry changed. When the build
-    // throws, the changed entries are restored and the published snapshot stays as it was, because publishing is the
-    // last step. The callers read the caller's sequence into the changes first: enumerating it under the lock would
-    // let code inside the enumeration (on this thread, the lock is re-entrant) publish a half-applied batch that a
-    // later rollback could not take back. Returns what was changed, one record per entry that existed or was added.
-    private List<Undo> Apply(ReadOnlySpan<Change> changes)
+    // Merges every due run on the calling thread, until none is due or the segments cannot be merged further
+    // (tests of a policy without a background thread).
+    internal void MergeNow()
     {
         lock (_gate)
         {
-            List<Undo> undo = [with(capacity: changes.Length)];
-            try
+            while (PickRun(int.MaxValue) is { } run)
             {
-                foreach (var (id, entry) in changes)
-                {
-                    if (entry is not null)
-                    {
-                        undo.Add(new(id, _entries.TryGetValue(id, out var previous) ? previous : null));
-                        _entries[id] = new(entry, NotInBase);
-                    }
-                    else if (_entries.Remove(id, out var removed))
-                    {
-                        undo.Add(new(id, removed));
-                    }
-                }
-
-                if (undo.Count > 0)
-                    PublishChanges(undo);
-
-                return undo;
-            }
-            catch
-            {
-                for (int i = undo.Count - 1; i >= 0; i--)
-                {
-                    var (id, previous) = undo[i];
-                    if (previous is { } stored)
-                        _entries[id] = stored;
-                    else
-                        _entries.Remove(id);
-                }
-
-                throw;
+                var job = ClaimJob(run);
+                job.Result = SegmentMerger.Merge(job.Inputs, job.DeadAtStart);
+                CompleteJob(job);
             }
         }
     }
 
-    // An entry and the ordinal of its document in the base of the published snapshot, or NotInBase.
-    private readonly record struct StoredEntry(IndexedEntry Entry, int BaseOrdinal);
+    // The documents currently dead, per segment, as local ordinals (tests).
+    internal IReadOnlyList<int>[] DeadOrdinalsPerSegment()
+    {
+        lock (_gate)
+        {
+            var result = new IReadOnlyList<int>[_segments.Length];
+            for (int i = 0; i < result.Length; i++)
+                result[i] = _dead[i]?.ToList() ?? [];
+            return result;
+        }
+    }
+
+    private void Publish()
+    {
+        _provider.Publish(_segments.Length == 0 ? IndexSnapshot.EmptyFor(_tokenization) : new IndexSnapshot(_segments, _dead, _tokenization));
+    }
+
+    // RebuildFrom: the new entries become the index only after their segment was built.
+    private void ReplaceAll(Dictionary<int, IndexedEntry> next, IProgress<float>? progress = null)
+    {
+        var segment = IndexSnapshotBuilder.BuildFoldedSegment(next, static entry => entry, _tokenization, progress);
+        if (segment.DocumentCount > 0)
+            _ = segment.Ids;
+
+        _epoch++;
+        _merging.Clear();
+        _segments = segment.DocumentCount == 0 ? [] : [segment];
+        _dead = new DeadSet?[_segments.Length];
+        _liveCount = segment.DocumentCount;
+        Publish();
+    }
+
+    // The segment that holds the live copy of an id, and its local ordinal.
+    private bool TryFindLive(int id, out int segment, out int local)
+    {
+        for (int s = _segments.Length - 1; s >= 0; s--)
+        {
+            if (_segments[s].Ids.TryFind(id, out local) && _dead[s]?.Contains(local) != true)
+            {
+                segment = s;
+                return true;
+            }
+        }
+
+        segment = local = -1;
+        return false;
+    }
+
+    // Applies the changes in order and publishes one snapshot when anything changed. The result says, per change,
+    // whether the id had a document before it (the changes before it in the same call included). A document that a
+    // change removes or replaces becomes dead where it is; the entries that stay are built into one new segment, in
+    // the order in which their ids first occur in the changes. The segment is built before any state changes, so a
+    // build that throws changes nothing. The callers read the caller's sequence into the changes first: enumerating
+    // it under the lock would let code inside the enumeration (on this thread, the lock is re-entrant) publish a
+    // half-applied batch.
+    private bool[] Apply(ReadOnlySpan<Change> changes)
+    {
+        var existed = new bool[changes.Length];
+        if (changes.Length == 0)
+            return existed;
+
+        lock (_gate)
+        {
+            // The last change of each id wins; null means removed.
+            Dictionary<int, IndexedEntry?> latest = [with(changes.Length)];
+            List<int> order = [with(changes.Length)];
+            List<(int Segment, int Local)> kills = [];
+            for (int i = 0; i < changes.Length; i++)
+            {
+                var (id, entry) = changes[i];
+                if (latest.TryGetValue(id, out var current))
+                {
+                    existed[i] = current is not null;
+                }
+                else
+                {
+                    existed[i] = TryFindLive(id, out int segment, out int local);
+                    if (existed[i])
+                        kills.Add((segment, local));
+                    order.Add(id);
+                }
+
+                latest[id] = entry;
+            }
+
+            List<KeyValuePair<int, IndexedEntry>> added = [with(order.Count)];
+            foreach (int id in CollectionsMarshal.AsSpan(order))
+            {
+                if (latest[id] is { } entry)
+                    added.Add(new(id, entry));
+            }
+
+            if (kills.Count == 0 && added.Count == 0)
+                return existed;
+
+            var fresh = added.Count == 0 ? null : IndexSnapshotBuilder.BuildFoldedSegment(added, static entry => entry, _tokenization);
+            if (fresh is not null)
+                _ = fresh.Ids;
+
+            var segments = new List<IndexSegment>(_segments.Length + 1);
+            var dead = new List<DeadSet?>(_segments.Length + 1);
+            for (int s = 0; s < _segments.Length; s++)
+            {
+                DeadSet? set = _dead[s];
+                var locals = CollectKills(kills, s);
+                if (locals.Count > 0)
+                {
+                    set = DeadSet.With(set, _segments[s].DocumentCount, CollectionsMarshal.AsSpan(locals));
+                    foreach (int local in CollectionsMarshal.AsSpan(locals))
+                        LogKill(_segments[s], _segments[s].RecordIds[local]);
+                }
+
+                // A segment without a live document is dropped, unless a merge still reads it.
+                if (set is not null && set.Count == _segments[s].DocumentCount && !_merging.Contains(_segments[s]))
+                    continue;
+
+                segments.Add(_segments[s]);
+                dead.Add(set);
+            }
+
+            if (fresh is not null)
+            {
+                segments.Add(fresh);
+                dead.Add(null);
+            }
+
+            if (segments.Count > _policy.MaxSegments)
+                MergeNewestSynchronously(segments, dead);
+
+            _segments = [.. segments];
+            _dead = [.. dead];
+            _liveCount += added.Count - kills.Count;
+            Publish();
+            KickMerges();
+            return existed;
+        }
+    }
+
+    private static List<int> CollectKills(List<(int Segment, int Local)> kills, int segment)
+    {
+        List<int> locals = [];
+        foreach (var (s, local) in CollectionsMarshal.AsSpan(kills))
+        {
+            if (s == segment)
+                locals.Add(local);
+        }
+
+        return locals;
+    }
+
+    // Tells the running merges that read this segment that a document of it died after they started.
+    private void LogKill(IndexSegment segment, int recordId)
+    {
+        foreach (var job in CollectionsMarshal.AsSpan(_jobs))
+        {
+            if (Array.IndexOf(job.Inputs, segment) >= 0)
+                job.KilledIds.Add(recordId);
+        }
+    }
+
+    // The writer outran the background merges: merges the newest small segments that no merge reads, on this thread.
+    // They are the segments the background merges would take next, and few, so this takes a few milliseconds.
+    private void MergeNewestSynchronously(List<IndexSegment> segments, List<DeadSet?> dead)
+    {
+        if (PickRun(segments, dead, _policy.SmallLaneLimit, minCount: 2) is not { } run)
+            return;
+
+        long began = System.Diagnostics.Stopwatch.GetTimestamp();
+        var merged = SegmentMerger.Merge(segments.GetRange(run.Start, run.Length), dead.GetRange(run.Start, run.Length));
+        Statistics.Record(synchronous: true, merged.DocumentCount, System.Diagnostics.Stopwatch.GetElapsedTime(began));
+        segments.RemoveRange(run.Start, run.Length);
+        dead.RemoveRange(run.Start, run.Length);
+        if (merged.DocumentCount > 0)
+        {
+            segments.Insert(run.Start, merged);
+            dead.Insert(run.Start, null);
+        }
+    }
+
+    // ── Merging ──
+
+    // The run of adjacent segments to merge next: its first segment and length, or null when nothing is due. A run
+    // ends at some segment and extends towards older ones while each older segment has at most MergePolicy.SimilarFactor
+    // times as many live documents as the largest segment of the run so far (and the run has at most
+    // MergePolicy.MaxRun segments). So the newest small segments merge with each other, and an old segment joins only
+    // once its newer neighbours have grown to about its size: a document is rewritten once per size class, not once
+    // per change. A run needs at least minCount segments and at most maxLive live documents; of the runs that qualify
+    // the smallest wins, the cheapest merge. No run crosses a segment that a running merge reads. A segment that is
+    // mostly dead is a run of one.
+    private (int Start, int Length)? PickRun(IReadOnlyList<IndexSegment> segments, IReadOnlyList<DeadSet?> dead, int maxLive, int minCount)
+    {
+        int count = segments.Count;
+        if (count == 0)
+            return null;
+
+        Span<int> lives = count <= 256 ? stackalloc int[count] : new int[count];
+        for (int i = 0; i < count; i++)
+            lives[i] = segments[i].DocumentCount - (dead[i]?.Count ?? 0);
+
+        (int Start, int Length)? best = null;
+        long bestTotal = long.MaxValue;
+        for (int end = count - 1; end >= 0; end--)
+        {
+            if (_merging.Contains(segments[end]))
+                continue;
+
+            int length = 1;
+            int largest = Math.Max(lives[end], 1);
+            long total = largest;
+            for (int i = end - 1; i >= 0 && length < _policy.MaxRun && !_merging.Contains(segments[i]); i--)
+            {
+                int size = Math.Max(lives[i], 1);
+                if (size > _policy.SimilarFactor * largest)
+                    break;
+
+                largest = Math.Max(largest, size);
+                total += size;
+                length++;
+            }
+
+            if (length >= minCount && total <= maxLive && total < bestTotal)
+            {
+                best = (end - length + 1, length);
+                bestTotal = total;
+            }
+        }
+
+        if (best is not null)
+            return best;
+
+        for (int i = 0; i < count; i++)
+        {
+            int deadCount = dead[i]?.Count ?? 0;
+            if (deadCount > 0 && deadCount >= _policy.DeadRatio * segments[i].DocumentCount && !_merging.Contains(segments[i]) && lives[i] <= maxLive)
+                return (i, 1);
+        }
+
+        return null;
+    }
+
+    // The next merge of the published segments with the normal fan-out.
+    private (int Start, int Length)? PickRun(int maxLive) => PickRun(_segments, _dead, maxLive, _policy.FanOut);
+
+    private MergeJob ClaimJob((int Start, int Length) run)
+    {
+        var job = new MergeJob(
+            _segments[run.Start..(run.Start + run.Length)],
+            _dead[run.Start..(run.Start + run.Length)],
+            _epoch);
+        foreach (var segment in job.Inputs)
+            _merging.Add(segment);
+        _jobs.Add(job);
+        return job;
+    }
+
+    // Starts a background worker for each lane that is idle and has a merge due. Lane 0 takes any merge, lane 1 only
+    // small ones (MergePolicy.SmallLaneLimit).
+    private void KickMerges()
+    {
+        if (!_policy.Background || _mergeFault is not null)
+            return;
+
+        for (int lane = 0; lane < _laneActive.Length; lane++)
+        {
+            if (_laneActive[lane] || PickRun(LaneLimit(lane)) is null)
+                continue;
+
+            _laneActive[lane] = true;
+            StartWorker(lane);
+        }
+    }
+
+    private void StartWorker(int lane) => Task.Run(() => MergeWorker(lane));
+
+    private int LaneLimit(int lane) => lane == 0 ? int.MaxValue : _policy.SmallLaneLimit;
+
+    private void MergeWorker(int lane)
+    {
+        while (true)
+        {
+            MergeJob job;
+            lock (_gate)
+            {
+                if (_mergeFault is not null || PickRun(LaneLimit(lane)) is not { } run)
+                {
+                    _laneActive[lane] = false;
+                    return;
+                }
+
+                job = ClaimJob(run);
+            }
+
+            try
+            {
+                long began = System.Diagnostics.Stopwatch.GetTimestamp();
+                job.Result = SegmentMerger.Merge(job.Inputs, job.DeadAtStart);
+                Statistics.Record(synchronous: false, job.Result.DocumentCount, System.Diagnostics.Stopwatch.GetElapsedTime(began));
+                OnMergeBuilt?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                lock (_gate)
+                {
+                    _mergeFault ??= ex;
+                    ReleaseJob(job);
+                    _laneActive[lane] = false;
+                }
+
+                return;
+            }
+
+            lock (_gate)
+            {
+                CompleteJob(job);
+                // Completing may make another run due for a lane that is idle; this lane loops to pick it up.
+                KickMerges();
+            }
+        }
+    }
+
+    private void ReleaseJob(MergeJob job)
+    {
+        _jobs.Remove(job);
+        foreach (var segment in job.Inputs)
+            _merging.Remove(segment);
+    }
+
+    // Replaces the inputs of a finished merge with its result and publishes, unless the index was replaced as a whole
+    // since the merge started.
+    private void CompleteJob(MergeJob job)
+    {
+        ReleaseJob(job);
+        if (job.Epoch != _epoch)
+            return;
+
+        int start = Array.IndexOf(_segments, job.Inputs[0]);
+        if (start < 0)
+            return;
+
+        var merged = job.Result!;
+        DeadSet? mergedDead = null;
+        if (merged.DocumentCount > 0 && job.KilledIds.Count > 0)
+        {
+            List<int> locals = [];
+            foreach (int id in CollectionsMarshal.AsSpan(job.KilledIds))
+            {
+                if (merged.Ids.TryFind(id, out int local))
+                    locals.Add(local);
+            }
+
+            if (locals.Count > 0)
+                mergedDead = DeadSet.With(null, merged.DocumentCount, CollectionsMarshal.AsSpan(locals));
+        }
+
+        var segments = new List<IndexSegment>(_segments);
+        var dead = new List<DeadSet?>(_dead);
+        segments.RemoveRange(start, job.Inputs.Length);
+        dead.RemoveRange(start, job.Inputs.Length);
+        if (merged.DocumentCount > 0 && (mergedDead is null || mergedDead.Count < merged.DocumentCount))
+        {
+            segments.Insert(start, merged);
+            dead.Insert(start, mergedDead);
+        }
+
+        _segments = [.. segments];
+        _dead = [.. dead];
+        Publish();
+    }
+
+    private sealed class MergeJob(IndexSegment[] inputs, DeadSet?[] deadAtStart, long epoch)
+    {
+        internal IndexSegment[] Inputs { get; } = inputs;
+
+        // The dead documents of the inputs when the merge started: the merge drops these.
+        internal DeadSet?[] DeadAtStart { get; } = deadAtStart;
+
+        internal long Epoch { get; } = epoch;
+
+        // Record ids of documents of the inputs that died after the merge started.
+        internal List<int> KilledIds { get; } = [];
+
+        internal IndexSegment? Result { get; set; }
+    }
 
     // One change of a mutation: Entry stores or replaces the entry of Id; null removes it.
     private readonly record struct Change(int Id, IndexedEntry? Entry);
+}
 
-    private readonly record struct Undo(int Id, StoredEntry? Previous);
+// Counts of the merges an IndexUpdater ran (IndexUpdater.Statistics). Merges are rare next to changes, so a lock is
+// cheaper than the cache-line padding that independent atomic counters would need.
+internal sealed class MergeStatistics
+{
+    private readonly Lock _lock = new();
+    private long _background;
+    private long _synchronous;
+    private long _documents;
+    private TimeSpan _time;
+
+    // Merges on a background thread.
+    internal long BackgroundMerges
+    {
+        get { lock (_lock) return _background; }
+    }
+
+    // Merges that a change ran itself because the segments passed MergePolicy.MaxSegments.
+    internal long SynchronousMerges
+    {
+        get { lock (_lock) return _synchronous; }
+    }
+
+    // Documents written by all merges: divided by the documents added, the write amplification of the index.
+    internal long DocumentsWritten
+    {
+        get { lock (_lock) return _documents; }
+    }
+
+    internal TimeSpan MergeTime
+    {
+        get { lock (_lock) return _time; }
+    }
+
+    internal void Record(bool synchronous, int documents, TimeSpan elapsed)
+    {
+        lock (_lock)
+        {
+            if (synchronous)
+                _synchronous++;
+            else
+                _background++;
+            _documents += documents;
+            _time += elapsed;
+        }
+    }
 }

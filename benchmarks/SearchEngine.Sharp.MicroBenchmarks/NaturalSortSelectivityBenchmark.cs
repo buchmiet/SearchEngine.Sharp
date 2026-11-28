@@ -33,7 +33,7 @@ public class NaturalSortSelectivityBenchmark
         var provider = new IndexSnapshotProvider();
         new IndexUpdater(provider).RebuildFrom(SelectivityCorpus.Create(documentCount).Entries);
         _snapshot = provider.Current;
-        _ = _snapshot.Base.GetSortedPermutation();
+        _ = _snapshot.Segments[0].GetSortedPermutation();
         _hitCount = HitSets.CountFor(Density, documentCount);
         _hits = HitSets.Random(documentCount, _hitCount, seed: 1);
     }

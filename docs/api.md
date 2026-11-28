@@ -97,9 +97,10 @@ grapheme-cluster boundaries. Exact effects and caveats: [Unicode matching](query
 
 Changes the index. Calls are serialized, and every call that changes an entry publishes a new snapshot through the
 provider.
-A call that throws leaves the stored entries and the published snapshot unchanged. A change keeps the bulk of the
-previous snapshot and builds again only the entries changed since the whole index was last built; once those
-changes pass about `2 × √(entry count)` (at least 256, at most 4,096), the change builds the whole index again.
+A call that throws leaves the entries and the published snapshot unchanged. A change builds one small segment from the
+entries it adds or replaces and marks the documents it removes or replaces as removed where they are; it does not
+rebuild the index. Segments of similar size are merged on a background thread that neither queries nor changes wait
+for.
 The cost of each call is in [performance.md](performance.md#keeping-an-index-current). Prefer the batch methods, or
 `ProgressiveIndexIngestion` during a scan, over one call per entry when many entries change at once.
 
@@ -232,8 +233,9 @@ static FacetFilter Combine(params FacetFilter[] filters);
 
 An index whose content never changes. Any number of threads may query one snapshot at once. The lookup structures
 for `Within` and for `NaturalSortAscending` are built on the first query that needs them, and concurrent first
-callers wait for that build. They belong to the snapshot's base, so the snapshots that `IndexUpdater` publishes
-after small changes share them; only the small delta part is built again after each change.
+callers wait for that build. They belong to a segment, so the snapshots that `IndexUpdater` publishes after small
+changes share those of every segment the change did not replace; a merge builds a new segment, whose structures are
+built again on first use.
 
 ```csharp
 static readonly IndexSnapshot Empty;    // empty snapshot with SearchTokenization.Default

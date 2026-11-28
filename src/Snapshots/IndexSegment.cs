@@ -23,20 +23,20 @@ namespace SearchEngine.Snapshots;
 //   PostingOffsets[i] : start of the postings of token i in PostingDocIds
 //   PostingCounts[i]  : number of documents that contain token i
 //
-// PostingDocIds holds snapshot ordinals, not record ids, ascending within each token. The documents of a segment have
-// the ordinals FirstOrdinal .. FirstOrdinal + DocumentCount - 1; the per-document arrays (RecordIds, SortTexts,
-// FacetColumns) are indexed by ordinal - FirstOrdinal.
+// PostingDocIds holds local ordinals, not record ids, ascending within each token: the documents of a segment are
+// numbered 0 .. DocumentCount - 1, and the per-document arrays (RecordIds, SortTexts, FacetColumns) are indexed by
+// that number. A segment knows nothing about its place in a snapshot, so the same segment object can sit at a
+// different place in the next snapshot after a merge (IndexSnapshot, Data layout, adds the offset).
 //
 // ── Thread safety ──
 // A segment is immutable after construction except for two derived structures built on first use: the bigram index
 // and the sort permutation. Each is built at most once per segment: the first caller builds it under a per-structure
 // lock while concurrent first callers wait on that lock. A build that throws publishes nothing, so the next caller
-// builds again. Nothing is built at publish time. The base segment of an index outlives many snapshots
-// (IndexSnapshot), so its structures survive the publishes of small changes.
+// builds again. Nothing is built at publish time. A segment outlives many snapshots
+// (IndexSnapshot), so its structures survive the publishes of changes that do not touch it.
 internal sealed class IndexSegment
 {
     internal static readonly IndexSegment Empty = new(
-        firstOrdinal: 0,
         recordIds: [],
         exactPostings: [],
         wordsArray: [],
@@ -47,9 +47,6 @@ internal sealed class IndexSegment
         postingCounts: [],
         sortTexts: [],
         facetColumns: []);
-
-    // The snapshot ordinal of the first document.
-    internal readonly int FirstOrdinal;
 
     // The record id of each document.
     internal readonly int[] RecordIds;
@@ -114,7 +111,6 @@ internal sealed class IndexSegment
     internal bool IsSortedPermutationBuilt => Volatile.Read(ref _sortedPermutation) is not null;
 
     internal IndexSegment(
-        int firstOrdinal,
         int[] recordIds,
         Dictionary<string, WordPostings> exactPostings,
         char[] wordsArray,
@@ -126,7 +122,6 @@ internal sealed class IndexSegment
         string[] sortTexts,
         Dictionary<string, long[]> facetColumns)
     {
-        FirstOrdinal = firstOrdinal;
         RecordIds = recordIds;
         ExactPostings = exactPostings;
         WordsArray = wordsArray;
@@ -138,6 +133,14 @@ internal sealed class IndexSegment
         SortTexts = sortTexts;
         FacetColumns = facetColumns;
     }
+
+    // Record id → local ordinal. Built on first use; the updater builds it before it publishes a segment, so a write
+    // never pays for it (IndexUpdater).
+    private IdIndex? _ids;
+    private object? _idsBuildLock;
+
+    internal IdIndex Ids
+        => Volatile.Read(ref _ids) ?? LazyInitializer.EnsureInitialized(ref _ids, ref _idsBuildLock, () => new IdIndex(RecordIds));
 
     // i ascends, so every list holds ascending token indices and is length-descending (Data layout above).
     private Dictionary<int, int[]> BuildBigramWordIndices()
@@ -168,7 +171,7 @@ internal sealed class IndexSegment
         return built;
     }
 
-    // The sort permutation: the ordinals of the segment in natural order (NaturalOrder), permutation[rank] = ordinal.
+    // The sort permutation: the local ordinals of the segment in natural order (NaturalOrder), permutation[rank] = ordinal.
     // Built on first use (Thread safety above).
     internal int[] GetSortedPermutation()
         => Volatile.Read(ref _sortedPermutation)
@@ -178,9 +181,9 @@ internal sealed class IndexSegment
     {
         var computed = new int[RecordIds.Length];
         for (int i = 0; i < computed.Length; i++)
-            computed[i] = FirstOrdinal + i;
+            computed[i] = i;
 
-        NaturalOrder.Sort(computed, this, null);
+        NaturalOrder.Sort(computed, this);
 
         Interlocked.Increment(ref _sortedPermutationBuildCount);
         return computed;

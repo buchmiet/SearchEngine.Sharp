@@ -65,7 +65,8 @@ reason and drop the number. A derived number names the constants it comes from (
 | Position of a token in a segment | | token index |
 | An indexed piece of text | token | token (also where identifiers say `Word`, such as `WordAt`) |
 | A piece of a query | term | term |
-| Building the whole index | full build (`RebuildFrom` or a merge) | merge for the threshold event; rebuild for `RebuildFrom` only |
+| Building the whole index | full build (`RebuildFrom`) | rebuild for `RebuildFrom` only |
+| Combining segments in the background | merge | merge; "full build" no longer names it |
 | Making a snapshot current | publish | publish |
 | The structure behind `NaturalSortAscending` | sort permutation | sort permutation |
 | Natural sort strategies | | sort the hits; walk the permutation |

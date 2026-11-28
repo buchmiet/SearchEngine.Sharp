@@ -68,6 +68,21 @@ internal sealed class FastBitSet
             Add(index);
     }
 
+    // Adds offset + index for every index: the postings of a segment hold local ordinals (IndexSegment).
+    public void AddAll(ReadOnlySpan<int> indices, int offset)
+    {
+        foreach (int index in indices)
+            Add(offset + index);
+    }
+
+    // Clears every bit that is set in mask, where mask word k covers the ordinals of word wordOffset + k of this set
+    // (IndexSnapshot, Data layout: a segment starts on a word boundary).
+    internal void ExceptWithWords(int wordOffset, ReadOnlySpan<ulong> mask)
+        => Combine<AndNotOperation>(Words.Slice(wordOffset, mask.Length), mask);
+
+    // Clears the bits of word wordIndex that are not in keepMask.
+    internal void KeepBitsOfWord(int wordIndex, ulong keepMask) => _bits[wordIndex] &= keepMask;
+
     public void RemoveAll(ReadOnlySpan<int> indices)
     {
         foreach (int index in indices)

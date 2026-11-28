@@ -4,6 +4,29 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [Unreleased]
 
+### Changed
+
+- `IndexUpdater` keeps the index as a list of immutable segments instead of one base, one delta and a list of dead
+  base ordinals. A change builds one small segment from the entries it adds or replaces, marks the documents it
+  removes or replaces as removed where they are (a bitmap per segment, copied in chunks), and publishes; it never
+  rebuilds the index. Neighbouring segments of similar size are merged on a background thread, which drops the removed
+  documents and replaces the merged segments in one publish, so a merge blocks neither queries nor changes. Reads
+  stay lock-free.
+  On the same machine, 10^6 names, 20,000 changes: the median `AddEntry` takes 0.5 to 0.6 ms before and 17 to 49 µs
+  after, the slowest call 2.0 to 2.1 s before and 16 to 19 ms after, and no call takes over a second (9 to 12
+  before). `ProgressiveIndexIngestion` with 2,000-entry batches over 100,000 paths publishes in 1.0 s instead of 9.1 s.
+  See [Keeping an index current](docs/performance.md#keeping-an-index-current).
+- `IndexUpdater` no longer keeps a copy of the entries: managed memory after a build of 10^6 names without facets fell
+  from 140 MB to 70 MB. `EntryCount` and `ContainsEntry` read the segments.
+- A query visits every segment. An index that `RebuildFrom` built has one, and answers as before.
+- `IndexUpdater.MergeThreshold` (internal) and the `2 × √n` rule are gone; the "full build" a change used to run
+  every few hundred to few thousand changes no longer exists.
+
+### Added
+
+- The library builds with [ZeroAlloc.Analyzers](https://github.com/ZeroAlloc-Net/ZeroAlloc.Analyzers) as a development
+  dependency (nothing flows to consumers). `src/.editorconfig` raises every rule to a warning.
+
 ## [0.6.1] - 2026-11-27
 
 The first release after 0.5.6: version 0.6.0 was never published to NuGet, so this section lists every change
