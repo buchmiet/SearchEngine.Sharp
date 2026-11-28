@@ -4,13 +4,16 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-11-24
+## [0.6.1] - 2026-11-27
 
-Requires .NET 11. Code written for 0.5.6 may need changes: the publish durations of the ingestion results and the
-ingestion settings are renamed, one `AddSearchEngine` overload is replaced, a facet filter on an unknown facet no
-longer throws, `SnapshotOrder` is unspecified after an entry is replaced, and most methods now throw
-`ArgumentNullException` or `ArgumentException` for invalid arguments. Every change to what shipped in 0.5.6 is listed
-under Changed.
+The first release after 0.5.6: version 0.6.0 was never published to NuGet, so this section lists every change
+since 0.5.6.
+
+Requires .NET 11. Code written for 0.5.6 may need changes: the publish durations of the ingestion results are
+renamed, the ingestion settings moved into one record per publish policy, one `AddSearchEngine` overload is replaced,
+a facet filter on an unknown facet no longer throws, `SnapshotOrder` is unspecified after an entry is replaced, and
+most methods now throw `ArgumentNullException` or `ArgumentException` for invalid arguments. Every change to what
+shipped in 0.5.6 is listed under Changed.
 
 ### Added
 
@@ -37,7 +40,9 @@ under Changed.
   UTF-16 code unit. `İ` (U+0130) now lowercases to `i`, as Unicode defines it (`char.ToLowerInvariant` kept it), so
   `İstanbul` matches `istanbul` without any option. Characters the platform cased differently from Unicode 17
   (for example letters added in recent Unicode versions on an older ICU) now lowercase the same everywhere;
-  rebuild indexes that were built with 0.5.6 if they hold such names.
+  rebuild indexes that were built with 0.5.6 if they hold such names. The public helpers lowercase the same way:
+  `TextNormalizer.ToLowerInvariantFast`, `CreateNormalizedWord`, `GetWordsFromString`, `ForEachUniqueWord` and
+  `NameTokenizer.TokenizeName`. Despite its name, `ToLowerInvariantFast` no longer calls `char.ToLowerInvariant`.
 - `WordMatchMethod.Regex` takes its case-insensitivity from the same Unicode 17.0.0 tables instead of
   `RegexOptions.IgnoreCase`: the characters of the pattern get the casing of indexed tokens and the pattern runs
   case-sensitively. `İstanbul` now finds `istanbul`, and under `CaseFold` a pattern no longer has to be written
@@ -63,9 +68,9 @@ under Changed.
   `FixedBatchSize` is `Adaptive.BatchCap` or `FixedBatch.BatchSize`, and `AdaptiveMultiplier` is
   `Adaptive.PublishMultiplier`. `TimeDebounce` has no batch size: it never published by size, and setting
   `FixedBatchSize` for it did nothing. `PerEntry` has no settings. `IngestPublishOptions` and the policies are
-  records, so `with` works on them, and every setting is checked when it is set: an invalid value throws
-  `ArgumentOutOfRangeException` naming the property where it is set, not when `IngestAsync` starts. A `switch`
-  over the four policies needs no default arm.
+  records, so `with` works on them and `Equals` and `==` compare their settings instead of their references, and every
+  setting is checked when it is set: an invalid value throws `ArgumentOutOfRangeException` naming the property where
+  it is set, not when `IngestAsync` starts. A `switch` over the four policies needs no default arm.
 
   ```csharp
   // 0.5.6
@@ -77,19 +82,27 @@ under Changed.
       ChannelCapacity = 1_000,
   };
 
-  // 0.6.0
+  // 0.6.1
   var options = new IngestPublishOptions
   {
       Policy = new IngestPublishPolicy.FixedBatch { BatchSize = 400, MaxStaleness = TimeSpan.FromSeconds(2) },
       ChannelCapacity = 1_000,
   };
   ```
+
+  Configuration binding cannot choose a policy by name. Bound from a 0.5.6 configuration, `"Policy": "FixedBatch"`
+  and keys such as `FixedBatchSize` are ignored without an error, and the options keep the default `Adaptive`
+  policy. Create the policy in code and bind onto options that already hold it:
+  `var options = new IngestPublishOptions { Policy = new IngestPublishPolicy.FixedBatch() }; section.Bind(options);`
+  then reads `Policy:BatchSize` and the other settings of that policy. `System.Text.Json` cannot deserialize a
+  policy either.
 - The bigram index used by `WordMatchMethod.Within` is built on the first `Within` query that needs it instead of
   in every build. Builds are faster, and the first `Within` query after each full build pays the cost (0.1 to 0.5 s
   at 1 million names, depending on the number of distinct tokens); a change that keeps the base of the
   `IndexUpdater` (see the `IndexUpdater` entry) keeps its bigram index. Concurrent first callers share one build.
 - `TextNormalizer.ForEachUniqueWord` requires a set that compares ordinally and throws `ArgumentException`
-  otherwise.
+  otherwise. A set made with `StringComparer.OrdinalIgnoreCase`, which 0.5.6 accepted, now throws; pass
+  `new HashSet<string>(StringComparer.Ordinal)`.
 - `NaturalSortAscending` compares sort texts part by part: text parts with text parts, numbers by value at any
   length, and digits of other scripts with their value. It used to compare a text part with the separator that
   followed a shorter part, so `ab` sorted before `a 2`, `xa` before `x1` and `reports` before `report final`, and
@@ -127,11 +140,14 @@ under Changed.
   negative, at the call, like `CreateDictionary`. It used to yield nothing.
 - `IngestionProgress.PendingCount` reports the entries accepted but not yet published, `EntriesAccepted` minus
   `EntriesPublished` (it was always 0).
-- `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by `AddSearchEngine(Func<IServiceProvider,
-  IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A snapshot keeps neither the search text
-  nor the facet values of its entries, so the updater cannot start from one; the factory now returns the entries,
-  and the index and the updater are both built from them. The index with initial entries is built when the
-  provider is first resolved instead of when `AddSearchEngine` is called.
+- `AddSearchEngine(Func<IServiceProvider, IndexSnapshot>)` (0.5.6) is replaced by
+  `AddSearchEngine(Func<IServiceProvider, IDictionary<int, string>>)` and a variant with a `SearchTokenization`. A
+  snapshot keeps neither the search text nor the facet values of its entries, so the updater cannot start from one; the
+  factory now returns the entries, and the index and the updater are both built from them. The index with initial
+  entries is built when the provider is first resolved instead of when `AddSearchEngine` is called. A factory that built
+  its snapshot from `IndexedEntry` values (facets or a separate sort text) has no direct replacement: register with
+  `AddSearchEngine()` or `AddSearchEngine(tokenization)` and call `IIndexUpdater.RebuildFrom` with the entries once at
+  startup.
 - With `enableOperators: true`, parentheses group terms only when both `(` and `)` are query separators of the
   preset. In a preset made by `SearchTokenization.Create` with only one of them, that one splits terms like a space
   and the other is part of its term. Such presets used to throw `ArgumentOutOfRangeException` for `(a) b` or leave
@@ -143,7 +159,8 @@ under Changed.
 - Creating an `IndexUpdater` publishes an empty snapshot with its preset, and the providers registered by
   `AddSearchEngine` and `AddKeyedSearchEngine` start with an empty snapshot of the registered preset. Until the
   first change, `IndexSnapshotProvider.Current` used to be `IndexSnapshot.Empty` with `SearchTokenization.Default`,
-  whatever preset the index was configured with.
+  whatever preset the index was configured with. Creating an updater replaces the snapshot the provider holds, so a
+  second updater created later on the same provider empties the index.
 - `IndexUpdater` publishes a change without rebuilding the whole index. A snapshot of the updater holds a base built
   from all entries, a delta built from the entries added or replaced since then, and the list of base documents
   removed or replaced since then. `AddEntry`, `RemoveEntry`, `RefreshEntry`, `AddOrUpdateEntries` and
@@ -160,7 +177,8 @@ under Changed.
 - A facet filter on a facet that no entry of the snapshot carries reads the facet as 0, like a facet that only some
   entries carry, instead of throwing `ArgumentException("Unknown facet ...")`. `Range("size", 1, 100)` on an index
   without `size` matches nothing, and `Range("size", 0, 100)` matches every document. A filter used to throw on an
-  empty index, after `Clear`, or while no entry with that facet had been published yet.
+  empty index, after `Clear`, or while no entry with that facet had been published yet. Facet names are not
+  checked, so a misspelled name no longer shows up as an exception.
 
 ### Removed
 
@@ -172,9 +190,12 @@ under Changed.
   that start with `NOT AND` or `NOT OR`, and returned nothing for misplaced operators such as `a NOT AND b`,
   `(AND a)`, `(a OR) b` or `a () b`. Such expressions are now corrected by the
   [documented rules](docs/query-semantics.md#query-parsing-default-preset), also inside parentheses.
+- A term of several `*` (`**`) missed documents without tokens, which `*` matches; consecutive `*` now behave as
+  one, in the index and in `NameMatcher`, as [documented](docs/query-semantics.md#glob-patterns).
 - A document whose tokens are equal only after lowercasing (`Straße STRAẞE`, `k` and the Kelvin sign) was
   returned twice by `Find` and counted twice by `CountMatches`. The second of two tokens that differ in lowercase
-  but compare equal case-insensitively (`ς σ`, `µ μ`, `β ϐ`) was not indexed.
+  but compare equal case-insensitively (`ς σ`, `µ μ`, `β ϐ`) was not indexed. `TextNormalizer.GetWordsFromString`
+  and `ForEachUniqueWord` return the same tokens as the index.
 - `ProgressiveIndexIngestion.IngestAsync` never completed when the publisher failed (an exception from the
   updater, a `Published` or `onPublished` handler, or the progress callback) while the scanner was blocked on a
   full channel. It now cancels the scanner and faults with the original exception.
@@ -296,8 +317,8 @@ under Changed.
 - Initial release: in-memory inverted index with exact and substring token search, boolean operators, natural
   sort, immutable snapshots for concurrent reads, and dependency injection registration.
 
-[Unreleased]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.6...v0.6.0
+[Unreleased]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.6...v0.6.1
 [0.5.6]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/buchmiet/SearchEngine.Sharp/compare/v0.5.3...v0.5.4
