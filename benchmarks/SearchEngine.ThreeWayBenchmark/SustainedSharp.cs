@@ -4,7 +4,7 @@ using SearchEngine;
 namespace ThreeWay;
 
 /// <summary>SearchEngine.Sharp, public API only; segment and merge figures come from reflection so the same adapter runs on the layout before segments.</summary>
-public sealed class SustainedSharp(string label) : ISustained
+public sealed class SustainedSharp(string label) : ILifecycle
 {
     public string Name => label;
 
@@ -63,6 +63,66 @@ public sealed class SustainedSharp(string label) : ISustained
         long deltaDocs = delta is null ? 0 : Convert.ToInt64(delta.GetType().GetProperty("DocumentCount", Any)!.GetValue(delta));
         long dead = type.GetField("DeadOrdinals", Any)?.GetValue(snapshot) is int[] d ? d.Length : 0;
         return (delta is null ? 1 : 2, deltaDocs + dead);
+    }
+
+    public long Apply(OpKind kind, int id, string? text, string probeToken)
+    {
+        switch (kind)
+        {
+            case OpKind.Add: _updater.AddEntry(id, text!); break;
+            case OpKind.Update: _updater.RefreshEntry(id, text!); break;
+            default: _updater.RemoveEntry(id); break;
+        }
+
+        return _engine.CountMatches(probeToken, WordMatchMethod.Exact);
+    }
+
+    public long CountAnd(string[] tokens) => _engine.CountMatches(string.Join(" AND ", tokens), WordMatchMethod.Exact, true);
+
+    private object? _largestRef;
+    private long _largestKey;
+    private System.Reflection.FieldInfo? _segmentsField, _deadField;
+    private System.Reflection.PropertyInfo? _docCount, _deadCount;
+
+    // Segments and dead sets of the current snapshot, through reflection (internal types); the largest segment is told apart by reference.
+    public LayoutDetail Detail()
+    {
+        object snapshot = _provider.Current;
+        var type = snapshot.GetType();
+        _segmentsField ??= type.GetField("Segments", Any);
+        _deadField ??= type.GetField("Dead", Any);
+        if (_segmentsField?.GetValue(snapshot) is not Array segments)
+        {
+            var (seg, delta) = Layout();
+            return new(seg, delta, 0, 0, 0, 0);
+        }
+
+        var dead = _deadField?.GetValue(snapshot) as Array;
+        long total = 0, largest = -1, largestDead = 0, deadTotal = 0;
+        object? largestSeg = null;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            object seg = segments.GetValue(i)!;
+            _docCount ??= seg.GetType().GetProperty("DocumentCount", Any)!;
+            long n = Convert.ToInt64(_docCount.GetValue(seg));
+            long d = 0;
+            if (dead?.GetValue(i) is { } set)
+            {
+                _deadCount ??= set.GetType().GetProperty("Count", Any)!;
+                d = Convert.ToInt64(_deadCount.GetValue(set));
+            }
+
+            total += n; deadTotal += d;
+            if (n > largest) { largest = n; largestDead = d; largestSeg = seg; }
+        }
+
+        if (!ReferenceEquals(largestSeg, _largestRef))
+        {
+            _largestRef = largestSeg;
+            _largestKey++;
+        }
+
+        return new(segments.Length, total - largest, deadTotal, largest, largestDead, _largestKey);
     }
 
     public long ReaderQuery(int which)

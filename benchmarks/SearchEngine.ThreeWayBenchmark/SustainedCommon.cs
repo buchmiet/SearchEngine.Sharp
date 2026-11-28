@@ -47,6 +47,31 @@ public interface ISustained : IDisposable
     IReadOnlyList<MergeEvent> MergeEvents { get; }
 }
 
+public enum OpKind : byte { Add = 0, Update = 1, Delete = 2 }
+
+/// <summary>
+/// The segment layout including deletions. Document counts are physical (dead documents included) so the largest
+/// segment is the same one an engine's merge policy sees; <see cref="LargestKey"/> changes whenever a different segment
+/// becomes the largest, in particular when the largest one is rewritten or merged.
+/// </summary>
+public sealed record LayoutDetail(int Segments, long DeltaDocuments, long DeadDocuments, long LargestDocuments, long LargestDead, long LargestKey);
+
+/// <summary>The index-lifecycle operations (additions, updates and deletions of single documents), same visibility guarantee as <see cref="ISustained.AddVisible"/>.</summary>
+public interface ILifecycle : ISustained
+{
+    /// <summary>
+    /// Adds a new document, replaces the text of an existing one (text = the whole new text) or deletes one (text null), and
+    /// returns the number of hits of probeToken once the change is visible to queries.
+    /// </summary>
+    long Apply(OpKind kind, int id, string? text, string probeToken);
+
+    /// <summary>Number of documents that contain every one of the tokens (exact tokens, lower case).</summary>
+    long CountAnd(string[] tokens);
+
+    /// <summary>The layout with dead documents, read untimed.</summary>
+    LayoutDetail Detail();
+}
+
 public static class ReaderQueries
 {
     // The queries a concurrent reader cycles through: a term, an AND and a prefix.

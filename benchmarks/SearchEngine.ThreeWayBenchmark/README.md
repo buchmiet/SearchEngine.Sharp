@@ -64,3 +64,39 @@ overlap a write call over 10 ms; merges are counted and, for Lucene, timed one b
 a subset. `PREV_DLL=<dll>` adds SearchEngine.Sharp built from another commit, as
 the report does for the layout before segments. The report is [results/sustained/report.md](results/sustained/report.md);
 `*.json` hold every call's latency, `*.log` the console output. The method and its caveats are in the report.
+
+## Index lifecycle: additions, updates and deletions
+
+`--mode lifecycle` is the sustained benchmark with the whole life of an index: an index of n documents (ids 0..n-1) receives one long stream of
+single-document additions, updates and deletions, every call timed until the change is visible to a query (same guarantee as above: Sharp
+`AddEntry` / `RefreshEntry` / `RemoveEntry` publish synchronously; Lucene.NET `AddDocument` / `UpdateDocument(term)` / `DeleteDocuments(term)` +
+`MaybeRefreshBlocking`; Tantivy `AddDocument` / `UpdateDocument(term)` / `DeleteTerm` + commit + searcher refresh; in-memory indexes).
+
+```bash
+scripts/run-lifecycle.sh results/lifecycle            # four configurations, every engine, one process each (~70 minutes, see the script header)
+python3 scripts/report_lifecycle.py results/lifecycle # report.md and the plots (needs matplotlib)
+# one run by hand
+dotnet bin/Release/net11.0/SearchEngine.ThreeWayBenchmark.dll --mode lifecycle --engine sharp --n 200000 --ops 120000 \
+  --mix add:20,update:60,delete:20 --old-share 0.9 --check-every 24000 --out sharp-main.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--engine sharp\|lucene\|tantivy`, `--label` | engine (one per process) and the name shown in the report |
+| `--n`, `--ops` | starting documents and number of operations |
+| `--mix add:30,update:50,delete:20` | weights of the operation types (default as shown) |
+| `--old-share 0.9` | share of updates and deletions that hit an original document no operation has touched (the large first segment); the rest hit a live document among the last `--recent-window` (default 2,000) writes |
+| `--reader 1 --rate R` | a reader thread cycles three queries; the writer is paced at R calls per second (0 = unpaced) |
+| `--check-every K` | untimed light validation every K operations (counts and a sample of version tokens); the full check always runs at the end |
+| `--full-ids 0` | skip the id list of every live document at the end (the live count and all other id sets are still compared); for 1,000,000 documents on Tantivy |
+| `--seed`, `--out` | seed of the corpus and of the operation stream, output JSON |
+| `--self-test-skip K` | validation self-test: every K-th update is not sent to the engine, the checks must then report errors |
+
+What is measured: latency per operation type and overall (mean, p50, p95, p99, p99.9, max), throughput; the layout after every call (segments, documents
+outside the largest segment, dead documents in all segments and in the largest one) and every moment a different segment becomes the largest one
+(Sharp: reference of the segment object, Lucene: segment name, Tantivy: segment id), with the latency of the surrounding calls; merges (count, documents written,
+time; Lucene's every merge); peak RSS, managed allocations, GC pauses; with a reader, reader latency tagged by merges and slow writes.
+Validation: the expected index is kept in a model and compared by ids with every engine (a token every live document has, per-version tokens with
+only the latest matching, tokens of deleted documents, `jpg`, `final`, `report AND pdf`, `rep*`); the report shows the mismatches, all of which must be zero. The method, the
+schema change (Lucene.NET indexes the id as a `StringField`, Tantivy's `id` field is now indexed, which also applies to the base build of the other scenarios) and the
+caveats are in [scripts/lifecycle-notes.md](scripts/lifecycle-notes.md), which the report includes.

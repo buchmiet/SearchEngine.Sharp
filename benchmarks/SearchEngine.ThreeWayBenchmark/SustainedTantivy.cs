@@ -8,7 +8,7 @@ namespace ThreeWay;
 /// TantivyDotNet with one writer that stays open for the whole run (the realistic use; the earlier one-shot benchmark
 /// created a writer per call). Visibility needs a commit and a searcher refresh; commits go to a RAM index unless durable.
 /// </summary>
-public sealed class SustainedTantivy : ISustained
+public sealed class SustainedTantivy : ILifecycle
 {
     public string Name => "TantivyDotNet 1.0.0-rc.2";
 
@@ -23,11 +23,11 @@ public sealed class SustainedTantivy : ISustained
 
     private static Schema MakeSchema() => new SchemaBuilder()
         .AddAnalyzer("sep", Analyzer.Regex(Sep.TantivyRegex).LowerCase())
-        .AddU64Field("id", stored: true, indexed: false, fast: true)
+        .AddU64Field("id", stored: true, indexed: true, fast: true) // indexed, so that a document can be replaced or deleted by term
         .AddTextField("name", stored: true, tokenizer: "sep")
         .Build();
 
-    private void Add(int id, string name)
+    private void Write(int id, string name)
     {
         _buffer.Clear();
         _json!.Reset(_buffer);
@@ -36,6 +36,11 @@ public sealed class SustainedTantivy : ISustained
         _json.WriteString("name", name);
         _json.WriteEndObject();
         _json.Flush();
+    }
+
+    private void Add(int id, string name)
+    {
+        Write(id, name);
         _writer.AddDocument(_buffer.WrittenSpan);
     }
 
@@ -76,6 +81,60 @@ public sealed class SustainedTantivy : ISustained
         _manager.Refresh();
         using var lease = _manager.Acquire();
         return lease.Searcher.Count(TantivyDotNet.Query.Term("name", probeToken));
+    }
+
+    public long Apply(OpKind kind, int id, string? text, string probeToken)
+    {
+        switch (kind)
+        {
+            case OpKind.Add: Add(id, text!); break;
+            case OpKind.Update:
+                Write(id, text!);
+                _writer.UpdateDocument(TantivyDotNet.Query.Term("id", (ulong)id), _buffer.WrittenSpan);
+                break;
+            default: _writer.DeleteTerm("id", (ulong)id); break;
+        }
+
+        _writer.Commit();
+        _manager.Refresh();
+        using var lease = _manager.Acquire();
+        return lease.Searcher.Count(TantivyDotNet.Query.Term("name", probeToken));
+    }
+
+    public long CountAnd(string[] tokens)
+    {
+        using var lease = _manager.Acquire();
+        TantivyDotNet.Query q = TantivyDotNet.Query.Term("name", tokens[0]);
+        for (int i = 1; i < tokens.Length; i++)
+            q = q & TantivyDotNet.Query.Term("name", tokens[i]);
+        return lease.Searcher.Count(q);
+    }
+
+    private readonly Dictionary<string, long> _segmentKeys = [];
+
+    // Document counts are physical (live + deleted), as in the other engines.
+    public LayoutDetail Detail()
+    {
+        var stats = _index.GetStats();
+        long total = 0, largest = -1, largestDead = 0, dead = 0, key = 0;
+        foreach (var s in stats.Segments)
+        {
+            long n = s.DocumentCount + s.DeletedDocumentCount;
+            total += n; dead += s.DeletedDocumentCount;
+            if (n > largest)
+            {
+                largest = n; largestDead = s.DeletedDocumentCount;
+                string id = s.Id.ToString()!;
+                if (!_segmentKeys.TryGetValue(id, out key))
+                    _segmentKeys[id] = key = _segmentKeys.Count + 1;
+            }
+        }
+
+        int count = stats.SegmentCount;
+        if (_lastSegments >= 0 && count < _lastSegments)
+            _segmentDrops++;
+        _lastSegments = count;
+        return new(count, total - largest, dead, largest, largestDead, key);
     }
 
     public (int Segments, long DeltaDocuments) Layout()

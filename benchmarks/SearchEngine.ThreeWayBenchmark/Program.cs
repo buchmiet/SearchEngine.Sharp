@@ -3,6 +3,7 @@ using System.Text.Json;
 using SearchEngine.Profiling;
 using ThreeWay;
 
+if (args.Contains("lifecycle")) return ThreeWay.Lifecycle.Run(args);
 if (args.Contains("sustained")) return ThreeWay.Sustained.Run(args);
 
 string engineName = "sharp"; int n = 100_000; int seed = 2026; int builds = 3; string? outPath = null; string tmp = Path.Combine(Path.GetTempPath(), "threeway");

@@ -10,7 +10,7 @@ using Directory = Lucene.Net.Store.Directory;
 namespace ThreeWay;
 
 /// <summary>Lucene.NET with a near-real-time searcher: visibility without a commit, as Lucene intends; durable mode commits to disk.</summary>
-public sealed class SustainedLucene : ISustained
+public sealed class SustainedLucene : ILifecycle
 {
     public string Name => "Lucene.NET 4.8";
 
@@ -62,19 +62,91 @@ public sealed class SustainedLucene : ISustained
         _writer = new IndexWriter(_dir, cfg);
         var doc = new Document();
         var idF = new StoredField("id", 0);
+        var keyF = new StringField("idk", "", Field.Store.NO); // the indexed id, so that a document can be replaced or deleted by term
         var nameF = new TextField("name", "", Field.Store.YES);
-        doc.Add(idF); doc.Add(nameF);
-        for (int i = 0; i < names.Length; i++) { idF.SetInt32Value(i); nameF.SetStringValue(names[i]); _writer.AddDocument(doc); }
+        doc.Add(idF); doc.Add(keyF); doc.Add(nameF);
+        for (int i = 0; i < names.Length; i++) { idF.SetInt32Value(i); keyF.SetStringValue(IdKey(i)); nameF.SetStringValue(names[i]); _writer.AddDocument(doc); }
         _writer.Commit();
         _manager = new SearcherManager(_writer, true, null);
         _readerQueries = [.. ReaderQueries.Cycle.Select(q => q.Lucene!())];
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
     }
 
+    private static string IdKey(int id) => id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static Document MakeDoc(int id, string text)
+        => new() { new StoredField("id", id), new StringField("idk", IdKey(id), Field.Store.NO), new TextField("name", text, Field.Store.YES) };
+
+    public long Apply(OpKind kind, int id, string? text, string probeToken)
+    {
+        switch (kind)
+        {
+            case OpKind.Add: _writer.AddDocument(MakeDoc(id, text!)); break;
+            case OpKind.Update: _writer.UpdateDocument(new Term("idk", IdKey(id)), MakeDoc(id, text!)); break;
+            default: _writer.DeleteDocuments(new Term("idk", IdKey(id))); break;
+        }
+
+        if (_durable)
+            _writer.Commit();
+        _manager.MaybeRefreshBlocking();
+        var searcher = _manager.Acquire();
+        try
+        {
+            var c = new TotalHitCountCollector();
+            searcher.Search(new TermQuery(new Term("name", probeToken)), c);
+            return c.TotalHits;
+        }
+        finally { _manager.Release(searcher); }
+    }
+
+    public long CountAnd(string[] tokens)
+    {
+        var q = new BooleanQuery();
+        foreach (string t in tokens)
+            q.Add(new TermQuery(new Term("name", t)), Occur.MUST);
+        var searcher = _manager.Acquire();
+        try
+        {
+            var c = new TotalHitCountCollector();
+            searcher.Search(q, c);
+            return c.TotalHits;
+        }
+        finally { _manager.Release(searcher); }
+    }
+
+    private readonly Dictionary<string, long> _segmentKeys = [];
+
+    public LayoutDetail Detail()
+    {
+        var searcher = _manager.Acquire();
+        try
+        {
+            long total = 0, largest = -1, largestDead = 0, dead = 0, key = 0;
+            int ordinal = 0;
+            foreach (var leaf in searcher.IndexReader.Leaves)
+            {
+                long n = leaf.Reader.MaxDoc, d = leaf.Reader.NumDeletedDocs;
+                total += n; dead += d;
+                if (n > largest)
+                {
+                    largest = n; largestDead = d;
+                    string name = (leaf.Reader as SegmentReader)?.SegmentName ?? "#" + ordinal;
+                    if (!_segmentKeys.TryGetValue(name, out key))
+                        _segmentKeys[name] = key = _segmentKeys.Count + 1;
+                }
+
+                ordinal++;
+            }
+
+            return new(searcher.IndexReader.Leaves.Count, total - largest, dead, largest, largestDead, key);
+        }
+        finally { _manager.Release(searcher); }
+    }
+
     public long AddVisible(int firstId, string[] names, string probeToken)
     {
         for (int i = 0; i < names.Length; i++)
-            _writer.AddDocument(new Document { new StoredField("id", firstId + i), new TextField("name", names[i], Field.Store.YES) });
+            _writer.AddDocument(MakeDoc(firstId + i, names[i]));
         if (_durable)
             _writer.Commit();
         _manager.MaybeRefreshBlocking();
