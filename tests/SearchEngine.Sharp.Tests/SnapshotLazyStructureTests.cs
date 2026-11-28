@@ -2,8 +2,8 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.Tests;
 
-// The bigram index (Within) and the natural sort permutation (NaturalSortAscending) of a segment are built on first use
-// (IndexSegment, LazyInitializer). Concurrent first callers on a new snapshot must share one build instead of each
+// The bigram index (Within), the text order (globs with a literal prefix) and the natural sort permutation
+// (NaturalSortAscending) of a segment are built on first use (IndexSegment, LazyInitializer). Concurrent first callers on a new snapshot must share one build instead of each
 // building its own copy: a server that gets a burst of queries right after a publish would otherwise build and allocate
 // the structure once per request. That the structures carry over to the next snapshot after a small change is tested in
 // IndexUpdaterSegmentTests.
@@ -20,6 +20,20 @@ public class SnapshotLazyStructureTests
         int[] counts = await RunConcurrently(() => engine.Find("ab", WordMatchMethod.Within).Count);
 
         await Assert.That(snapshot.Segments[0].BigramBuildCount).IsEqualTo(1);
+        foreach (int count in counts)
+            await Assert.That(count).IsEqualTo(counts[0]);
+    }
+
+    [Test]
+    public async Task Concurrent_first_prefix_glob_queries_build_the_text_order_once()
+    {
+        var (provider, engine) = CreateIndex();
+        IndexSnapshot snapshot = provider.Current;
+
+        int[] counts = await RunConcurrently(() => engine.Find("report-12?-*", WordMatchMethod.Exact).Count);
+
+        await Assert.That(snapshot.Segments[0].WordsByTextBuildCount).IsEqualTo(1);
+        await Assert.That(counts[0]).IsPositive();
         foreach (int count in counts)
             await Assert.That(count).IsEqualTo(counts[0]);
     }

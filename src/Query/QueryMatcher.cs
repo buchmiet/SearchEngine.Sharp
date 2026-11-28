@@ -81,8 +81,14 @@ internal static class QueryMatcher
 
     // The pattern is classified once (GlobMatcher.Shape); its general form is matched by GlobMatcher.IsWholeWordMatch.
     // Both scans stop at the first token shorter than GlobMatcher.MinMatchLength (IndexSegment, Data layout).
-    internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
+    //
+    // A match starts with the literal characters before the first wildcard, compared code unit by code unit whatever the
+    // case folding or unit mode, so a segment of PrefixRangeMinWords tokens or more visits only the tokens that start with
+    // them (IndexSegment.WordsByText) and the matcher still makes the final decision. useTextOrder false forces the
+    // scan (read by tests).
+    internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot, bool useTextOrder = true)
     {
+        var prefix = pattern.AsSpan(0, pattern.AsSpan().IndexOfAny('*', '?'));
         int minLength = GlobMatcher.MinMatchLength(pattern);
         bool graphemeBoundaries = snapshot.Tokenization.GraphemeBoundaries;
         int maxLength = GlobMatcher.MaxMatchLength(pattern, graphemeBoundaries);
@@ -92,6 +98,16 @@ internal static class QueryMatcher
         {
             var segment = snapshot.Segments[s];
             int offset = snapshot.Offsets[s];
+            if (useTextOrder && !prefix.IsEmpty && segment.WordCount >= PrefixRangeMinWords)
+            {
+                var (start, end) = segment.PrefixRange(prefix);
+                if ((long)(end - start) * PrefixRangeMaxShare <= segment.WordCount)
+                {
+                    MatchGlobRange(shape, minLength, maxLength, segment, start, end, offset, result);
+                    continue;
+                }
+            }
+
             if (shape.IsSpecialized)
                 MatchGlobSpecialized(shape, minLength, maxLength, segment, offset, result);
             else
@@ -99,6 +115,29 @@ internal static class QueryMatcher
         }
 
         return result;
+    }
+
+    // Smaller segments are scanned: the scan is cheap, and a text order is not worth building for them.
+    private const int PrefixRangeMinWords = 256;
+
+    // A run longer than 1 / PrefixRangeMaxShare of the tokens is scanned: the scan reads the tokens in order, and a run
+    // that long costs about as much as the scan.
+    private const int PrefixRangeMaxShare = 5;
+
+    private static void MatchGlobRange(GlobMatcher.Shape shape, int minLength, int maxLength, IndexSegment segment, int start, int end, int offset, FastBitSet result)
+    {
+        var order = segment.WordsByText.AsSpan();
+        var wordLengths = segment.WordLengths.AsSpan();
+        for (int i = start; i < end; i++)
+        {
+            int wordIndex = order[i];
+            int wordLength = wordLengths[wordIndex];
+            if (wordLength < minLength || wordLength > maxLength)
+                continue;
+
+            if (shape.IsMatch(segment.WordAt(wordIndex)))
+                result.AddAll(segment.PostingsAt(wordIndex), offset);
+        }
     }
 
     private static void MatchGlobSpecialized(GlobMatcher.Shape shape, int minLength, int maxLength, IndexSegment segment, int offset, FastBitSet result)

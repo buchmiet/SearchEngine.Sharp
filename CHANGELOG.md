@@ -16,6 +16,14 @@ All notable changes to SearchEngine.Sharp. The format follows [Keep a Changelog]
   after, the slowest call 2.0 to 2.1 s before and 16 to 19 ms after, and no call takes over a second (9 to 12
   before). `ProgressiveIndexIngestion` with 2,000-entry batches over 100,000 paths publishes in 1.0 s instead of 9.1 s.
   See [Keeping an index current](docs/performance.md#keeping-an-index-current).
+- A glob with literal characters before its first `*` or `?` (`rep*`, `img_*`, `dsc?????`, `rep*t`) tests only the
+  tokens that start with them instead of every token. Results are unchanged. Each segment keeps its tokens sorted by
+  text, built by the first such query (0.10 s warm for 304,000 tokens, 4 bytes per token, nothing at publish time;
+  segments of fewer than 256 tokens and prefixes shared by a fifth or more of the tokens are scanned as before). On a
+  4-vCPU Xeon VM at 10^6 names (medians of three interleaved runs of `benchmarks/SearchEngine.ThreeWayBenchmark`, the
+  machine shared with other jobs), `rep*` takes 0.03 ms to count and 0.2 ms to return the ids, down from 1.4 ms and
+  1.6 ms; `dsc?????` counts in 1.3 ms instead of 1.8 ms, since adding its 40,043 hits dominates. `*ing`, `*port*`
+  and every other query are untouched.
 - `IndexUpdater` no longer keeps a copy of the entries: managed memory after a build of 10^6 names without facets fell
   from 140 MB to 70 MB. `EntryCount` and `ContainsEntry` read the segments.
 - A query visits every segment. An index that `RebuildFrom` built has one, and answers as before.
