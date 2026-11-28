@@ -147,6 +147,79 @@ internal sealed class FastBitSet
         return written;
     }
 
+    // Writes the ordinals of the first destination.Length set bits to destination in ascending order and returns how
+    // many it wrote (fewer when the set has fewer bits). It stops at the first word it does not need: the cost is
+    // O(P/64 + K) for K written ordinals found within the first P ordinals.
+    internal int CopyFirstSetBitOrdinals(Span<int> destination)
+    {
+        ReadOnlySpan<ulong> words = Words;
+        int written = 0;
+        int limit = _length;
+
+        for (int wordIndex = 0; wordIndex < words.Length && written < destination.Length; wordIndex++)
+        {
+            ulong bits = words[wordIndex];
+            while (bits != 0 && written < destination.Length)
+            {
+                int ordinal = (wordIndex << 6) + BitOperations.TrailingZeroCount(bits);
+                if (ordinal >= limit)
+                    return written;
+
+                destination[written++] = ordinal;
+                bits &= bits - 1;
+            }
+        }
+
+        return written;
+    }
+
+    // The ordinals of the set bits in ascending order, read lazily: a caller that stops early reads only the words
+    // before the last ordinal it took.
+    internal SetBitEnumerable EnumerateSetBits() => new(this);
+
+    internal readonly struct SetBitEnumerable(FastBitSet set)
+    {
+        public SetBitEnumerator GetEnumerator() => new(set._bits, set._wordCount, set._length);
+    }
+
+    internal struct SetBitEnumerator
+    {
+        private readonly ulong[] _bits;
+        private readonly int _wordCount;
+        private readonly int _length;
+        private int _wordIndex;
+        private ulong _current;
+
+        internal SetBitEnumerator(ulong[] bits, int wordCount, int length)
+        {
+            _bits = bits;
+            _wordCount = wordCount;
+            _length = length;
+            _wordIndex = -1;
+        }
+
+        public int Current { get; private set; }
+
+        public bool MoveNext()
+        {
+            while (_current == 0)
+            {
+                if (++_wordIndex >= _wordCount)
+                    return false;
+
+                _current = _bits[_wordIndex];
+            }
+
+            int ordinal = (_wordIndex << 6) + BitOperations.TrailingZeroCount(_current);
+            if (ordinal >= _length)
+                return false;
+
+            _current &= _current - 1;
+            Current = ordinal;
+            return true;
+        }
+    }
+
     // Applies TOperation word by word: whole Vector<ulong> blocks first, then the remaining words one at a time.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void Combine<TOperation>(Span<ulong> left, ReadOnlySpan<ulong> right)

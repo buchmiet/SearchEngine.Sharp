@@ -37,14 +37,14 @@ internal static class PostingListOperations
         return results;
     }
 
-    // Translates the live postings of a token into record ids, in ascending ordinal order.
-    public static List<int> MaterializeRecordIds(IndexSnapshot snapshot, LivePostings postings)
+    // Translates the first limit live postings of a token into record ids, in ascending ordinal order.
+    public static List<int> MaterializeRecordIds(IndexSnapshot snapshot, LivePostings postings, int limit = int.MaxValue)
     {
         if (postings.TryGetSpan(out var ordinals))
-            return MaterializeRecordIds(snapshot, ordinals);
+            return MaterializeRecordIds(snapshot, ordinals[..Math.Min(ordinals.Length, limit)]);
 
-        var results = new List<int>(postings.UpperBound);
-        postings.AppendRecordIdsTo(results);
+        var results = new List<int>(Math.Min(postings.UpperBound, limit));
+        postings.AppendRecordIdsTo(results, limit);
         return results;
     }
 }

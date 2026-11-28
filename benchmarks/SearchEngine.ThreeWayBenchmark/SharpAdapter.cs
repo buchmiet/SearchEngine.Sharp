@@ -22,8 +22,8 @@ public sealed class SharpEngine : IEngine
     public bool Supports(QuerySpec q) => q.Sharp is not null;
     public long Count(QuerySpec q) { var s = q.Sharp!.Value; return _engine.CountMatches(s.Expr, s.Method, s.Ops); }
     public long All(QuerySpec q) { var s = q.Sharp!.Value; var l = _engine.Find(s.Expr, s.Method, s.Ops); long sum = l.Count; foreach (var i in l) sum += i; return sum; }
-    // Sharp has no top-k: it always materialises the whole hit list, the caller takes the first ten.
-    public long Top10(QuerySpec q) { var s = q.Sharp!.Value; var l = _engine.Find(s.Expr, s.Method, s.Ops); long sum = l.Count; for (int i = 0; i < Math.Min(10, l.Count); i++) sum += l[i]; return sum; }
+    // The engine stops after ten ids, in snapshot order; the checksum is the ids.
+    public long Top10(QuerySpec q) { var s = q.Sharp!.Value; var l = _engine.Find(s.Expr, s.Method, s.Ops, SearchSortMode.SnapshotOrder, null, 10); long sum = 0; foreach (var i in l) sum += i; return sum; }
     public long AddOneAndSearch(int id, string name, string tok)
     {
         _updater.AddEntry(id, name);

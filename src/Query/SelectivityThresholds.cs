@@ -17,12 +17,24 @@ internal static class SelectivityThresholds
     // (FacetSelectivityBenchmark, 100,000 documents, filter passing half of them); 75% leaves a margin.
     internal const double FacetOnHitsMaxFraction = 0.75;
 
-    internal static bool UseSortKPath(int hitCount, int documentCount, bool permutationBuilt)
-        => hitCount > 0
-           && hitCount < documentCount
-           && hitCount <= (int)(documentCount * (permutationBuilt
-               ? NaturalSortBuiltPermutationSortKMaxFraction
-               : NaturalSortSortKMaxFraction));
+    // Cost of the top-limit selection of one hit (a sort key and a comparison with the heap root) relative to testing
+    // one document while walking the built permutation (a bit test). A key is about an order of magnitude dearer.
+    internal const double NaturalSortSelectCostRatio = 12;
+
+    // limit is the number of results wanted. Below the hit count and with the permutation built, walking it stops
+    // after about limit * documentCount / hitCount documents, and selecting the top limit hits costs one key per hit:
+    // select while hitCount * ratio is below that walk length.
+    internal static bool UseSortKPath(int hitCount, int documentCount, bool permutationBuilt, int limit = int.MaxValue)
+    {
+        if (permutationBuilt && limit < hitCount && hitCount > 0 && hitCount < documentCount)
+            return (double)hitCount * hitCount * NaturalSortSelectCostRatio <= (double)limit * documentCount;
+
+        return hitCount > 0
+               && hitCount < documentCount
+               && hitCount <= (int)(documentCount * (permutationBuilt
+                   ? NaturalSortBuiltPermutationSortKMaxFraction
+                   : NaturalSortSortKMaxFraction));
+    }
 
     internal static bool UseFacetOnHitsPath(int hitCount, int documentCount)
         => hitCount > 0
