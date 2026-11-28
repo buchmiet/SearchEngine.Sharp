@@ -3,10 +3,8 @@ using System.Threading.Channels;
 
 namespace SearchEngine.Ingestion;
 
-/// <summary>
-/// The publisher side of an ingestion: takes entries from the channel into a batch and publishes it when the
-/// schedule says so, when the scan ends, and, with a flush on cancellation, when the ingestion is cancelled.
-/// </summary>
+// The publisher: takes entries from the channel into a batch and publishes it when the schedule says so, when the
+// scan ends, and, with a flush on cancellation, when the ingestion is cancelled.
 internal sealed class PublishLoop(
     ChannelReader<BufferedEntry> reader,
     PublishSchedule schedule,
@@ -34,12 +32,10 @@ internal sealed class PublishLoop(
         }
     }
 
-    /// <summary>
-    /// Reports end of input as <see langword="false"/>, also when the scanner failed: the channel then throws the
-    /// scanner's exception once it is drained, sometimes before its Completion task is complete. The failure
-    /// surfaces from the producer task; the publisher must still flush its batch first, also when the caller
-    /// cancels meanwhile. Only the caller's cancellation propagates.
-    /// </summary>
+    // Reports end of input as false, also when the scanner failed: the channel then throws the scanner's exception
+    // once it is drained, sometimes before its Completion task is complete. The failure surfaces from the scanner's
+    // task; the publisher must still flush its batch first, also when the caller cancels meanwhile. Only the caller's
+    // cancellation propagates.
     internal static async Task<bool> WaitForEntryAsync<T>(ChannelReader<T> reader, CancellationToken cancellationToken)
     {
         try
@@ -75,12 +71,9 @@ internal sealed class PublishLoop(
         }
     }
 
-    /// <summary>
-    /// Waits for the scanner and, while a timer publish can become due, for the timer too. Returns
-    /// <see langword="true"/> when entries may be available. A timer that wakes before its publish is due (timers
-    /// truncate to whole milliseconds) is re-armed for the remaining time by the next pass of the loop. It runs on
-    /// every wake-up, so its state machine comes from a pool instead of a new allocation each time it waits.
-    /// </summary>
+    // Waits for the scanner and, while a timer publish can become due, for the timer too. Returns true when entries
+    // may be available. A firing before the publish is due is re-armed by the next pass of the loop (WakeTimer). It
+    // runs on every wake-up, so its state machine comes from a pool.
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<bool> WaitForEntriesOrTimerAsync(WakeTimer wakeTimer, CancellationToken cancellationToken)
     {

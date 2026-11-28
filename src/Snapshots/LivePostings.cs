@@ -1,6 +1,6 @@
 namespace SearchEngine.Snapshots;
 
-// The live documents of one word in a snapshot, in ascending ordinal order: its base postings without the dead
+// The live documents of one token in a snapshot, in ascending ordinal order: its base postings without the dead
 // ordinals, then its delta postings. Read without copying; both lists and the dead ordinals are ascending, so
 // skipping the dead ones is one merge.
 internal readonly ref struct LivePostings
@@ -30,7 +30,7 @@ internal readonly ref struct LivePostings
         }
     }
 
-    // The postings as one span when no dead ordinal has to be skipped and only one segment holds the word: then the
+    // The postings as one span when no dead ordinal has to be skipped and only one segment holds the token: then the
     // callers keep their tight loops over a span.
     internal bool TryGetSpan(out ReadOnlySpan<int> ordinals)
     {

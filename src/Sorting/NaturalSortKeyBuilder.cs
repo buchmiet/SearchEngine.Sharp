@@ -4,7 +4,7 @@ namespace SearchEngine.Sorting;
 
 /// <summary>
 /// Builds the key that <see cref="SearchSortMode.NaturalSortAscending"/> compares ordinally, so that
-/// <c>file2</c> sorts before <c>file10</c> and <c>a 2</c> before <c>ab</c>.
+/// <c>file2</c> sorts before <c>file10</c>.
 /// </summary>
 /// <remarks>
 /// <para>The text is split into parts:</para>
@@ -12,7 +12,8 @@ namespace SearchEngine.Sorting;
 /// <item>The characters <c>-</c>, space, <c>_</c> and <c>/</c> separate parts and are dropped.</item>
 /// <item>Each run of letters and each run of digits (<see cref="char.IsLetter(char)"/>,
 /// <see cref="char.IsDigit(char)"/>) is a part of its own.</item>
-/// <item>Any other character (punctuation, symbols) is a one-character text part.</item>
+/// <item>Any other character (punctuation, symbols) is a one-character text part; so is each half of a surrogate
+/// pair.</item>
 /// </list>
 /// <para>Two keys compare like their texts compared part by part, from the first part:</para>
 /// <list type="bullet">
@@ -21,8 +22,8 @@ namespace SearchEngine.Sorting;
 /// <c>7</c> are equal. A digit of another script counts with its value (<c>٣</c> is 3).</item>
 /// <item>Two text parts compare character by character after <see cref="TextNormalizer.ToLowerInvariantFast(char)"/>
 /// (Unicode 17.0.0 simple lowercase), by UTF-16 code unit, so the comparison ignores case and depends neither on the
-/// culture nor on the platform. A part that is the start of
-/// the other comes first: <c>a</c> before <c>ab</c>, so <c>a 2</c> sorts before <c>ab</c>.</item>
+/// culture nor on the platform. A part that is the start of the other comes first: <c>a</c> before <c>ab</c>, so
+/// <c>a 2</c> sorts before <c>ab</c>.</item>
 /// <item>When all parts of one text equal the first parts of the other, the text with fewer parts comes first.</item>
 /// </list>
 /// <para>Texts that differ only in case, in leading zeros or in which separator they use get the same key.</para>
@@ -42,7 +43,14 @@ public static class NaturalSortKeyBuilder
 
     // A key has at most three code units per input character: a one-digit number or a one-character text part.
     private const int MaxKeyCharsPerInputChar = 3;
-    private const int MaxStackKeyLength = 1024;
+
+    // The longest key Build writes on the stack; callers of BuildInto use it for their own stack buffers. Build keeps
+    // texts of up to 341 characters on the stack (341 = MaxStackKeyLength / MaxKeyCharsPerInputChar, rounded down), a
+    // number quoted in the XML doc of Build.
+    internal const int MaxStackKeyLength = 1024;
+
+    // The buffer length BuildInto needs for a text of this length.
+    internal static int MaxKeyLength(int textLength) => checked(textLength * MaxKeyCharsPerInputChar);
 
     /// <summary>
     /// Builds the natural sort key of <paramref name="sortText"/>.
@@ -51,20 +59,27 @@ public static class NaturalSortKeyBuilder
     /// <returns>The key, or an empty string for an empty text. The key is meant only for ordinal comparison with
     /// other keys; it is not readable text.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="sortText"/> is <see langword="null"/>.</exception>
-    /// <remarks>For texts of up to 341 characters the only allocation is the returned string. The method is
-    /// thread-safe.</remarks>
+    /// <remarks>For texts of up to 341 characters the only allocation is the returned string. Safe to call from
+    /// several threads at once.</remarks>
     public static string Build(string sortText)
     {
         ArgumentNullException.ThrowIfNull(sortText);
         if (sortText.Length == 0)
             return string.Empty;
 
-        int maxLength = checked(sortText.Length * MaxKeyCharsPerInputChar);
+        int maxLength = MaxKeyLength(sortText.Length);
         Span<char> buffer = maxLength <= MaxStackKeyLength
             ? stackalloc char[maxLength]
             : new char[maxLength];
 
-        ReadOnlySpan<char> text = sortText;
+        return new(buffer[..BuildInto(sortText, buffer)]);
+    }
+
+    // Writes the key of text to buffer, which holds at least MaxKeyLength(text.Length) characters, and returns
+    // its length. Comparing two written keys with SequenceCompareTo orders them like string.CompareOrdinal on the
+    // keys Build returns.
+    internal static int BuildInto(ReadOnlySpan<char> text, Span<char> buffer)
+    {
         int pos = 0;
         int i = 0;
         while (i < text.Length)
@@ -100,7 +115,7 @@ public static class NaturalSortKeyBuilder
             }
         }
 
-        return new(buffer[..pos]);
+        return pos;
     }
 
     private static int AppendNumber(ReadOnlySpan<char> digits, Span<char> buffer, int pos)

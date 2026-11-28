@@ -2,23 +2,23 @@ using System.Text.RegularExpressions;
 
 namespace SearchEngine.Query;
 
-/// <summary>Small LRU cache of compiled regexes (non-backtracking when supported). A pattern is compiled with the
-/// casing of indexed tokens (<see cref="RegexCaseFolding"/>) and matched case-sensitively: the tokens are lowercase, or
-/// case folded, already.</summary>
+// Small LRU cache of regexes rewritten by RegexCaseFolding. A pattern runs on NonBacktracking, or on the backtracking
+// engine when NonBacktracking does not support it; an invalid pattern gives no regex. The caller treats an invalid
+// pattern and a match timeout alike: an empty result.
 internal static class RegexPatternCache
 {
     private const int Capacity = 8;
     private const RegexOptions BaseOptions = RegexOptions.None;
     private const RegexOptions NonBacktrackingOptions = BaseOptions | RegexOptions.NonBacktracking;
 
+    // Stated to users in docs/query-semantics.md, Regular expressions.
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(1);
     private static readonly Lock Gate = new();
     private static readonly Dictionary<CacheKey, LinkedListNode<CacheEntry>> Entries = new();
     private static readonly LinkedList<CacheEntry> Lru = new();
 
-    /// <param name="pattern">The pattern as the caller wrote it.</param>
-    /// <param name="caseFold">Whether the index applies <see cref="UnicodeMatching.CaseFold"/>.</param>
-    /// <param name="regex">The compiled regex; null when the pattern is invalid.</param>
+    // pattern: as the caller wrote it. caseFold: whether the index applies UnicodeMatching.CaseFold. regex: null when
+    // the pattern is invalid (false).
     internal static bool TryGet(string pattern, bool caseFold, out Regex regex)
     {
         var key = new CacheKey(pattern, caseFold);

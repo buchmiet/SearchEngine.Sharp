@@ -4,22 +4,16 @@ using System.Runtime.InteropServices;
 
 namespace SearchEngine.Index;
 
-// A fixed-capacity bitset backed by a ulong[] array where each ulong holds 64 bits.
+// A fixed-length set of snapshot ordinals, 64 per ulong.
 //
-// Layout: document with ordinal i maps to bit (i & 63) of word _bits[i >> 6].
-//   Add(i)  →  _bits[i / 64] |= 1 << (i % 64)
-//   Get(i)  →  (_bits[i / 64] >> (i % 64)) & 1
+// ── Data layout ──
+// Ordinal i is bit (i & 63) of _bits[i >> 6]. Only the first _wordCount words belong to the set: a wrapped pooled
+// buffer can be longer.
 //
-// Set operations map directly to boolean algebra used by the query evaluator:
-//   UnionWith     → OR  (documents matching A or B)
-//   IntersectWith → AND (documents matching A and B)
-//   ExceptWith    → AND NOT (documents matching A but not B; used to implement NOT)
-//
-// The three set operations share one loop over Vector<ulong> (256 bits with AVX2, 128 bits with ARM64 AdvSimd)
-// followed by a scalar tail. The population count is a scalar loop: BitOperations.PopCount compiles to POPCNT on
-// x64 and to CNT with ADDV on ARM64.
-//
-// Only the first _wordCount words belong to the set: a wrapped pooled buffer can be longer.
+// ── Cost ──
+// UnionWith, IntersectWith and ExceptWith (OR, AND, AND NOT) share one loop over Vector<ulong> (256 bits with AVX2,
+// 128 bits with ARM64 AdvSimd) followed by a scalar tail. The population count is a scalar loop: BitOperations.PopCount
+// compiles to POPCNT on x64 and to CNT with ADDV on ARM64.
 internal sealed class FastBitSet
 {
     private readonly ulong[] _bits;
@@ -35,7 +29,7 @@ internal sealed class FastBitSet
         _bits = new ulong[_wordCount];
     }
 
-    // Used by QueryContext to wrap a pooled ulong[] buffer without extra allocation.
+    // Wraps a pooled buffer, which can be longer than the set needs; the set does not own it (QueryContext).
     internal FastBitSet(ulong[] bits, int length)
     {
         _length = length;
@@ -90,7 +84,7 @@ internal sealed class FastBitSet
     public void UnionWith(FastBitSet other) => Combine<OrOperation>(Words, other.Words);
 
     // Four words per iteration: on x64 the loop overhead otherwise limits the rate below one POPCNT per cycle
-    // (measured 10-20% slower on an i7-10750H at 10k to 1M bits).
+    // (FastBitSetBenchmark.GetTrueCount, 10k to 1M bits: 10-20% slower without unrolling).
     public int GetTrueCount()
     {
         ReadOnlySpan<ulong> words = Words;
@@ -108,10 +102,9 @@ internal sealed class FastBitSet
         return count;
     }
 
-    /// <summary>
-    /// Writes set-bit ordinals into <paramref name="destination"/> and returns the count written.
-    /// Uses trailing-zero-count per ulong word, so the cost is O(N/64 + K) for a set of length N with K set bits.
-    /// </summary>
+    // Writes the ordinals of the set bits to destination in ascending order and returns their count; throws when
+    // destination is shorter than the set-bit count. A trailing-zero count per word makes the cost O(N/64 + K) for a
+    // set of length N with K set bits.
     internal int CopySetBitOrdinals(Span<int> destination)
     {
         ReadOnlySpan<ulong> words = Words;

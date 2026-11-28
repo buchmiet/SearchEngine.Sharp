@@ -41,8 +41,8 @@ public closed record class IngestPublishPolicy
     /// <summary>
     /// Publishes when the buffer reaches the batch cap, when at least <see cref="MinTimerPublishBatch"/> entries wait
     /// and <c>max(MinInterval, PublishMultiplier × last publish duration)</c> has passed since the last publish, or
-    /// when the oldest buffered entry has waited <see cref="MaxStaleness"/>. A timer makes the time-based publishes
-    /// happen while the scanner is idle. Suits scans of any speed and size.
+    /// when the oldest buffered entry has waited <see cref="MaxStaleness"/>, paced as described there. A timer
+    /// makes the time-based publishes happen while the scan is idle.
     /// </summary>
     public sealed record class Adaptive : IngestPublishPolicy
     {
@@ -61,7 +61,7 @@ public closed record class IngestPublishPolicy
         /// <summary>
         /// Gets whether the batch cap grows with the index. When <see langword="true"/> (the default), the cap
         /// becomes, after each publish, <c>max(BatchCap, number of entries the updater holds)</c>, so the number of
-        /// publishes stays low as the index grows (a batch that large makes the updater rebuild the whole index).
+        /// publishes stays low as the index grows (a batch that large makes the updater run a full build).
         /// When <see langword="false"/>, the cap stays at <see cref="BatchCap"/>.
         /// </summary>
         public bool GrowthAwareBatchCap { get; init; } = true;
@@ -79,9 +79,9 @@ public closed record class IngestPublishPolicy
 
         /// <summary>
         /// The largest <see cref="PublishMultiplier"/>: 1,000. At that value the publisher spends about 0.1% of its
-        /// time publishing while the timer drives the publishes, so a larger value saves nothing measurable; it only
-        /// delays results. The limit also keeps <c>k × last publish duration</c> inside the range of
-        /// <see cref="TimeSpan"/> for any publish shorter than 29 years.
+        /// time publishing while the timer drives the publishes (1 / (1 + 1,000)), so a larger value can save at most
+        /// that 0.1%; it only delays results. The limit also keeps <c>k × last publish duration</c> inside the range
+        /// of <see cref="TimeSpan"/> for any publish shorter than 29 years.
         /// </summary>
         public const double MaxPublishMultiplier = 1_000;
 
@@ -117,10 +117,10 @@ public closed record class IngestPublishPolicy
 
         /// <summary>
         /// Gets the longest time an accepted entry should wait before the publish that contains it starts. A timer
-        /// enforces it while the scanner is idle. Must be positive. Defaults to 1 second.
+        /// enforces it while the scan is idle. Must be positive. Defaults to 1 second.
         /// </summary>
         /// <remarks>
-        /// <para>Staleness is measured from the moment the scanner hands the entry over until the publish that
+        /// <para>Staleness is measured from the moment the scan hands the entry over until the publish that
         /// contains it starts (see <see cref="IngestionResult.MaxObservedStaleness"/>); that publish's own duration
         /// comes on top, as does time spent in the <c>Published</c> and <c>onPublished</c> handlers.</para>
         /// <para>Unless <see cref="StrictMaxStaleness"/> is set, a staleness publish also waits until
@@ -130,7 +130,7 @@ public closed record class IngestPublishPolicy
         /// <c>max(MaxStaleness, (1 + k) × R)</c>. While <c>R</c> stays below <c>MaxStaleness / (1 + k)</c> (333 ms
         /// with the defaults) the bound is <see cref="MaxStaleness"/>; beyond that it grows with the index (a 400 ms
         /// publish gives 1.2 s instead of 1.0 s), which keeps the scan from running back-to-back full
-        /// rebuilds.</para>
+        /// builds.</para>
         /// </remarks>
         /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
         public TimeSpan MaxStaleness
@@ -143,7 +143,7 @@ public closed record class IngestPublishPolicy
         /// Gets whether a publish starts as soon as the oldest buffered entry exceeds <see cref="MaxStaleness"/>,
         /// even when that means starting a publish immediately after the previous one. Once a single publish
         /// takes longer than <see cref="MaxStaleness"/>, every batch is stale when the previous publish ends, so with
-        /// this set full rebuilds run back to back and their total work grows with the square of the index size.
+        /// this set full builds run back to back and their total work grows with the square of the index size.
         /// Defaults to <see langword="false"/>, which applies the pacing described under
         /// <see cref="MaxStaleness"/>.
         /// </summary>
@@ -153,7 +153,7 @@ public closed record class IngestPublishPolicy
     /// <summary>
     /// Publishes when the buffer is not empty and <see cref="MinInterval"/> has passed since the last publish, or
     /// when the oldest buffered entry has waited <see cref="MaxStaleness"/>. A timer makes both happen while the
-    /// scanner is idle. It never publishes because of the number of buffered entries. Suits scans that should
+    /// scan is idle. It never publishes because of the number of buffered entries. Suits scans that should
     /// refresh at a fixed rate.
     /// </summary>
     public sealed record class TimeDebounce : IngestPublishPolicy
@@ -171,7 +171,7 @@ public closed record class IngestPublishPolicy
 
         /// <summary>
         /// Gets the longest time an accepted entry should wait before the publish that contains it starts. A timer
-        /// enforces it while the scanner is idle. It matters only when it is shorter than <see cref="MinInterval"/>
+        /// enforces it while the scan is idle. It matters only when it is shorter than <see cref="MinInterval"/>
         /// or a publish is long: an entry that arrives during a publish is older than the time since that publish.
         /// Must be positive. Defaults to 1 second.
         /// </summary>
@@ -185,7 +185,7 @@ public closed record class IngestPublishPolicy
 
     /// <summary>
     /// Publishes when the buffer reaches <see cref="BatchSize"/> entries, or, when the next entry arrives, if the
-    /// oldest buffered entry has waited <see cref="MaxStaleness"/>. It arms no timer, so an idle scanner leaves
+    /// oldest buffered entry has waited <see cref="MaxStaleness"/>. It arms no timer, so an idle scan leaves
     /// entries unpublished until it hands over the next entry or ends. Suits tests and benchmarks.
     /// </summary>
     public sealed record class FixedBatch : IngestPublishPolicy
@@ -215,8 +215,8 @@ public closed record class IngestPublishPolicy
 
     /// <summary>
     /// Publishes after every entry. It has no settings. Meant only as a baseline for small collections: every
-    /// publish builds the entries changed since the last full rebuild again, and the updater rebuilds the whole
-    /// index every few hundred to few thousand entries, so total cost grows faster than the entry count.
+    /// publish builds the entries changed since the last full build again, and the updater runs a full build every
+    /// few hundred to few thousand entries, so total cost grows faster than the entry count.
     /// </summary>
     public sealed record class PerEntry : IngestPublishPolicy;
 

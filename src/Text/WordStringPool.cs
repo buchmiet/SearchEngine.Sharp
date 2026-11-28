@@ -1,16 +1,6 @@
 namespace SearchEngine.Text;
 
-/// <summary>
-/// Pool that canonicalizes word strings, so the same word across multiple documents shares a single string
-/// instance.
-/// </summary>
-/// <remarks>
-/// During index build, thousands of documents may contain the same word. Without
-/// canonicalization each occurrence produces a separate string object on the heap.
-/// The pool returns the first-seen instance for any given word, so all references
-/// to, say, "apple" point to the same object and the memory for a word is paid once,
-/// however many documents contain it.
-/// </remarks>
+// Canonicalizes token strings, so the same token in many documents shares one string instance.
 internal sealed class WordStringPool
 {
     private readonly Dictionary<string, string> _pool = new(StringComparer.Ordinal);
@@ -23,6 +13,4 @@ internal sealed class WordStringPool
         _pool[word] = word;
         return word;
     }
-
-    public int Count => _pool.Count;
 }

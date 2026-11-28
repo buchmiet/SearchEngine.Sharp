@@ -4,11 +4,9 @@ namespace SearchEngine.Filters;
 /// Facet predicates joined with AND, applied after the text expression is evaluated (including <c>NOT</c>).
 /// </summary>
 /// <remarks>
-/// <para>A document that was indexed without a value for a facet that other documents carry has the value 0 for
-/// it, so a range that includes 0, or a mask whose <c>mustHave</c> is 0, matches such documents.</para>
-/// <para>A query throws <see cref="ArgumentException"/> when a predicate names a facet that no document in the
-/// snapshot carries, unless the index is empty or the text expression matches no documents. Names are not checked
-/// when the filter is created.</para>
+/// <para>A document without a value for a facet has the value 0 for it, also when no document carries the facet,
+/// so a range that includes 0, or a mask whose <c>mustHave</c> is 0, matches such documents. Facet names are not
+/// checked.</para>
 /// <para>There is no OR between predicates. Instances are immutable and safe to share between threads.</para>
 /// </remarks>
 public sealed class FacetFilter

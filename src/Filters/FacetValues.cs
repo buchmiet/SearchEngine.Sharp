@@ -7,8 +7,7 @@ namespace SearchEngine.Filters;
 /// Names compare ordinally, so they are case-sensitive.
 /// </summary>
 /// <remarks>
-/// Instances are immutable and safe to share between threads and documents. They hold two small arrays and no
-/// dictionary, because the index builder only enumerates them and one instance is created per entry.
+/// Instances are immutable and safe to share between threads and documents.
 /// </remarks>
 public sealed class FacetValues
 {
@@ -17,6 +16,8 @@ public sealed class FacetValues
     /// </summary>
     public static FacetValues Empty { get; } = new([], []);
 
+    // Two small arrays and no dictionary: the index builder only enumerates the pairs, and one instance is created
+    // per entry.
     private readonly string[] _names;
     private readonly long[] _values;
 
@@ -113,7 +114,6 @@ public sealed class FacetValues
         return new(names, longs);
     }
 
-    /// <summary>Number of facet pairs.</summary>
     internal int Count => _names.Length;
 
     internal string NameAt(int index) => _names[index];

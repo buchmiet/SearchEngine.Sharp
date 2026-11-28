@@ -5,13 +5,14 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Query;
 
+// Like QueryMatcher: the result can hold dead ordinals; the caller clears them (IndexSnapshot.RemoveDeadOrdinals).
 internal static class RegexMatcher
 {
     internal static FastBitSet MatchRegex(string pattern, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
 
-        if (pattern.Length == 0 || !RegexPatternCache.TryGet(pattern, (snapshot.Tokenization.UnicodeMatching & UnicodeMatching.CaseFold) != 0, out Regex regex))
+        if (!RegexPatternCache.TryGet(pattern, (snapshot.Tokenization.UnicodeMatching & UnicodeMatching.CaseFold) != 0, out Regex regex))
             return result;
 
         try
@@ -27,8 +28,8 @@ internal static class RegexMatcher
         }
         catch (RegexMatchTimeoutException)
         {
-            // Only reachable on the backtracking fallback path (NonBacktracking
-            // cannot time out in practice). Treat like an invalid pattern: empty result.
+            // The backtracking fallback can time out; NonBacktracking runs in time linear in the token. A timeout gives
+            // an empty result, as an invalid pattern does (RegexPatternCache).
             return qc.RentEmptyBitSet();
         }
 

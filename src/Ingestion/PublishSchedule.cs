@@ -1,9 +1,7 @@
 namespace SearchEngine.Ingestion;
 
-/// <summary>
-/// Applies a publish policy: decides whether the batch is full and how long until a timer publish is due. It
-/// remembers when the last publish finished, how long it took and the current batch cap.
-/// </summary>
+// Applies a publish policy: decides whether the batch is full and how long until a timer publish is due. It remembers
+// when the last publish finished, how long it took and the current batch cap.
 internal sealed class PublishSchedule
 {
     private readonly IngestPublishPolicy _policy;
@@ -26,13 +24,11 @@ internal sealed class PublishSchedule
         };
     }
 
-    /// <summary>Whether <paramref name="count"/> buffered entries start a publish on their own.</summary>
+    // Whether count buffered entries start a publish on their own.
     public bool IsBatchFull(int count) => count > 0 && count >= _batchCap;
 
-    /// <summary>
-    /// Records a finished publish. Under <see cref="IngestPublishPolicy.Adaptive"/> with a growing cap, the cap
-    /// becomes <c>max(BatchCap, indexedCount)</c>.
-    /// </summary>
+    // Records a finished publish. Under Adaptive with a growing cap (GrowthAwareBatchCap), the cap becomes
+    // max(BatchCap, indexedCount).
     public void RecordPublish(TimeSpan publishDuration, int indexedCount)
     {
         _lastPublishDuration = publishDuration;
@@ -41,11 +37,8 @@ internal sealed class PublishSchedule
             _batchCap = Math.Max(adaptive.BatchCap, indexedCount);
     }
 
-    /// <summary>
-    /// Time until a timer-driven publish of <paramref name="batch"/> is due: <see cref="TimeSpan.Zero"/> when it is
-    /// due now, <see langword="null"/> when no timer should be armed (nothing buffered, or a policy without a timer
-    /// whose batch is not yet stale).
-    /// </summary>
+    // Time until a timer-driven publish of batch is due: zero when it is due now, null when no timer should be armed
+    // (nothing buffered, or a policy without a timer whose batch is not yet stale).
     public TimeSpan? TimeUntilTimerPublish(PendingBatch batch)
     {
         if (batch.Count == 0 || MaxStaleness() is not { } maxStaleness)
@@ -54,10 +47,11 @@ internal sealed class PublishSchedule
         TimeSpan sinceLastPublish = _timeProvider.GetElapsedTime(_lastPublishTimestamp);
         TimeSpan untilStale = maxStaleness - _timeProvider.GetElapsedTime(batch.OldestTimestamp);
 
-        // Once one publish takes longer than MaxStaleness, every batch is already stale when the previous publish
-        // finishes; publishing on staleness alone then rebuilds the index back to back every ChannelCapacity entries
-        // and total work becomes quadratic. Under Adaptive, staleness may not publish sooner than PublishMultiplier x
-        // the last publish duration after that publish.
+        // Once one publish takes longer than MaxStaleness, every batch is stale when the previous publish finishes,
+        // and staleness alone would start the publishes back to back. With a scan that fills the channel during a
+        // publish, each batch then holds about ChannelCapacity entries (10,000 by default), more than
+        // IndexUpdater.MergeThreshold (at most 4,096), so every publish is a merge and the total work grows with the
+        // square of the entry count. The pacing that prevents it: IngestPublishPolicy.Adaptive.StrictMaxStaleness.
         if (_policy is IngestPublishPolicy.Adaptive { StrictMaxStaleness: false } paced)
             untilStale = Max(untilStale, _lastPublishDuration * paced.PublishMultiplier - sinceLastPublish);
 

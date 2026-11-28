@@ -8,11 +8,13 @@ namespace SearchEngine;
 /// <para>Calls are serialized. Queries never wait for them: they keep reading the last published snapshot
 /// until the new one is published.</para>
 /// <para>A call that throws leaves the stored entries and the published snapshot as they were.</para>
-/// <para>A change keeps most of the previous snapshot: it builds again only the entries added or replaced since the
-/// whole index was last built, so its cost grows with the number of changes since then rather than with the size
-/// of the index. Once those changes, removed and replaced entries included, pass about twice the square root of the
-/// entry count (at least 256, at most 4,096), the change builds the whole index again, which is linear in its size;
-/// <c>RebuildFrom</c> always does. Change many entries with one call to
+/// <para>A method that takes a sequence reads it to the end before it takes the updater's lock, so other changes
+/// do not wait while it is read.</para>
+/// <para>A change keeps most of the previous snapshot: it builds only the entries added or replaced since the last
+/// full build, so its cost grows with the number of changes since then, not with the size of the index. Once those
+/// changes, removed and replaced entries included, pass about twice the square root of the entry count (at least
+/// 256, at most 4,096), the change is a full build, which is linear in the size of the index;
+/// <see cref="RebuildFrom(IDictionary{int, string})"/> is always one. Change many entries with one call to
 /// <see cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, IndexedEntry}})"/> or <see cref="RemoveEntries"/>,
 /// or feed a running scan through <see cref="Ingestion.ProgressiveIndexIngestion"/>.</para>
 /// <para>A <see langword="string"/> entry is indexed as <c>new IndexedEntry(text, text)</c>: the same text is searched
@@ -20,18 +22,16 @@ namespace SearchEngine;
 /// </remarks>
 public interface IIndexUpdater
 {
-    // ── Full rebuild ──
+    // ── Replace all entries ──
 
     /// <summary>Replaces all entries with <paramref name="entries"/> and publishes the new snapshot.</summary>
     /// <param name="entries">The new content, keyed by the id that queries return. The updater copies it.</param>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is
+    /// <see langword="null"/>.</exception>
     void RebuildFrom(IDictionary<int, string> entries);
 
-    /// <summary>Replaces all entries with <paramref name="entries"/> and publishes the new snapshot.</summary>
-    /// <param name="entries">The new content, keyed by the id that queries return. The updater copies it.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <inheritdoc cref="RebuildFrom(IDictionary{int, string})"/>
     void RebuildFrom(IDictionary<int, IndexedEntry> entries);
 
     /// <summary>
@@ -39,19 +39,18 @@ public interface IIndexUpdater
     /// snapshot.
     /// </summary>
     /// <param name="entries">The new content. When an id occurs more than once, the last value wins.</param>
-    /// <param name="progress">Receives the progress of the rebuild from 0 to 100; see
+    /// <param name="progress">Receives the progress of the build from 0 to 100; see
     /// <see cref="Snapshots.IndexSnapshotBuilder"/>. Reading the stream is not reported.</param>
-    /// <param name="ct">Observed while the stream is read. The rebuild itself is not cancelled.</param>
+    /// <param name="ct">Observed while the stream is read. The build itself is not cancelled.</param>
     /// <returns>A task that completes when the new snapshot is published.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The stream yields a <see langword="null"/> entry. The returned task
     /// faults with it, and the index is unchanged.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled while the stream was read.
     /// The index is unchanged.</exception>
-    /// <remarks>The stream is read before the updater's lock is taken, so other changes are not blocked while it
-    /// is read. A change made by another call in the meantime is replaced by this rebuild. The method does not
-    /// resume on the caller's synchronization context: after the stream completes a step asynchronously, the
-    /// reading and the rebuild continue on a thread-pool thread.</remarks>
+    /// <remarks>A change that another call makes while the stream is read is replaced by this call. The method does
+    /// not resume on the caller's synchronization context: after the stream completes a step asynchronously, the
+    /// reading and the build continue on a thread-pool thread.</remarks>
     Task RebuildFromAsync(IAsyncEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress = null, CancellationToken ct = default);
 
     /// <inheritdoc cref="RebuildFromAsync(IAsyncEnumerable{KeyValuePair{int, string}}, IProgress{float}?, CancellationToken)"/>
@@ -77,20 +76,19 @@ public interface IIndexUpdater
     /// case nothing is published.</returns>
     bool RemoveEntry(int id);
 
-    /// <summary>Replaces the entry with the given id, or adds it when the id is new, and publishes the new
-    /// snapshot.</summary>
+    /// <summary>Does the same as <see cref="AddEntry(int, string)"/> and returns whether the id existed.</summary>
     /// <param name="id">The id that queries return for this entry.</param>
     /// <param name="text">The text to search and sort.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="text"/> is <see langword="null"/>.</exception>
     /// <returns><see langword="true"/> when an entry with this id existed before the call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is <see langword="null"/>.</exception>
     bool RefreshEntry(int id, string text);
 
-    /// <summary>Replaces the entry with the given id, or adds it when the id is new, and publishes the new
-    /// snapshot.</summary>
+    /// <summary>Does the same as <see cref="AddEntry(int, IndexedEntry)"/> and returns whether the id
+    /// existed.</summary>
     /// <param name="id">The id that queries return for this entry.</param>
     /// <param name="entry">The entry to index.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="entry"/> is <see langword="null"/>.</exception>
     /// <returns><see langword="true"/> when an entry with this id existed before the call.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entry"/> is <see langword="null"/>.</exception>
     bool RefreshEntry(int id, IndexedEntry entry);
 
     // ── Batch operations (one publish) ──
@@ -98,9 +96,8 @@ public interface IIndexUpdater
     /// <summary>Adds or replaces every entry of <paramref name="entries"/> and publishes one new snapshot.</summary>
     /// <param name="entries">The entries to store. When an id occurs more than once, the last value wins.</param>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <remarks><paramref name="entries"/> is read in full before anything is stored, without holding the updater's
-    /// lock. An exception thrown while it is enumerated leaves the index unchanged.</remarks>
+    /// <exception cref="ArgumentException">An entry in <paramref name="entries"/> is
+    /// <see langword="null"/>.</exception>
     void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries);
 
     /// <inheritdoc cref="AddOrUpdateEntries(IEnumerable{KeyValuePair{int, string}})"/>
@@ -108,10 +105,8 @@ public interface IIndexUpdater
 
     /// <summary>Removes the entries with the given ids and publishes one new snapshot.</summary>
     /// <param name="ids">The ids to remove. Ids that are not present are skipped.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="ids"/> is <see langword="null"/>.</exception>
     /// <returns>The number of entries removed. When it is 0, nothing is published.</returns>
-    /// <remarks><paramref name="ids"/> is read in full before anything is removed, without holding the updater's
-    /// lock. An exception thrown while it is enumerated leaves the index unchanged.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="ids"/> is <see langword="null"/>.</exception>
     int RemoveEntries(IEnumerable<int> ids);
 
     // ── Utility ──

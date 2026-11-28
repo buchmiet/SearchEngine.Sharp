@@ -6,36 +6,16 @@ using SearchEngine.Tokenizer;
 
 namespace SearchEngine.Snapshots;
 
-// ── Build algorithm (four phases) ────────────────────────────────────────────
+// Builds one IndexSegment (its layout: IndexSegment, Data layout) in three phases:
 //
-// Phase 1: Build the inverted index (word → list of document ordinals).
-//   The text of each document is folded (SearchTokenization.FoldIndexText; IndexUpdater stores it folded
-//   already) and tokenized.
-//   One HashSet<string>, cleared for every document, tracks the unique words of the
-//   current document, so duplicate words within one document do not generate
-//   duplicate postings (one entry per document, not per occurrence).
-//   Words are canonicalized through WordStringPool so identical strings share
-//   the same heap instance, reducing memory when the same word appears across
-//   many documents.
+// Phase 1: the inverted index (token → document ordinals). The text of each document is folded and tokenized. One
+//   HashSet<string>, cleared for every document, keeps the distinct tokens of the current document, so a token that
+//   occurs twice in a document gives one posting. Tokens are canonicalized through WordStringPool, so a token that
+//   occurs in many documents is one string instance.
+// Phase 2: sort the tokens by descending length.
+// Phase 3: pack the tokens and posting lists into the flat arrays.
 //
-// Phase 2: Sort words by descending length.
-//   QueryMatcher.MatchWithin relies on being able to break early once it
-//   encounters a word shorter than the query. Descending length order makes
-//   this loop termination correct.
-//
-// Phase 3: Pack into flat arrays.
-//   All word characters are concatenated into a single char[] (WordsArray).
-//   All posting lists are concatenated into a single int[] (PostingDocIds).
-//   Parallel arrays (WordLengths, WordEnds, PostingOffsets, PostingCounts)
-//   let the query engine navigate both flat arrays without pointer indirection,
-//   which keeps the data contiguous in memory.
-//
-// Phase 4: Bigram index (lazy, see IndexSegment.BigramWordIndices).
-//   For every pair of consecutive characters in each word, record the word's
-//   ordinal under that bigram key. At query time, MatchWithin looks up only
-//   the candidate words that share the query's first bigram, cutting the
-//   search space from O(vocab) to O(avg bigram list length). Built on the first
-//   Within query against a segment, not during Build.
+// The bigram index is not built here (IndexSegment.BigramWordIndices).
 
 /// <summary>
 /// Builds an <see cref="IndexSnapshot"/> from a set of entries without an <see cref="IndexUpdater"/>.
@@ -46,7 +26,6 @@ namespace SearchEngine.Snapshots;
 /// <para>An id names one document, so an id that occurs twice in the entries throws
 /// <see cref="ArgumentException"/>. The check is skipped for an <see cref="IDictionary{TKey, TValue}"/> or an
 /// <see cref="IReadOnlyDictionary{TKey, TValue}"/>, whose keys are unique.</para>
-/// <para>A document without a value for a facet that other documents carry gets 0 in that facet.</para>
 /// <para>The progress values are percentages: the first half covers reading the entries, the second half packing
 /// the tokens. <see cref="IProgress{T}.Report"/> is called on the building thread when the value reaches a new whole
 /// percent, so a build of any size makes at most 102 reports, and the last report is 100, made when the snapshot is
@@ -58,45 +37,22 @@ namespace SearchEngine.Snapshots;
 /// </remarks>
 public static class IndexSnapshotBuilder
 {
-    /// <summary>
-    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries: each text is searched
-    /// and sorted, and no entry has facets.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
+    /// <summary>Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/param[@name='entries']|/returns|/exception[@cref='T:System.ArgumentException']"/>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries)
         => Build(entries, SearchTokenization.Default);
 
-    /// <summary>
-    /// Builds a snapshot from string entries: each text is searched and sorted, and the entries have no facets.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
-    /// queries.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
-    /// <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/*[not(self::param[@name='progress'])]"/>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
-    /// <summary>
-    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries: each text is searched
-    /// and sorted, and no entry has facets.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
+    /// <summary>Builds a snapshot with <see cref="SearchTokenization.Default"/> from string entries.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/param[@name!='tokenization']|/returns|/exception[@cref='T:System.ArgumentException']"/>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, string>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
@@ -122,59 +78,31 @@ public static class IndexSnapshotBuilder
         return Snapshot(BuildCore(entries, tokenization.FoldIndexText, static text => text, static _ => null, tokenization, firstOrdinal: 0, progress), tokenization);
     }
 
-    /// <summary>
-    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/> values.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
+    /// <summary>Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/>
+    /// values.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/param[@name='entries']|/returns|/exception[@cref='T:System.ArgumentException']"/>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries)
         => Build(entries, SearchTokenization.Default);
 
-    /// <summary>
-    /// Builds a snapshot from <see cref="IndexedEntry"/> values.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
-    /// queries.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
-    /// <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
+    /// <summary>Builds a snapshot from <see cref="IndexedEntry"/> values.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/*[not(self::summary) and not(self::param[@name='progress'])]"/>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, SearchTokenization tokenization)
         => Build(entries, tokenization, progress: null);
 
-    /// <summary>
-    /// Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/> values.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
+    /// <summary>Builds a snapshot with <see cref="SearchTokenization.Default"/> from <see cref="IndexedEntry"/>
+    /// values.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/param[@name!='tokenization']|/returns|/exception[@cref='T:System.ArgumentException']"/>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
     public static IndexSnapshot Build(IEnumerable<KeyValuePair<int, IndexedEntry>> entries, IProgress<float>? progress)
         => Build(entries, SearchTokenization.Default, progress);
 
-    /// <summary>
-    /// Builds a snapshot from <see cref="IndexedEntry"/> values.
-    /// </summary>
-    /// <param name="entries">The documents, keyed by the id that queries return. They are enumerated once, in the
-    /// order that becomes <see cref="SearchSortMode.SnapshotOrder"/>.</param>
-    /// <param name="tokenization">The preset that splits and folds the text. The snapshot keeps it for its
-    /// queries.</param>
-    /// <param name="progress">Receives the build progress from 0 to 100, or <see langword="null"/>.</param>
-    /// <returns>The new snapshot. No entries give an empty snapshot that keeps the preset.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="entries"/> or <paramref name="tokenization"/> is
-    /// <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">An id occurs more than once in <paramref name="entries"/>, or an entry is
-    /// <see langword="null"/>.</exception>
+    /// <summary>Builds a snapshot from <see cref="IndexedEntry"/> values.</summary>
+    /// <inheritdoc cref="Build(IEnumerable{KeyValuePair{int, string}}, SearchTokenization, IProgress{float}?)"
+    ///     path="/*[not(self::summary)]"/>
     public static IndexSnapshot Build(
         IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         SearchTokenization tokenization,
@@ -184,8 +112,7 @@ public static class IndexSnapshotBuilder
         return Snapshot(BuildCore(entries, entry => tokenization.FoldIndexText(entry.SearchText), static entry => entry.SortText, static entry => entry.Facets, tokenization, firstOrdinal: 0, progress), tokenization);
     }
 
-    // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry): dependency
-    // injection and IndexUpdater fold each entry once when it comes in, so a build does not fold it again.
+    // Entries whose SearchText is already folded with tokenization (SearchTokenization.FoldEntry).
     internal static IndexSnapshot BuildFolded(
         IEnumerable<KeyValuePair<int, IndexedEntry>> entries,
         SearchTokenization tokenization,
@@ -272,10 +199,7 @@ public static class IndexSnapshotBuilder
                 ref buildState,
                 static (ref BuildWordState state, string word) =>
                 {
-                    word = state.StringPool.Canonicalize(word); // deduplicate string instances
-
-                    // GetValueRefOrAddDefault avoids a double dictionary lookup:
-                    // one call to find-or-insert the entry, returning a ref to the list.
+                    word = state.StringPool.Canonicalize(word);
                     ref var docIds = ref CollectionsMarshal.GetValueRefOrAddDefault(state.InvertedIndex, word, out bool exists);
                     if (!exists)
                     {
@@ -333,9 +257,7 @@ public static class IndexSnapshotBuilder
         foreach (var (word, docIds) in invertedIndex)
             wordDescriptions.Add(new(word, docIds));
 
-        // Phase 2: sort descending by word length.
-        // QueryMatcher.MatchWithin breaks as soon as it sees a word shorter than the
-        // query, so MatchWithin returns wrong results without this ordering.
+        // Phase 2: sort descending by token length (IndexSegment, Data layout).
         CollectionsMarshal.AsSpan(wordDescriptions).Sort(static (a, b) => b.Length.CompareTo(a.Length));
 
         var wordsArray = new char[totalWordsLength];
@@ -371,13 +293,10 @@ public static class IndexSnapshotBuilder
 
             wordsOffset += word.Length;
             wordLengths[i] = word.Length;
-            wordEnds[i] = wordsOffset; // exclusive end; word starts at wordsOffset - word.Length
+            wordEnds[i] = wordsOffset;
 
             reporter.Report(50.0f + ((float)i / wordDescSpan.Length * 50.0f));
         }
-
-        // Phase 4 (bigram index) is built lazily by IndexSegment on the first Within query:
-        // Exact, glob and regex queries never read it, and it is the largest build phase.
 
         var recordIdsArr = recordIds.ToArray();
         var facetColumns = BuildFacetColumns(recordIdsArr.Length, facetKeys, pendingFacetValues, directFacetColumns);

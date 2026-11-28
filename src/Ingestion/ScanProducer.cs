@@ -2,10 +2,8 @@ using System.Threading.Channels;
 
 namespace SearchEngine.Ingestion;
 
-/// <summary>
-/// Reads the scan, turns each item into an <see cref="IndexedEntry"/> stamped with the time of the handover and
-/// writes it into the channel. Completes the channel when the scan ends, with the scan's exception when it fails.
-/// </summary>
+// The scanner: reads the scan, turns each item into an IndexedEntry stamped with the time of the handover and writes
+// it into the channel. Completes the channel when the scan ends, with the exception of the scan when it fails.
 internal sealed class ScanProducer<TEntry>(
     IAsyncEnumerable<KeyValuePair<int, TEntry>> entries,
     Func<KeyValuePair<int, TEntry>, IndexedEntry> toIndexedEntry,

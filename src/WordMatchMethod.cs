@@ -1,20 +1,20 @@
 namespace SearchEngine;
 
 /// <summary>
-/// Specifies how search terms are matched against indexed words. Indexed words and terms are lowercased, so
+/// Specifies how search terms are matched against indexed tokens. Indexed tokens and terms are lowercased, so
 /// matching is case-insensitive for every method.
 /// </summary>
 public enum WordMatchMethod
 {
     /// <summary>
-    /// A term must equal an indexed word; a term without wildcard characters is one O(1) dictionary lookup.
-    /// A term with <c>*</c> or <c>?</c> is a glob pattern that must match a whole word.
+    /// A term must equal an indexed token. A term with <c>*</c> or <c>?</c> is a glob pattern that must match a
+    /// whole token.
     /// </summary>
     Exact = 0,
 
     /// <summary>
-    /// A term can be a substring of an indexed word. A term with <c>*</c> or <c>?</c> is a glob pattern that
-    /// must match a whole word, as under <see cref="Exact"/>.
+    /// A term can be a substring of an indexed token. A term with <c>*</c> or <c>?</c> is a glob pattern that
+    /// must match a whole token, as under <see cref="Exact"/>.
     /// </summary>
     Within = 1,
 

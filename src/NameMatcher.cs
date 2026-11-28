@@ -45,10 +45,12 @@ public sealed class NameMatcher
     }
 
     /// <summary>Parses <paramref name="expression"/> once for many <see cref="IsMatch"/> calls.</summary>
-    /// <param name="expression">The query, as it would be passed to <c>Find</c>.</param>
-    /// <param name="method">How terms match tokens, as it would be passed to <c>Find</c>.</param>
-    /// <param name="enableOperators"><see langword="true"/> to treat <c>AND</c>, <c>OR</c>, <c>NOT</c> and
-    /// parentheses as operators. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
+    /// <param name="expression">The query, as it would be passed to
+    /// <see cref="ISearchEngine.Find(string, WordMatchMethod, bool)"/>.</param>
+    /// <param name="method">How terms match tokens, as it would be passed to
+    /// <see cref="ISearchEngine.Find(string, WordMatchMethod, bool)"/>.</param>
+    /// <param name="enableOperators"><see langword="true"/> to recognize the operators described in the remarks of
+    /// <see cref="ISearchEngine"/>. Ignored for <see cref="WordMatchMethod.Regex"/>.</param>
     /// <param name="tokenization">The preset of the index this matcher stands in for;
     /// <see cref="SearchTokenization.Default"/> when <see langword="null"/>.</param>
     /// <returns>A matcher for the expression. An empty or whitespace expression, or an invalid regular expression,
@@ -108,7 +110,7 @@ public sealed class NameMatcher
         }
     }
 
-    // Every token is tried: the index returns nothing when the pattern times out on any word, so a timeout after
+    // Every token is tried: the index returns nothing when the pattern times out on any token, so a timeout after
     // an earlier hit is still no match.
     private bool MatchRegex(ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
@@ -135,7 +137,7 @@ public sealed class NameMatcher
     }
 
     // The terms of one text: true when a token of the text matches the term. A text without tokens is still a
-    // document, so "*" and NOT terms match it.
+    // document, so NOT terms and a term of only '*' (GlobMatcher.MatchesEveryDocument) match it.
     private readonly ref struct TextAlgebra(NameMatcher matcher, ReadOnlySpan<char> text, ReadOnlySpan<char> lower) : QueryExpressionEvaluator.IQueryAlgebra<bool>
     {
         private readonly ReadOnlySpan<char> _text = text;
@@ -149,7 +151,7 @@ public sealed class NameMatcher
 
     private bool MatchTerm(int position, string word, ReadOnlySpan<char> text, ReadOnlySpan<char> lower)
     {
-        if (word is ['*'])
+        if (GlobMatcher.MatchesEveryDocument(word))
             return true;
 
         var compiled = _globs![position];

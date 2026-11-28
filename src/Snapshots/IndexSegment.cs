@@ -3,41 +3,36 @@ using SearchEngine.Sorting;
 
 namespace SearchEngine.Snapshots;
 
-// ── Data layout ──────────────────────────────────────────────────────────────
+// One immutable part of an IndexSnapshot: the inverted index, sort texts and facet columns of a set of documents,
+// built by IndexSnapshotBuilder.
 //
-// All unique words are packed consecutively into a single char[] (WordsArray).
-// Parallel arrays indexed by word ordinal i describe each word's slice:
+// ── Data layout ──
+// The distinct tokens are packed one after another into one char[] (WordsArray). Arrays indexed by token index i
+// describe the slice of each token:
 //
-//   WordLengths[i]  : length of word i in characters
-//   WordEnds[i]     : exclusive end offset in WordsArray, so word i occupies
-//                     WordsArray[ WordEnds[i]-WordLengths[i] .. WordEnds[i] )
+//   WordLengths[i] : length of token i in characters
+//   WordEnds[i]    : exclusive end of token i in WordsArray, so token i is
+//                    WordsArray[WordEnds[i] - WordLengths[i] .. WordEnds[i])
 //
-// Words are stored in descending order of length. This allows the infix search
-// loop to stop as soon as WordLengths[i] < queryLength (early exit).
+// Tokens are stored in descending order of length, so the Within and glob scans (QueryMatcher) stop at the first token
+// shorter than the query or than the shortest match of the pattern.
 //
-// Posting lists (which documents contain each word) are packed into PostingDocIds[].
-// Parallel arrays describe each word's slice of that flat list:
+// The posting lists (the documents that contain each token) are packed into PostingDocIds. Arrays indexed by token
+// index i describe the slice of each list:
 //
-//   PostingOffsets[i]  : start offset in PostingDocIds
-//   PostingCounts[i]   : number of entries
+//   PostingOffsets[i] : start of the postings of token i in PostingDocIds
+//   PostingCounts[i]  : number of documents that contain token i
 //
-// PostingDocIds contains document *ordinals* of the snapshot, not the caller-supplied IDs, in ascending order. The
-// documents of a segment have the ordinals FirstOrdinal .. FirstOrdinal + DocumentCount - 1; the per-document arrays
-// (RecordIds, SortTexts, facet columns) are indexed by ordinal - FirstOrdinal.
+// PostingDocIds holds snapshot ordinals, not record ids, ascending within each token. The documents of a segment have
+// the ordinals FirstOrdinal .. FirstOrdinal + DocumentCount - 1; the per-document arrays (RecordIds, SortTexts,
+// FacetColumns) are indexed by ordinal - FirstOrdinal.
 //
-// ── Thread safety ─────────────────────────────────────────────────────────────
-//
-// A segment is immutable after construction except for two derived structures built on first use: the bigram
-// index and the natural-sort permutation. Each is built at most once per segment: the first caller builds it under a
-// per-structure lock while concurrent first callers wait on that lock (they block instead of spinning or building a
-// copy). A build that throws publishes nothing, so the next caller builds again. Nothing is built at publish time.
-// The base segment of an index outlives many snapshots (see IndexSnapshot), so its structures survive the publishes
-// of small changes.
-
-/// <summary>
-/// One immutable part of an <see cref="IndexSnapshot"/>: the inverted index, sort texts and facet columns of a set of
-/// documents, built by <see cref="IndexSnapshotBuilder"/>.
-/// </summary>
+// ── Thread safety ──
+// A segment is immutable after construction except for two derived structures built on first use: the bigram index
+// and the sort permutation. Each is built at most once per segment: the first caller builds it under a per-structure
+// lock while concurrent first callers wait on that lock. A build that throws publishes nothing, so the next caller
+// builds again. Nothing is built at publish time. The base segment of an index outlives many snapshots
+// (IndexSnapshot), so its structures survive the publishes of small changes.
 internal sealed class IndexSegment
 {
     internal static readonly IndexSegment Empty = new(
@@ -56,62 +51,46 @@ internal sealed class IndexSegment
     // The snapshot ordinal of the first document.
     internal readonly int FirstOrdinal;
 
-    // Caller-supplied integer IDs in document order: RecordIds[o - FirstOrdinal] is the id of ordinal o.
+    // The record id of each document.
     internal readonly int[] RecordIds;
 
-    // Fast path for exact single-word queries: word string → (offset, count) in PostingDocIds.
+    // Token → (offset, count) in PostingDocIds, for lookups by text (PostingsOf): the token arrays are sorted by
+    // length, so they cannot be searched by text.
     internal readonly Dictionary<string, WordPostings> ExactPostings;
 
-    // All unique words concatenated into one char[]. Navigate using WordEnds + WordLengths.
+    // The token and posting arrays (Data layout above).
     internal readonly char[] WordsArray;
-
-    // Flat posting list: document ordinals for every word, packed end-to-end.
-    // Navigate using PostingOffsets + PostingCounts.
     internal readonly int[] PostingDocIds;
-
-    // PostingOffsets[i]: start of word i's posting list in PostingDocIds.
     internal readonly int[] PostingOffsets;
-
-    // WordEnds[i]: exclusive end of word i in WordsArray. Word i occupies
-    // WordsArray[ WordEnds[i]-WordLengths[i] .. WordEnds[i] ).
     internal readonly int[] WordEnds;
-
-    // WordLengths[i]: character length of word i. Stored in descending order,
-    // enabling early exit in MatchWithin: stop when WordLengths[i] < queryLength.
     internal readonly int[] WordLengths;
-
-    // PostingCounts[i]: number of documents that contain word i.
     internal readonly int[] PostingCounts;
 
-    // Sort texts parallel to RecordIds, used to build the sorted permutation on demand.
+    // The sort text (IndexedEntry.SortText) of each document.
     internal readonly string[] SortTexts;
 
-    // Facet columns parallel to RecordIds. A facet that no document of the segment carries has no column.
+    // Facet name → the value of each document. A facet that no document of the segment carries has no column.
     internal readonly Dictionary<string, long[]> FacetColumns;
 
     internal int DocumentCount => RecordIds.Length;
 
-    // One past the ordinal of the last document.
-    internal int EndOrdinal => FirstOrdinal + RecordIds.Length;
-
     internal int WordCount => WordLengths.Length;
 
-    // Word i, read from WordsArray.
+    // Token i, read from WordsArray.
     internal ReadOnlySpan<char> WordAt(int wordIndex)
         => WordsArray.AsSpan(WordEnds[wordIndex] - WordLengths[wordIndex], WordLengths[wordIndex]);
 
-    // Ordinals of the documents that contain word i.
+    // Ordinals of the documents that contain token i.
     internal ReadOnlySpan<int> PostingsAt(int wordIndex)
         => PostingDocIds.AsSpan(PostingOffsets[wordIndex], PostingCounts[wordIndex]);
 
-    // Ordinals of the documents that contain exactly this word; empty when the word is not indexed.
+    // Ordinals of the documents that contain exactly this token; empty when the token is not indexed.
     internal ReadOnlySpan<int> PostingsOf(string word)
         => ExactPostings.TryGetValue(word, out var postings) ? PostingDocIds.AsSpan(postings.Offset, postings.Count) : default;
 
-    // Bigram index: first two characters of query packed as (char0 << 16 | char1)
-    // → int[] of word indices that contain that bigram, in length-descending order.
-    // Used by MatchWithin to skip words that cannot possibly match (pruning).
-    // Built once on first use (only Within queries need it), see Thread safety above.
+    // Bigram index: every bigram of the indexed tokens, packed as (c0 << 16 | c1) → the indices of the tokens that
+    // contain it, ascending and so length-descending (Data layout above). Only Within queries read it: MatchWithin
+    // reads the list of the first bigram of the query, since a token that contains the query contains that bigram.
     private Dictionary<int, int[]>? _bigramWordIndices;
     private object? _bigramBuildLock;
     private int _bigramBuildCount;
@@ -120,15 +99,15 @@ internal sealed class IndexSegment
         => Volatile.Read(ref _bigramWordIndices)
            ?? LazyInitializer.EnsureInitialized(ref _bigramWordIndices, ref _bigramBuildLock, BuildBigramWordIndices);
 
-    // Number of times the bigram index was built on this segment (tests: at most once).
+    // Number of times the bigram index was built on this segment (read by tests).
     internal int BigramBuildCount => Volatile.Read(ref _bigramBuildCount);
 
-    // Index permutation for NaturalSortAscending, built once on first use (see GetSortedPermutation).
+    // Sort permutation for NaturalSortAscending (GetSortedPermutation).
     private int[]? _sortedPermutation;
     private object? _sortedPermutationBuildLock;
     private int _sortedPermutationBuildCount;
 
-    // Number of times the sort permutation was built on this segment (tests: at most once).
+    // Number of times the sort permutation was built on this segment (read by tests).
     internal int SortedPermutationBuildCount => Volatile.Read(ref _sortedPermutationBuildCount);
 
     // True once the sort permutation exists. Reading it never starts the build.
@@ -160,9 +139,7 @@ internal sealed class IndexSegment
         FacetColumns = facetColumns;
     }
 
-    // Words are stored in descending length order, so iterating i = 0..N-1 adds word indices in
-    // the same order to every list: each candidate list is length-descending and MatchWithin can
-    // stop at the first word shorter than the query.
+    // i ascends, so every list holds ascending token indices and is length-descending (Data layout above).
     private Dictionary<int, int[]> BuildBigramWordIndices()
     {
         var bigramLists = new Dictionary<int, List<int>>();
@@ -191,8 +168,8 @@ internal sealed class IndexSegment
         return built;
     }
 
-    // Returns the ordinals of the segment sorted by natural sort key, built once on first use:
-    // sortedPermutation[rank] = ordinal.
+    // The sort permutation: the ordinals of the segment in natural order (NaturalOrder), permutation[rank] = ordinal.
+    // Built on first use (Thread safety above).
     internal int[] GetSortedPermutation()
         => Volatile.Read(ref _sortedPermutation)
            ?? LazyInitializer.EnsureInitialized(ref _sortedPermutation, ref _sortedPermutationBuildLock, BuildSortedPermutation);

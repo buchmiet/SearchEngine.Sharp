@@ -5,9 +5,8 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Query;
 
-// Every matcher scans the words of each segment of the snapshot and adds the postings of the matching words. The
-// result can hold dead ordinals; the caller clears them once the whole query is evaluated
-// (IndexSnapshot.RemoveDeadOrdinals).
+// Every matcher adds, segment by segment, the postings of the tokens that match. The result can hold dead ordinals;
+// the caller clears them once the text expression is evaluated (IndexSnapshot.RemoveDeadOrdinals).
 internal static class QueryMatcher
 {
     internal static FastBitSet Match(
@@ -16,7 +15,7 @@ internal static class QueryMatcher
         QueryContext qc,
         IndexSnapshot snapshot)
     {
-        if (word is ['*'])
+        if (GlobMatcher.MatchesEveryDocument(word))
             return qc.RentAllTrueBitSet();
 
         if (GlobMatcher.ContainsMetacharacters(word))
@@ -35,8 +34,8 @@ internal static class QueryMatcher
         return result;
     }
 
-    // On a match of the word inside an indexed word, all documents that contain the indexed word are added; one match
-    // per indexed word is enough.
+    // When the term occurs inside a token, every document that contains that token is added; one occurrence per token
+    // is enough.
     internal static FastBitSet MatchWithin(string word, QueryContext qc, IndexSnapshot snapshot)
     {
         var result = qc.RentEmptyBitSet();
@@ -51,11 +50,8 @@ internal static class QueryMatcher
         int wordLength = word.Length;
         var wordLengths = segment.WordLengths.AsSpan();
 
-        // Infix matching runs on the calling thread.
-
-        // For queries of length >= 2 use the bigram index to prune candidates.
-        // The bigram maps to word indices already in length-descending order,
-        // so the early-exit on length is preserved exactly as in the linear scan.
+        // A token that contains the term contains its first bigram (IndexSegment.BigramWordIndices). That list keeps
+        // the tokens in descending length (IndexSegment, Data layout), so the loop stops at the first shorter token.
         var bigramWordIndices = wordLength >= 2 ? segment.BigramWordIndices : null;
         if (bigramWordIndices is { Count: > 0 })
         {
@@ -75,7 +71,7 @@ internal static class QueryMatcher
             return;
         }
 
-        // Fallback: linear scan (handles length-1 queries and empty bigram index).
+        // Linear scan: a one-character term has no bigram, and a segment can have an empty bigram index.
         for (int wordIndex = 0; wordIndex < wordLengths.Length && wordLengths[wordIndex] >= wordLength; wordIndex++)
         {
             if (ContainsWithin(segment.WordAt(wordIndex), word, graphemeBoundaries))
@@ -84,6 +80,7 @@ internal static class QueryMatcher
     }
 
     // The pattern is classified once (GlobMatcher.Shape); its general form is matched by GlobMatcher.IsWholeWordMatch.
+    // Both scans stop at the first token shorter than GlobMatcher.MinMatchLength (IndexSegment, Data layout).
     internal static FastBitSet MatchGlob(string pattern, QueryContext qc, IndexSnapshot snapshot)
     {
         int minLength = GlobMatcher.MinMatchLength(pattern);
@@ -115,10 +112,9 @@ internal static class QueryMatcher
         }
     }
 
-    // Kept apart from the specialized scan on purpose: one loop that picks either matcher per word measured about 30%
-    // slower for general patterns (BenchmarkDotNet, 100k documents, "p?rt*on"). Most words are rejected after one
-    // character here, so the words are sliced from spans hoisted out of the loop rather than through
-    // IndexSegment.WordAt, which measured about 10% slower on this loop.
+    // Kept apart from the specialized scan: one loop that picks the matcher per token is slower for general patterns.
+    // Most tokens are rejected after one character, so the tokens are sliced from spans hoisted out of the loop;
+    // IndexSegment.WordAt costs more per token on this loop.
     private static void MatchGlobGeneral(string pattern, int minLength, int maxLength, bool graphemeBoundaries, IndexSegment segment, FastBitSet result)
     {
         var wordLengths = segment.WordLengths.AsSpan();
@@ -135,9 +131,7 @@ internal static class QueryMatcher
         }
     }
 
-    // Finds target inside word with a vectorized IndexOf; the match starts and ends on unit boundaries: code points, or
-    // grapheme clusters with UnicodeMatching.GraphemeBoundaries (TextUnitBoundaries.IndexOf). Also used by NameMatcher
-    // and by *x* globs (GlobMatcher.Shape).
+    // A substring match that starts and ends on unit boundaries (TextUnitBoundaries.IndexOf).
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     internal static bool ContainsWithin(ReadOnlySpan<char> word, ReadOnlySpan<char> target, bool graphemeBoundaries)
         => TextUnitBoundaries.IndexOf(word, target, graphemeBoundaries) >= 0;

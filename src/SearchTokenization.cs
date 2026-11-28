@@ -12,7 +12,8 @@ public sealed class SearchTokenization
 {
     private const string DefaultIndexSeparators = " .,;:/\\\r\n\t|-#[]{}()~£$€";
     private const string DefaultQuerySeparators = "| -./\n\r\t\\,#[]{}()~:;$£€";
-    private const string FileMaskQuerySeparators = " \r\n"; // explicit CR/LF, not Environment.NewLine: query semantics must be identical on every OS
+    // CR and LF, not Environment.NewLine: queries must split the same way on every OS.
+    private const string FileMaskQuerySeparators = " \r\n";
 
     /// <summary>
     /// Gets the preset for token-level search. Indexed text splits on space, tab, CR, LF and
@@ -83,8 +84,8 @@ public sealed class SearchTokenization
     // Indexed text, split at the index separators as written and folded token by token (TextFolder.FoldRuns).
     internal string FoldIndexText(string text) => TextFolder.FoldRuns(text, UnicodeMatching, IndexSeparatorValues);
 
-    // The entry as IndexUpdater stores it: SearchText folded once, when the entry comes in, so that rebuilds after
-    // later changes do not fold it again (IndexSnapshotBuilder.BuildFolded). SortText and Facets stay as given.
+    // The entry as the index stores it: SearchText folded once, when the entry comes in, so no build folds it again
+    // (the BuildFolded methods of IndexSnapshotBuilder take folded entries). SortText and Facets stay as given.
     internal IndexedEntry FoldEntry(IndexedEntry entry)
     {
         string folded = FoldIndexText(entry.SearchText);
@@ -92,7 +93,7 @@ public sealed class SearchTokenization
     }
 
     // One query term, split at the query separators as written, after operators have been recognized on the query
-    // as typed. Regex patterns are never folded.
+    // as typed. Regex patterns do not come through here; RegexCaseFolding gives them the casing of indexed tokens.
     internal ReadOnlySpan<char> FoldQueryTerm(ReadOnlySpan<char> term)
         => (UnicodeMatching & TextFolder.FoldingOptions) == 0 || System.Text.Ascii.IsValid(term)
             ? term

@@ -11,9 +11,8 @@ namespace SearchEngine.Query;
 
 internal static class QueryExpressionEvaluator
 {
-    // Fast path: if the expression contains exactly one word (no operators, no multiple
-    // tokens), skip the full tokenize → postfix → evaluate pipeline and go straight to
-    // QueryMatcher.Match. This is the common case for simple type-ahead search.
+    // The one term of an expression read without operators, found without building the QueryToken list; false for
+    // several terms or none.
     internal static bool TryGetSingleWord(
         ReadOnlySpan<char> expression,
         SearchTokenization tokenization,
@@ -38,10 +37,8 @@ internal static class QueryExpressionEvaluator
         return true;
     }
 
-    /// <summary>
-    /// Returns true when the expression evaluates to a single word operand, with or without
-    /// <paramref name="enableOperators"/>. Multi-word, NOT, and parenthesized expressions return false.
-    /// </summary>
+    // The one term of the expression when nothing else is left after correction (Tokenize); false for several terms,
+    // a NOT or a parenthesis group. Without operators this is TryGetSingleWord.
     internal static bool TryGetSingleSemanticWord(
         ReadOnlySpan<char> expression,
         bool enableOperators,
@@ -75,10 +72,8 @@ internal static class QueryExpressionEvaluator
         return Evaluate<FastBitSet, IndexAlgebra>(CollectionsMarshal.AsSpan(postfix), ref algebra, new FastBitSet[postfix.Count]);
     }
 
-    /// <summary>
-    /// What the operands of an expression are and how the operators combine them: a document set per term for an
-    /// index (<see cref="IndexAlgebra"/>), a match flag per term for one text (<see cref="NameMatcher"/>).
-    /// </summary>
+    // What the operands of an expression are and how the operators combine them: a document set per term for an index
+    // (IndexAlgebra), a match flag per term for one text (NameMatcher).
     internal interface IQueryAlgebra<TValue>
     {
         // position: index of the term in the postfix expression, for algebras that compile terms in advance.
@@ -88,10 +83,8 @@ internal static class QueryExpressionEvaluator
         TValue Or(TValue left, TValue right);
     }
 
-    /// <summary>
-    /// Evaluates a postfix expression from <see cref="ToPostfix"/>. <paramref name="stack"/> holds at least
-    /// <c>postfix.Length</c> values. The expression is well formed, so every operator finds its operands.
-    /// </summary>
+    // Evaluates a postfix expression from ToPostfix. stack holds at least postfix.Length values. The expression is well
+    // formed, so every operator finds its operands.
     internal static TValue Evaluate<TValue, TAlgebra>(ReadOnlySpan<QueryToken> postfix, ref TAlgebra algebra, scoped Span<TValue> stack)
         where TAlgebra : IQueryAlgebra<TValue>, allows ref struct
     {
@@ -122,8 +115,8 @@ internal static class QueryExpressionEvaluator
         return stack[0];
     }
 
-    // Document sets of an index snapshot. AND / OR reuse the left operand; NOT copies the all-documents set
-    // rented once per evaluation.
+    // Document sets of an index snapshot. AND and OR reuse the left operand; NOT copies the set of all ordinals, rented
+    // once per evaluation.
     private struct IndexAlgebra(WordMatchMethod method, QueryContext qc, IndexSnapshot snapshot) : IQueryAlgebra<FastBitSet>
     {
         private FastBitSet? _allRecords;
@@ -151,7 +144,7 @@ internal static class QueryExpressionEvaluator
         }
     }
 
-    // Splits the expression into a well-formed infix token list (see Append); empty when nothing is left.
+    // Splits the expression into a well-formed infix QueryToken list (see Append); empty when nothing is left.
     private static List<QueryToken> Tokenize(
         ReadOnlySpan<char> expression,
         bool enableOperators,
@@ -211,7 +204,7 @@ internal static class QueryExpressionEvaluator
         AddTerms(tokenization.FoldQueryTerm(wordSpan), tokenization.QuerySeparatorValues, tokens);
     }
 
-    // Operators are recognized on the word as typed; folding comes after, so a word that only folds to and/or/not
+    // Operators are recognized on the text as typed; folding comes after, so text that only folds to and/or/not
     // (nöt, ånd) stays a term. A folded term can contain a query separator (U+037E GREEK QUESTION MARK composes to
     // ';'): it is split as the folded index text is, and the parts are joined by implicit AND like adjacent terms.
     private static void AddTerms(ReadOnlySpan<char> folded, SearchValues<char> separators, List<QueryToken> tokens)
@@ -278,8 +271,8 @@ internal static class QueryExpressionEvaluator
                     return;
                 }
 
-                // An empty group is dropped together with the AND inserted for it, so "a () OR b" = "a OR b". An AND
-                // that was typed stays, as it would without the group.
+                // Only an implicit AND goes with the empty group (Append); an AND that was typed stays, as it would
+                // without the group.
                 tokens.RemoveAt(tokens.Count - 1);
                 if (tokens.Count > 0 && tokens[^1].Implicit)
                     tokens.RemoveAt(tokens.Count - 1);
@@ -293,13 +286,9 @@ internal static class QueryExpressionEvaluator
             tokens.RemoveAt(tokens.Count - 1);
     }
 
-    /// <summary>
-    /// Parses an expression into postfix order (Dijkstra's shunting-yard algorithm): operands as words, operators in
-    /// the order they apply. NOT binds tighter than AND, AND tighter than OR; equal precedence applies left to
-    /// right. Returns <see langword="null"/> when no operand is left after correction. Shared by the index
-    /// (<see cref="Evaluate(string, bool, WordMatchMethod, QueryContext, IndexSnapshot)"/>) and
-    /// <see cref="NameMatcher"/>.
-    /// </summary>
+    // Parses an expression into postfix order (Dijkstra's shunting-yard algorithm): terms as operands, operators in the
+    // order they apply. NOT binds tighter than AND, AND tighter than OR (GetPrecedence); equal precedence applies left
+    // to right. Null when no term is left after correction.
     internal static List<QueryToken>? ToPostfix(string expression, bool enableOperators, SearchTokenization tokenization)
     {
         var tokens = Tokenize(expression.AsSpan(), enableOperators, tokenization);
@@ -406,7 +395,7 @@ internal static class QueryExpressionEvaluator
         return true;
     }
 
-    // Implicit: an AND that Append inserted in front of "(" and takes back when the group turns out empty.
+    // Implicit: an AND that Append inserted in front of "(".
     internal readonly record struct QueryToken(string Word, WordOperations Operation, bool Implicit = false)
     {
         public static QueryToken CreateWord(string word) => new(word, WordOperations.None);

@@ -5,7 +5,7 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Query;
 
-// Turns the bitset of a query, without dead ordinals (IndexSnapshot.RemoveDeadOrdinals), into the caller's ids.
+// Turns the bitset of a query, without dead ordinals (IndexSnapshot.RemoveDeadOrdinals), into record ids.
 internal static class ResultMaterializer
 {
     internal static List<int> Materialize(
@@ -32,8 +32,9 @@ internal static class ResultMaterializer
             : MaterializeNaturalSortFullPermutation(snapshot, resultSet, hitCount);
     }
 
-    // The natural sort strategy for hitCount hits: true sorts only the hits, false walks the sort permutation.
-    // The permutation's state is read once, so a build by another thread in between only changes the cost.
+    // The natural sort strategy for hitCount hits: true sorts the hits, false walks the permutation. The state of the
+    // base's sort permutation is read once, so a build by another thread in between only changes the cost. The natural
+    // order of the delta is not counted; it is built once per snapshot, on first use (IndexSnapshot.DeltaOrder).
     internal static bool UsesSortKPath(IndexSnapshot snapshot, int hitCount)
         => SelectivityThresholds.UseSortKPath(hitCount, snapshot.DocumentCount, snapshot.Base.IsSortedPermutationBuilt);
 

@@ -10,14 +10,16 @@ namespace SearchEngine;
 /// text and to query terms. Pure ASCII text is never changed, so only names with non-ASCII characters pay for them.
 /// </summary>
 /// <remarks>
-/// A <see cref="WordMatchMethod.Regex"/> pattern is not folded, because folding would change its character classes;
-/// it runs as written against the folded tokens. <see cref="IndexedEntry.SortText"/> is never folded.
+/// A <see cref="WordMatchMethod.Regex"/> pattern is not composed or stripped of accents, because that would change
+/// its character classes; its literal characters get the casing of indexed tokens (see
+/// <see cref="WordMatchMethod.Regex"/>), and it runs against the folded tokens. <see cref="IndexedEntry.SortText"/>
+/// is never folded.
 /// </remarks>
 [Flags]
 public enum UnicodeMatching
 {
-    /// <summary>No Unicode processing: text is only lowercased character by character (invariant culture). The
-    /// default.</summary>
+    /// <summary>No Unicode processing: text is only lowercased character by character
+    /// (<see cref="Tokenizer.TextNormalizer.ToLowerInvariantFast(char)"/>). The default.</summary>
     None = 0,
 
     /// <summary>
@@ -28,12 +30,10 @@ public enum UnicodeMatching
     Compose = 1,
 
     /// <summary>
-    /// Unicode simple case folding, so case variants that per-character lowercase keeps apart match: final
-    /// <c>ς</c> and <c>σ</c>, <c>µ</c> and <c>μ</c>, Greek symbol variants such as <c>ϐ</c>, and
-    /// supplementary-plane letters such as Deseret <c>𐐀</c> and <c>𐐨</c>. On top of that come the full foldings
-    /// <c>ß</c>/<c>ẞ</c>→<c>ss</c> and the Latin ligatures U+FB00 to U+FB06, and <c>İ</c>→<c>i</c>,
-    /// <c>ſ</c>→<c>s</c>. Other full foldings (<c>ŉ</c>, Greek letters with ypogegrammeni, Armenian ligatures) are
-    /// not applied.
+    /// Unicode full case folding (CaseFolding.txt, statuses C and F) of the lowercase, from the Unicode 17.0.0
+    /// tables of the library, so case variants that per-character lowercase keeps apart match: final <c>ς</c> and
+    /// <c>σ</c>, <c>µ</c> and <c>μ</c>, <c>ϐ</c> and <c>β</c>, Deseret <c>𐐀</c> and <c>𐐨</c>. Full foldings
+    /// expand (<c>ß</c>→<c>ss</c>, <c>ﬁ</c>→<c>fi</c>, <c>ŉ</c>→<c>ʼn</c>). The Turkic foldings are not applied.
     /// </summary>
     CaseFold = 2,
 
@@ -72,11 +72,9 @@ internal static class TextFolder
 
     internal const UnicodeMatching FoldingOptions = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
 
-    /// <summary>
-    /// Folds indexed text: every run between <paramref name="separators"/> is folded on its own (<see cref="Fold"/>)
-    /// and the separators are kept. Text is split as written, before folding, exactly like a query, so a combining
-    /// mark after a separator never composes with it. Returns <paramref name="text"/> itself when nothing changes.
-    /// </summary>
+    // Folds indexed text: every run between separators is folded on its own (Fold) and the separators are kept. Text
+    // is split as written, before folding, exactly like a query, so a combining mark after a separator never composes
+    // with it. Returns text itself when nothing changes.
     internal static string FoldRuns(string text, UnicodeMatching options, SearchValues<char> separators)
     {
         if ((options & FoldingOptions) == 0 || Ascii.IsValid(text))
@@ -110,14 +108,11 @@ internal static class TextFolder
         return sb?.Append(text, copied, text.Length - copied).ToString() ?? text;
     }
 
-    /// <summary>
-    /// Folds one run of text that holds no separator as written: a token of indexed text or a query term. The steps
-    /// are composition (or accent removal), case folding, and then, when composing, the per-character lowercase that
-    /// the tokenizer applies anyway followed by composition again: lowercasing can undo NFC (T + U+0308 has no
-    /// precomposed form, t + U+0308 composes to U+1E97), so composition comes last. A character whose lowercase is
-    /// one of <paramref name="separators"/> is left for the tokenizer, so lowercasing here never moves a token
-    /// boundary.
-    /// </summary>
+    // Folds one run of text that holds no separator as written: a token of indexed text or a query term. The steps
+    // are composition (or accent removal), case folding, and then, when composing, the per-character lowercase that
+    // the tokenizer applies anyway followed by composition again: lowercasing can undo NFC (T + U+0308 has no
+    // precomposed form, t + U+0308 composes to U+1E97), so composition comes last. A character whose lowercase is one
+    // of separators is left for the tokenizer, so lowercasing here never moves a token boundary.
     internal static string Fold(string text, UnicodeMatching options, SearchValues<char>? separators = null)
     {
         if ((options & FoldingOptions) == 0 || string.IsNullOrEmpty(text) || Ascii.IsValid(text))
@@ -219,7 +214,7 @@ internal static class TextFolder
         return -1;
     }
 
-    // U+FDD0 to U+FDEF and the last two code points of every plane (Unicode 15.1, section 23.7).
+    // The 66 noncharacters (66 = 32 + 2 x 17 planes): U+FDD0 to U+FDEF and the last two code points of every plane.
     private static bool IsNoncharacter(int codePoint) => codePoint is >= 0xFDD0 and <= 0xFDEF || (codePoint & 0xFFFE) == 0xFFFE;
 
     private static string Normalize(string text, bool removeDiacritics)
@@ -253,10 +248,10 @@ internal static class TextFolder
     }
 
     // Accents are the non-spacing marks of the Combining Diacritical Marks blocks, the marks that Latin, Greek and
-    // Cyrillic letters decompose into: U+0300–U+036F, U+1AB0–U+1AFF (Extended), U+1DC0–U+1DFF (Supplement) and the
-    // half marks U+FE20–U+FE2F. Marks of other scripts belong to the letter and change the word (the Japanese
-    // dakuten U+3099 turns ハス into バス, Thai tone marks, Indic vowel signs, Hebrew points), and U+20D0–U+20FF are
-    // marks for symbols (including the keycap U+20E3), so all of those stay. Every accent is in the BMP: testing
+    // Cyrillic letters decompose into: U+0300 to U+036F, U+1AB0 to U+1AFF (Extended), U+1DC0 to U+1DFF (Supplement)
+    // and the half marks U+FE20 to U+FE2F. Marks of other scripts belong to the letter and change the word (the
+    // Japanese dakuten U+3099 turns ハス into バス, Thai tone marks, Indic vowel signs, Hebrew points), and U+20D0 to
+    // U+20FF are marks for symbols (including the keycap U+20E3), so all of those stay. Every accent is in the BMP: testing
     // UTF-16 code units is exact, and a surrogate never matches.
     private static bool IsAccent(char ch)
         => ch is (>= '\u0300' and <= '\u036F') or (>= '\u1AB0' and <= '\u1AFF') or (>= '\u1DC0' and <= '\u1DFF') or (>= '\uFE20' and <= '\uFE2F')
@@ -288,7 +283,8 @@ internal static class TextFolder
             position += length;
             int lowercase = UnicodeCasing.ToLower(rune.Value);
             int count = UnicodeCasing.FullFold(lowercase, folded);
-            // What per-character lowercase gives on its own: the lowercase of a BMP character, a supplementary one as it is.
+            // What per-character lowercase gives on its own: the lowercase of a BMP character, a supplementary one as
+            // it is.
             int lowered = rune.IsBmp ? lowercase : rune.Value;
             if (count == 1 && folded[0] == lowered)
             {
@@ -308,19 +304,21 @@ internal static class TextFolder
     }
 }
 
-/// <summary>
-/// The boundaries of the units of user text in one word: extended grapheme clusters (UAX #29) under
-/// <see cref="UnicodeMatching.GraphemeBoundaries"/>, code points otherwise (a surrogate pair is one unit, a lone
-/// surrogate is one too). A glob <c>?</c> matches one unit, and a match never starts or ends inside one.
-/// </summary>
-/// <remarks>For clusters, the first test that cannot be answered from the two characters around the position finds all
-/// boundaries in one forward walk; every later test reads that table, so testing many positions costs one walk instead
-/// of one walk per test. Not copied once used (the table and its state live in the instance), and not declared in a
-/// <see langword="using"/> statement, whose variable is read-only: call <see cref="Dispose"/> in a
-/// <see langword="finally"/> block.</remarks>
+// The boundaries of the units of user text in one token: extended grapheme clusters (UAX #29) under
+// UnicodeMatching.GraphemeBoundaries, code points otherwise (a surrogate pair is one unit, a lone surrogate is one
+// too). A glob ? matches one unit, and a match never starts or ends inside one.
+//
+// ── Cost ──
+// For clusters, the first test that cannot be answered from the two characters around the position finds all
+// boundaries in one forward walk; every later test reads that table, so testing many positions costs one walk instead
+// of one walk per test.
+//
+// ── Invariants ──
+// Not copied once used (the table and its state live in the instance), and not declared in a using statement, whose
+// variable is read-only: call Dispose in a finally block.
 internal ref struct TextUnitBoundaries
 {
-    /// <summary>Words shorter than this get their cluster table on the stack from the caller; longer ones rent it.</summary>
+    // Tokens shorter than this get their cluster table on the stack from the caller; longer ones rent it.
     internal const int MaxStackLength = 256;
 
     private readonly ReadOnlySpan<char> _word;
@@ -329,10 +327,8 @@ internal ref struct TextUnitBoundaries
     private bool[]? _rented;
     private bool _built;
 
-    /// <param name="word">The word.</param>
-    /// <param name="graphemeClusters">True for clusters, false for code points.</param>
-    /// <param name="buffer">Room for <c>word.Length + 1</c> flags, or empty to rent it from the shared pool when
-    /// needed. Code points need none.</param>
+    // graphemeClusters: true for clusters, false for code points. buffer: room for word.Length + 1 flags, or empty to
+    // rent it from the shared pool when needed; code points need none.
     internal TextUnitBoundaries(ReadOnlySpan<char> word, bool graphemeClusters, Span<bool> buffer)
     {
         _word = word;
@@ -340,7 +336,7 @@ internal ref struct TextUnitBoundaries
         _isBoundary = buffer;
     }
 
-    /// <summary>True when <paramref name="position"/> (0 to the word's length) is a unit boundary.</summary>
+    // True when position (0 to the token's length) is a unit boundary.
     internal bool IsBoundary(int position)
     {
         if (!_graphemeClusters)
@@ -362,14 +358,13 @@ internal ref struct TextUnitBoundaries
         return _isBoundary[position];
     }
 
-    /// <summary>True when <paramref name="position"/> (0 to the word's length) does not split a surrogate pair: the
-    /// unit boundary for code points, which needs no table.</summary>
+    // True when position (0 to the token's length) does not split a surrogate pair: the unit boundary for code points,
+    // which needs no table.
     internal static bool IsCodePointBoundary(ReadOnlySpan<char> word, int position)
         => position <= 0 || position >= word.Length
             || !(char.IsHighSurrogate(word[position - 1]) && char.IsLowSurrogate(word[position]));
 
-    /// <summary>The end of the unit that starts at <paramref name="position"/>, which is a boundary before the end of
-    /// the word.</summary>
+    // The end of the unit that starts at position, which is a boundary before the end of the token.
     internal int Next(int position)
     {
         int next = position + 1;
@@ -392,7 +387,6 @@ internal ref struct TextUnitBoundaries
         _built = true;
     }
 
-    /// <summary>Returns a rented table to the pool.</summary>
     public void Dispose()
     {
         if (_rented is not null)
@@ -401,10 +395,8 @@ internal ref struct TextUnitBoundaries
         _rented = null;
     }
 
-    /// <summary>
-    /// Index of the first occurrence of <paramref name="value"/> in <paramref name="word"/> that starts and ends on
-    /// unit boundaries, or -1: the substring match of <see cref="WordMatchMethod.Within"/> and of <c>*value*</c> globs.
-    /// </summary>
+    // Index of the first occurrence of value in word that starts and ends on unit boundaries, or -1: the substring
+    // match of WordMatchMethod.Within and of *value* globs.
     internal static int IndexOf(ReadOnlySpan<char> word, ReadOnlySpan<char> value, bool graphemeClusters)
     {
         int index = word.IndexOf(value);

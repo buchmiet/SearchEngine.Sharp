@@ -1,9 +1,8 @@
 namespace SearchEngine.Ingestion;
 
-/// <summary>
-/// The counters of one ingestion. The scanner counts accepted entries; the publisher counts everything else and
-/// reads the accepted count for its progress reports.
-/// </summary>
+// The counters of one ingestion. The scanner counts accepted entries; the publisher counts everything else and reads
+// the accepted count for its progress reports. Only EntriesAccepted is shared with the scanner; the publisher writes
+// the others, and they are read on its task or after it has finished, so they take no lock.
 internal sealed class IngestionCounters(TimeProvider timeProvider)
 {
     private int _entriesAccepted;
@@ -25,7 +24,6 @@ internal sealed class IngestionCounters(TimeProvider timeProvider)
         TotalPublishDuration += publishDuration;
     }
 
-    // Only the publisher calls this, and the result is read after the publisher has finished.
     public void ObserveStaleness(long oldestTimestamp, long publishStarted)
     {
         TimeSpan staleness = timeProvider.GetElapsedTime(oldestTimestamp, publishStarted);

@@ -3,22 +3,16 @@ using SearchEngine.Index;
 
 namespace SearchEngine.Pooling;
 
-// Manages a set of FastBitSet instances for the duration of a single query.
+// The FastBitSets of one query. Each wraps a buffer rented from ArrayPool<ulong>.Shared, one per bitset, which Dispose
+// returns.
 //
-// Reason for pooling:
-//   Evaluating a boolean expression (e.g. "cat AND (dog OR bird) NOT fish")
-//   creates several intermediate bitsets. Without pooling each bitset allocates
-//   a new ulong[]. For 1M documents that is 125 KB per bitset, above the 85,000-byte
-//   large object heap threshold, so sustained query load would put pressure on
-//   Gen2 collections.
+// ── Cost ──
+// An expression creates several intermediate bitsets. At 1M ordinals each takes 125 KB (1,000,000 bits / 8), above the
+// 85,000-byte large object heap threshold, so allocating them under sustained query load would add Gen2 collections.
 //
-// Mechanism:
-//   All ulong[] buffers are rented from ArrayPool<ulong>.Shared on first use
-//   and returned in Dispose(). FastBitSet wraps the rented buffer and does
-//   not own it. QueryContext is created per-query (using var qc = new QueryContext(...))
-//   so all leases are released when the query completes.
-//
-// Lifetime rule: all FastBitSets produced by this context are invalid after Dispose().
+// ── Invariants ──
+// A FastBitSet from this context does not own its buffer and is invalid after Dispose. recordCount is the bitset
+// length, IndexSnapshot.OrdinalCount (dead ordinals included).
 internal sealed class QueryContext(int recordCount) : IDisposable
 {
     private readonly ArrayPool<ulong> _pool = ArrayPool<ulong>.Shared;

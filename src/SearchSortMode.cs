@@ -10,8 +10,8 @@ public enum SearchSortMode
     /// <see cref="Snapshots.IndexSnapshotBuilder"/> keeps the order in which its entries were enumerated. An
     /// <see cref="IndexUpdater"/> keeps the order of <see cref="IIndexUpdater.RebuildFrom(IDictionary{int, string})"/>
     /// followed by the order in which entries were added, but only while no entry is removed or replaced; after that,
-    /// until the next <c>RebuildFrom</c> or <see cref="IIndexUpdater.Clear"/>, the order is not specified and can
-    /// change with every later change.
+    /// until the next <see cref="IIndexUpdater.RebuildFrom(IDictionary{int, string})"/> or
+    /// <see cref="IIndexUpdater.Clear"/>, the order is not specified and can change with every later change.
     /// </summary>
     SnapshotOrder = 0,
 

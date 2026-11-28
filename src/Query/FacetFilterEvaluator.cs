@@ -6,11 +6,12 @@ using System.Buffers;
 
 namespace SearchEngine.Query;
 
-// A document without a value for a facet has the value 0, whether no document of its segment carries the facet or no
-// document at all: the filter is bound to each segment on its own (SegmentFilter), and a predicate on a facet the
-// segment has no column for is decided once for the whole segment.
+// A document without a value for a facet has the value 0, also when no document of its segment carries the facet
+// (SegmentFilter).
 internal static class FacetFilterEvaluator
 {
+    // results holds no dead ordinals (IndexSnapshot.RemoveDeadOrdinals): its count is compared with the live
+    // DocumentCount.
     internal static void Apply(
         FastBitSet results,
         FacetFilter filter,
@@ -129,16 +130,16 @@ internal static class FacetFilterEvaluator
         return results;
     }
 
-    // FacetPredicate is closed: this switch is exhaustive, and a new kind is a compile error here until it is handled.
+    // Exhaustive because FacetPredicate is closed; a new kind gives warning CS8509 here.
     private static bool Matches(FacetPredicate predicate, long value) => predicate switch
     {
         FacetRange range => value >= range.MinInclusive && value <= range.MaxInclusive,
         FacetMask mask => (value & mask.MustHave) == mask.MustHave && (value & mask.MustNot) == 0,
     };
 
-    // A filter bound to the facet columns of one segment, read by the segment's local document index. A predicate on
-    // a facet without a column is true or false for every document of the segment (value 0): a true one is dropped,
-    // a false one makes the segment match nothing.
+    // A filter bound to the facet columns of one segment, read by ordinal - FirstOrdinal. A predicate on a facet
+    // without a column is true or false for every document of the segment (value 0): a true one is dropped, a false one
+    // makes the segment match nothing.
     private readonly struct SegmentFilter
     {
         private readonly FacetPredicate[]? _predicates;

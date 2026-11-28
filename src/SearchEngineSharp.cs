@@ -7,8 +7,8 @@ using SearchEngine.Snapshots;
 namespace SearchEngine;
 
 /// <summary>
-/// Runs queries against the current snapshot of an <see cref="IIndexSnapshotProvider"/>. The engine keeps no
-/// state of its own and is safe to call from many threads at once.
+/// Runs queries against the current snapshot of an <see cref="IIndexSnapshotProvider"/>; see
+/// <see cref="ISearchEngine"/> for the query rules and thread safety.
 /// </summary>
 /// <param name="snapshotProvider">The provider whose <see cref="IIndexSnapshotProvider.Current"/> snapshot each
 /// query reads.</param>
@@ -82,9 +82,9 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
     private static bool HasQueryInput(string expression, FacetFilter? filter)
         => !string.IsNullOrWhiteSpace(expression) || filter is not null && !filter.IsEmpty;
 
-    // Fast path of an Exact query for one plain word (no glob metacharacters): its live postings are read straight
-    // from the snapshot, without a bitset. False when the query is not such a word; empty postings when the word is
-    // not indexed.
+    // Fast path of an Exact query for one plain term (no glob metacharacters): its live postings are read straight
+    // from the snapshot, without a bitset. False when the query is not such a term; empty postings when the term is
+    // not an indexed token.
     private static bool TryGetExactWordPostings(
         string expression,
         WordMatchMethod method,
@@ -139,6 +139,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         return resultSet;
     }
 
+    // The expression is not blank: Evaluate answers a blank one from the filter alone.
     private static FastBitSet? EvaluateExpression(
         string expression,
         WordMatchMethod method,
@@ -147,9 +148,7 @@ public sealed class SearchEngineSharp(IIndexSnapshotProvider snapshotProvider) :
         IndexSnapshot snapshot)
     {
         if (method == WordMatchMethod.Regex)
-            return string.IsNullOrWhiteSpace(expression)
-                ? null
-                : RegexMatcher.MatchRegex(expression, queryContext, snapshot);
+            return RegexMatcher.MatchRegex(expression, queryContext, snapshot);
 
         if (QueryExpressionEvaluator.TryGetSingleSemanticWord(
                 expression.AsSpan(),

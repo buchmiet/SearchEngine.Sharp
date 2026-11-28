@@ -8,9 +8,9 @@ public static class NameTokenizer
 {
     /// <summary>
     /// Splits <paramref name="name"/> at every character that is not a letter or digit (by
-    /// <see cref="char.IsLetterOrDigit(char)"/>, so <c>_</c> splits too), lowercases each token (invariant
-    /// culture), drops repeated tokens (the first occurrence stays) and joins the rest with
-    /// <paramref name="joinCharacter"/>.
+    /// <see cref="char.IsLetterOrDigit(char)"/>, so <c>_</c> splits too), lowercases each token with
+    /// <see cref="TextNormalizer.ToLowerInvariantFast(char)"/>, drops repeated tokens (the first occurrence stays) and
+    /// joins the rest with <paramref name="joinCharacter"/>.
     /// </summary>
     /// <param name="name">The name to tokenize.</param>
     /// <param name="joinCharacter">The text placed between tokens. Pass an empty string for none.</param>

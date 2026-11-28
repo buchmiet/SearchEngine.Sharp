@@ -4,13 +4,14 @@ namespace SearchEngine.Query;
 
 internal static class PostingListOperations
 {
-    // Translates snapshot ordinals into the caller-supplied IDs, in the order given.
+    // Translates snapshot ordinals into record ids, in the order given.
     public static List<int> MaterializeRecordIds(IndexSnapshot snapshot, ReadOnlySpan<int> ordinals)
     {
         if (ordinals.Length == 0)
             return [];
 
         var results = new List<int>(ordinals.Length);
+        // One segment: the ordinal indexes RecordIds directly, with no SegmentOf per ordinal.
         if (snapshot.Delta is null)
         {
             var recordIds = snapshot.Base.RecordIds.AsSpan();
@@ -26,7 +27,7 @@ internal static class PostingListOperations
         return results;
     }
 
-    // Translates the live postings of a word into the caller-supplied IDs, in ascending ordinal order.
+    // Translates the live postings of a token into record ids, in ascending ordinal order.
     public static List<int> MaterializeRecordIds(IndexSnapshot snapshot, LivePostings postings)
     {
         if (postings.TryGetSpan(out var ordinals))

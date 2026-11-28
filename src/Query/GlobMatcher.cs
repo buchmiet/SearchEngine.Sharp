@@ -1,29 +1,27 @@
 namespace SearchEngine.Query;
 
-/// <summary>
-/// Zero-allocation glob matching for whole indexed tokens.
-/// <c>*</c> matches zero or more units of text; <c>?</c> matches exactly one. A unit is a code point (a surrogate pair
-/// counts once, a lone surrogate too), or an extended grapheme cluster under
-/// <see cref="UnicodeMatching.GraphemeBoundaries"/> (<see cref="TextUnitBoundaries"/>). Every position where a wildcard
-/// meets literal text is a unit boundary. Patterns are anchored at both ends (full token match).
-/// </summary>
+// Glob matching for whole indexed tokens. '*' matches zero or more units of text and '?' exactly one unit
+// (TextUnitBoundaries). Every position where a wildcard meets literal text is a unit boundary. A pattern is anchored
+// at both ends.
 internal static class GlobMatcher
 {
     internal static bool ContainsMetacharacters(ReadOnlySpan<char> pattern) => pattern.ContainsAny('*', '?');
 
-    // Every character but '*' consumes at least one UTF-16 unit of the word.
+    // A term of only '*' ("*", "**", ...) matches every document, also one with no token, which a scan of the tokens
+    // would miss, so a caller answers it before it looks at the tokens.
+    internal static bool MatchesEveryDocument(ReadOnlySpan<char> pattern)
+        => !pattern.IsEmpty && !pattern.ContainsAnyExcept('*');
+
+    // Every character but '*' consumes at least one UTF-16 unit of the token.
     internal static int MinMatchLength(ReadOnlySpan<char> pattern) => pattern.Length - pattern.Count('*');
 
-    // The longest word in UTF-16 units that the pattern can match: a literal consumes one unit and '?' one code point,
+    // The longest token in UTF-16 units that the pattern can match: a literal consumes one unit and '?' one code point,
     // at most two units. Unbounded with '*' or when '?' is a grapheme cluster.
     internal static int MaxMatchLength(ReadOnlySpan<char> pattern, bool graphemeBoundaries)
         => graphemeBoundaries || pattern.Contains('*') ? int.MaxValue : pattern.Length + pattern.Count('?');
 
-    /// <summary>
-    /// Returns true when <paramref name="word"/> fully matches <paramref name="pattern"/>.
-    /// Consecutive <c>*</c> in the pattern are treated as a single wildcard. <paramref name="graphemeBoundaries"/>
-    /// makes the units grapheme clusters instead of code points (<see cref="UnicodeMatching.GraphemeBoundaries"/>).
-    /// </summary>
+    // True when the whole token matches the pattern. Consecutive '*' act as one. graphemeBoundaries makes the units
+    // grapheme clusters instead of code points (UnicodeMatching.GraphemeBoundaries).
     internal static bool IsWholeWordMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, bool graphemeBoundaries = false)
     {
         var units = new TextUnitBoundaries(word, graphemeBoundaries,
@@ -39,7 +37,7 @@ internal static class GlobMatcher
     }
 
     // A star remembers where it started and gives up one more unit whenever the rest of the pattern fails. A star and
-    // a question mark always start on a unit boundary: the word starts on one, a question mark and a star end on one,
+    // a question mark always start on a unit boundary: the token starts on one, a question mark and a star end on one,
     // and a literal before a wildcard must end on one (MayCrossAt).
     private static bool Match(ReadOnlySpan<char> pattern, ReadOnlySpan<char> word, ref TextUnitBoundaries units)
     {
@@ -97,8 +95,8 @@ internal static class GlobMatcher
         return patternIndex == pattern.Length;
     }
 
-    // The pattern moves from a literal to a wildcard (or back) at patternIndex: word must have a unit boundary there.
-    // Leftmost placement of each literal run stays correct, because the check depends only on where that run is
+    // The pattern moves from a literal to a wildcard (or back) at patternIndex: the token must have a unit boundary
+    // there. Leftmost placement of each literal run stays correct, because the check depends only on where that run is
     // placed.
     private static bool MayCrossAt(ReadOnlySpan<char> pattern, int patternIndex, int wordIndex, ref TextUnitBoundaries units)
         => patternIndex == 0
@@ -107,16 +105,9 @@ internal static class GlobMatcher
 
     private static bool IsWildcard(char ch) => ch is '*' or '?';
 
-    /// <summary>
-    /// Pre-classified glob: the common shapes (<c>abc*</c>, <c>*abc</c>, <c>*abc*</c>, <c>ab*cd</c>,
-    /// no <c>?</c>) are matched with span primitives (vectorized StartsWith/EndsWith/IndexOf);
-    /// everything else falls back to <see cref="IsWholeWordMatch"/>. Results are identical, with and without the
-    /// grapheme boundary check.
-    /// </summary>
-    /// <remarks>
-    /// Built once per pattern (per query on an index, once in <see cref="NameMatcher.Create"/>) and stored as offsets
-    /// into the pattern string, so it can be kept in a field.
-    /// </remarks>
+    // A glob classified once per pattern: the shapes abc*, *abc, *abc* and ab*cd (no '?') are matched with span
+    // primitives (vectorized StartsWith, EndsWith, IndexOf), every other pattern with IsWholeWordMatch. Results equal
+    // IsWholeWordMatch in both unit modes. Stored as offsets into the pattern string, so it can be kept in a field.
     internal readonly struct Shape
     {
         private readonly string _pattern;
@@ -149,7 +140,7 @@ internal static class GlobMatcher
             int innerEnd = trailing ? pattern.Length - 1 : pattern.Length;
             if (innerEnd <= innerStart)
             {
-                _kind = Kind.Contains; // "*" or "**": matches every word
+                _kind = Kind.Contains; // "*" or "**": matches every token
                 return;
             }
 
@@ -176,20 +167,20 @@ internal static class GlobMatcher
                 (_tailStart, _tailLength) = (first + 1, pattern.Length - first - 1);
             }
 
-            // Where a literal meets a *, the word can be split inside a surrogate pair only if the literal ends with a
-            // high surrogate there (the head) or starts with a low one (the tail). Any other literal always meets the
-            // word on a code point boundary, so for code points the check is settled here, once per pattern.
+            // Where a literal meets a '*', only a head that ends with a high surrogate or a tail that starts with a low
+            // one can split a surrogate pair of the token (TextUnitBoundaries.IndexOf), so for code points the check is
+            // settled here, once per pattern.
             _checkBoundaries = graphemeBoundaries
                 || (_headLength > 0 && char.IsHighSurrogate(pattern[_headStart + _headLength - 1]))
                 || (_tailLength > 0 && char.IsLowSurrogate(pattern[_tailStart]));
         }
 
-        /// <summary>False when the pattern needs the general matcher (<c>?</c>, several inner <c>*</c>).</summary>
+        // False when the pattern needs the general matcher: a '?', or an inner '*' together with another '*'.
         internal bool IsSpecialized => _kind != Kind.General;
 
         internal bool IsMatch(ReadOnlySpan<char> word) => _kind switch
         {
-            // First-character check before the vectorized compare: most words differ there.
+            // First-character check before the vectorized compare: most tokens differ there.
             Kind.Prefix => word.Length >= _headLength && word[0] == _pattern[_headStart] && word.StartsWith(Head)
                 && (!_checkBoundaries || AreBoundaries(word, _headLength, _headLength)),
             Kind.Suffix => word.EndsWith(Tail)
@@ -200,7 +191,7 @@ internal static class GlobMatcher
             _ => IsWholeWordMatch(_pattern, word, _graphemeBoundaries),
         };
 
-        // Both positions are unit boundaries of word. Code points need no boundary table, so that case skips it.
+        // Both positions are unit boundaries of the token. Code points need no boundary table, so that case skips it.
         private bool AreBoundaries(ReadOnlySpan<char> word, int first, int second)
         {
             if (!_graphemeBoundaries)

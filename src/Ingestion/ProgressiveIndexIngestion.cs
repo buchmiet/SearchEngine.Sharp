@@ -28,8 +28,8 @@ namespace SearchEngine.Ingestion;
 ///         <see cref="IngestPublishOptions.FlushOnCancellation"/> set (the default), every accepted entry that is
 ///         not yet published, including entries still in the channel, is published before the task completes;
 ///         otherwise those entries are discarded. The entries that have arrived are published at once; entries the
-///         scan hands over before it stops follow in one more publish. Entries already published stay in the index. The task completes
-///         with <see cref="IngestionResult.WasCancelled"/> set and does not throw.</item>
+///         scan hands over before it stops follow in one more publish. Entries already published stay in the index.
+///         The task completes with <see cref="IngestionResult.WasCancelled"/> set and does not throw.</item>
 /// </list>
 /// <para>Failures</para>
 /// <list type="bullet">
@@ -51,10 +51,7 @@ public sealed class ProgressiveIndexIngestion(IIndexUpdater updater)
     private readonly TimeProvider _timeProvider = TimeProvider.System;
     private int _isRunning;
 
-    /// <summary>
-    /// Creates an instance whose clock and timers come from <paramref name="timeProvider"/>.
-    /// Tests use this to drive staleness and pacing deterministically.
-    /// </summary>
+    // Clock and timers come from timeProvider, so staleness and pacing can run on a fake clock (read by tests).
     internal ProgressiveIndexIngestion(IIndexUpdater updater, TimeProvider timeProvider)
         : this(updater)
     {

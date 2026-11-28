@@ -4,26 +4,23 @@ using SearchEngine.Tokenizer;
 
 namespace SearchEngine.Query;
 
-/// <summary>
-/// Gives the literal characters of a regex pattern the casing that indexed tokens have: case folding under
-/// <see cref="UnicodeMatching.CaseFold"/> (<see cref="TextFolder.ApplyCaseFolding"/>), then the per-character lowercase
-/// (<see cref="TextNormalizer.ToLowerInvariantFast(char)"/>), both from the Unicode tables in UnicodeCasing.g.cs. The
-/// pattern then runs case-sensitively, so the case tables of .NET (<c>RegexOptions.IgnoreCase</c>) play no part.
-/// </summary>
-/// <remarks>
-/// Only characters that stand for themselves change: plain characters, <c>\uXXXX</c> and <c>\xXX</c>. Escapes such as
-/// <c>\D</c> or <c>\p{Lu}</c>, group names, inline options and comments are copied as written. A character whose folding
-/// is several characters (<c>ß</c> to <c>ss</c> under CaseFold) becomes the group <c>(?:ss)</c>, so a quantifier after it
-/// applies to all of them. A character class keeps what it lists and gains the folded form of each character and range;
-/// the several-character foldings become alternatives, <c>[aß]</c> giving <c>(?:[aß]|ss)</c>. A negated class, or one with
-/// a subtraction, cannot take alternatives and keeps only the one-character foldings. The rewriting never rejects a
-/// pattern: an invalid one stays invalid and fails to compile as before.
-/// </remarks>
+// Gives the literal characters of a regex pattern the casing that indexed tokens have: case folding under
+// UnicodeMatching.CaseFold (TextFolder.ApplyCaseFolding), then the per-character lowercase
+// (TextNormalizer.ToLowerInvariantFast(char)), both from the Unicode tables in UnicodeCasing.g.cs. The pattern then
+// runs case-sensitively, so the case tables of .NET (RegexOptions.IgnoreCase) play no part.
+//
+// Only characters that stand for themselves change: plain characters, \uXXXX and \xXX. Escapes such as \D or \p{Lu},
+// group names, inline options and comments are copied as written. A character whose folding is several characters
+// (ß to ss under CaseFold) becomes the group (?:ss), so a quantifier after it applies to all of them. A character
+// class keeps what it lists and gains the folded form of each character and range; the several-character foldings
+// become alternatives, [aß] giving (?:[aß]|ss). A negated class, or one with a subtraction, cannot take alternatives
+// and keeps only the one-character foldings. The rewriting never rejects a pattern: an invalid one stays invalid and
+// fails to compile.
 internal static class RegexCaseFolding
 {
     internal static string Apply(string pattern, bool caseFold) => new Rewriter(pattern, caseFold).Run();
 
-    /// <summary>The casing that one character (one code point, in its UTF-16 form) has in indexed tokens.</summary>
+    // The casing that one character (one code point, in its UTF-16 form) has in indexed tokens.
     internal static string FoldCharacter(string character, bool caseFold)
     {
         string folded = caseFold ? TextFolder.ApplyCaseFolding(character) : character;
@@ -62,7 +59,7 @@ internal static class RegexCaseFolding
 
         private char Peek(int offset) => _position + offset < pattern.Length ? pattern[_position + offset] : '\0';
 
-        /// <summary>One code point: a surrogate pair, or a single UTF-16 unit (a lone surrogate too).</summary>
+        // One code point: a surrogate pair, or a single UTF-16 unit (a lone surrogate too).
         private string TakeCharacter()
         {
             int length = char.IsHighSurrogate(pattern[_position]) && char.IsLowSurrogate(Peek(1)) ? 2 : 1;
@@ -78,8 +75,7 @@ internal static class RegexCaseFolding
             _position += length;
         }
 
-        /// <summary>Copies from <paramref name="skip"/> characters on through the first <paramref name="terminator"/>
-        /// (inclusive), or to the end of the pattern.</summary>
+        // Copies from skip characters on through the first terminator (inclusive), or to the end of the pattern.
         private void CopyThrough(int skip, char terminator)
         {
             int end = pattern.IndexOf(terminator, Math.Min(_position + skip, pattern.Length));
@@ -121,7 +117,7 @@ internal static class RegexCaseFolding
             if (group) _output.Append(')');
         }
 
-        /// <summary><c>\uXXXX</c> or <c>\xXX</c> at the current position.</summary>
+        // \uXXXX or \xXX at the current position.
         private bool TryCodePointEscape(out int codePoint, out int length)
         {
             int digits = Peek(1) switch { 'u' => 4, 'x' => 2, _ => 0 };
@@ -133,9 +129,9 @@ internal static class RegexCaseFolding
                    && !char.IsSurrogate((char)codePoint);
         }
 
-        /// <summary>The length of an escape that is not a code point of its own and is copied as written:
-        /// <c>\p{L}</c>, <c>\k&lt;name&gt;</c>, <c>\cX</c>, a backreference or octal number, or a backslash and one
-        /// character (<c>\d</c>, <c>\W</c>, <c>\.</c>). A backslash that ends the pattern stays alone.</summary>
+        // The length of an escape that is not a code point of its own and is copied as written: \p{L}, \k<name>, \cX,
+        // a backreference or octal number, or a backslash and one character (\d, \W, \.). A backslash that ends the
+        // pattern stays alone.
         private int OtherEscapeLength()
         {
             int end;
@@ -222,8 +218,8 @@ internal static class RegexCaseFolding
 
         private sealed record ParsedClass(string Text, List<string> Alternatives);
 
-        /// <summary>Parses the class at the current position (on its <c>[</c>) and returns it with the folded
-        /// characters added; null when the class does not close.</summary>
+        // Parses the class at the current position (on its '[') and returns it with the folded characters added; null
+        // when the class does not close.
         private ParsedClass? ParseClass()
         {
             var text = new StringBuilder("[");
@@ -308,9 +304,9 @@ internal static class RegexCaseFolding
             return new ParsedClass(text.ToString(), alternatives);
         }
 
-        /// <summary>One character of a class as a code point, consuming it: a plain character or a code-point
-        /// escape (<c>\uXXXX</c>, <c>\xXX</c>, an escaped punctuation character such as <c>\-</c>). Null for a class
-        /// escape such as <c>\d</c> or <c>\p{L}</c>, which is consumed too, and for a lone surrogate.</summary>
+        // One character of a class as a code point, consuming it: a plain character or a code-point escape (\uXXXX,
+        // \xXX, an escaped punctuation character such as \-). Null for a class escape such as \d or \p{L}, which is
+        // consumed too, and for a lone surrogate.
         private int? ClassCharacter()
         {
             if (pattern[_position] != '\\')
@@ -336,7 +332,7 @@ internal static class RegexCaseFolding
             return null;
         }
 
-        /// <summary>Appends ascending BMP code points to a class, consecutive ones as a range.</summary>
+        // Appends ascending BMP code points to a class, consecutive ones as a range.
         private static void AppendRanges(StringBuilder text, IEnumerable<int> codePoints)
         {
             int first = -1, last = -1;
@@ -379,8 +375,8 @@ internal static class RegexCaseFolding
             return count;
         }
 
-        /// <summary>Appends characters produced by folding: letters and marks as they are, anything else as
-        /// <c>\uXXXX</c>, so no character is read as regex syntax.</summary>
+        // Appends characters produced by folding: letters and marks as they are, anything else as \uXXXX, so no
+        // character is read as regex syntax.
         private static void AppendEscaped(StringBuilder output, string text)
         {
             foreach (char ch in text)

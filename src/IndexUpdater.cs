@@ -5,37 +5,33 @@ using SearchEngine.Snapshots;
 namespace SearchEngine;
 
 // IndexUpdater owns the mutable source of truth (_entries) and is the only place that calls
-// IndexSnapshotProvider.Publish. All mutating operations are serialised through _gate so concurrent callers never see
-// a partially-updated index.
+// IndexSnapshotProvider.Publish.
 //
-// Cost of a change:
-//   The data structures of a segment (flat arrays, sorted word list, bigram index) cannot be updated in place, so a
-//   snapshot is a base segment plus a small delta segment plus the dead base ordinals (see IndexSnapshot). A change
-//   keeps the base of the published snapshot, marks the base documents it removes or replaces as dead and builds a
-//   new delta from every entry stored since the base was built. When the delta and the dead ordinals together pass
-//   MergeThreshold, the change rebuilds the base from all entries instead (a merge) and the next snapshot starts with
-//   an empty delta. RebuildFrom always builds a new base. The Async variants read the stream before acquiring the
-//   lock, so the lock is held only for the final in-memory copy and the build.
+// ── Cost ──
+// The structures of a segment (flat arrays, sorted token list, bigram index) cannot be updated in place, so a snapshot
+// is a base segment plus a small delta segment plus the dead base ordinals (IndexSnapshot). A change keeps the base of
+// the published snapshot, marks the base documents it removes or replaces as dead and builds a new delta from every
+// entry stored since the base was built. When the delta and the dead ordinals together pass MergeThreshold, the
+// change is a merge: it builds a new base from all entries, and the next snapshot starts with an empty delta.
+// RebuildFrom always builds a new base.
 //
-// One source of truth:
-//   _entries holds every entry with the ordinal of its document in the base of the published snapshot, or NotInBase
-//   when the entry was stored after that base was built. The delta ids and the dead ordinals of the next snapshot are
-//   derived from the published snapshot (_published) and the changes, so nothing else has to be kept in step.
+// ── Invariants ──
+// _entries holds every entry with the ordinal of its document in the base of the published snapshot, or NotInBase
+// when the entry was stored after that base was built. The delta ids and the dead ordinals of the next snapshot are
+// derived from the published snapshot (_published) and the changes, so nothing else has to be kept in step.
 //
-// Thread safety:
-//   _gate serialises all writes to _entries and _published and all calls to Publish. Reads (queries) are lock-free:
-//   SearchEngineSharp reads the snapshot reference via Volatile.Read and never touches _entries.
+// ── Thread safety ──
+// _gate serializes all writes to _entries and _published and every Publish.
 //
-// Atomicity:
-//   A mutation either completes (new snapshot published, _entries updated) or leaves both untouched. Batch mutations
-//   read the caller's sequence before taking the lock, so a failing or re-entrant enumeration changes nothing.
-//   Single-entry and batch mutations then record the previous value of every id they change and restore it if
-//   building the snapshot throws (Apply); base ordinals are written only after the build succeeded. RebuildFrom fills
-//   a new dictionary and only swaps it in after the build succeeded.
+// ── Atomicity ──
+// A change either completes (_entries updated, new snapshot published) or leaves both as they were. The callers of
+// Apply read the caller's sequence before the lock (Apply has the reason); Apply records the previous value of every
+// id it changes and restores it when the build throws, and base ordinals are written only after a build succeeded
+// (AssignBaseOrdinals). RebuildFrom swaps in its new dictionary only after the build succeeded (ReplaceAll).
 
 /// <summary>
 /// Keeps the entries of an index and publishes a new snapshot to the <see cref="IndexSnapshotProvider"/> after
-/// each change. Changes are serialized; queries read the published snapshot without taking the lock.
+/// each change.
 /// </summary>
 /// <remarks>All members are safe to call from several threads.</remarks>
 public sealed class IndexUpdater : IIndexUpdater
@@ -46,7 +42,7 @@ public sealed class IndexUpdater : IIndexUpdater
     private readonly IndexSnapshotProvider _provider;
     private readonly SearchTokenization _tokenization;
     private readonly Lock _gate = new();
-    // Every entry is stored with its SearchText folded (SearchTokenization.FoldEntry), so a build folds nothing.
+    // Every entry, with its SearchText folded (SearchTokenization.FoldEntry).
     private Dictionary<int, StoredEntry> _entries;
     // The last snapshot this updater published, or the one the provider started with.
     private IndexSnapshot _published;
@@ -58,9 +54,9 @@ public sealed class IndexUpdater : IIndexUpdater
     /// <param name="tokenization">The preset of every snapshot this updater builds, including the empty ones it
     /// publishes when it is created and on <see cref="Clear"/>; <see cref="SearchTokenization.Default"/> when
     /// <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
     /// <remarks>The updater does not read the snapshot that <paramref name="provider"/> already holds: it replaces
     /// it with an empty one, and every later snapshot is built only from the entries given to the updater.</remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
     public IndexUpdater(IndexSnapshotProvider provider, SearchTokenization? tokenization = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
@@ -101,13 +97,11 @@ public sealed class IndexUpdater : IIndexUpdater
         lock (_gate) return _entries.ContainsKey(id);
     }
 
-    // The number of delta entries plus dead base ordinals past which a change rebuilds the base (a merge). A change
-    // costs a build of the delta, and every query pays a little for the delta and the dead ordinals, while a merge
-    // costs a build of all entries; about 2 * sqrt(entries) keeps both small (measured on a Ryzen 5 9600X: a build
-    // costs about 0.2-0.5 µs per entry up to a few thousand entries, then GC pauses grow).
+    // The number of delta entries plus dead base ordinals past which a change is a merge. A change costs a build of
+    // the delta, and every query pays a little for the delta and the dead ordinals, while a merge costs a build of
+    // all entries; about 2 * sqrt(entries) keeps both small. The IIndexUpdater remarks and docs/performance.md
+    // (Keeping an index current) quote 2 * sqrt(entries), 256 and 4,096: change them with this line.
     internal static int MergeThreshold(int entryCount) => Math.Clamp((int)(2 * Math.Sqrt(entryCount)), 256, 4096);
-
-    // ── Full rebuild (string) ──
 
     /// <inheritdoc />
     public void RebuildFrom(IDictionary<int, string> entries)
@@ -127,8 +121,6 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entries);
         return RebuildFromStreamAsync(entries, static (key, value) => IndexedEntry.FromText(key, value, nameof(entries)), progress, ct);
     }
-
-    // ── Full rebuild (IndexedEntry) ──
 
     /// <inheritdoc />
     public void RebuildFrom(IDictionary<int, IndexedEntry> entries)
@@ -165,8 +157,6 @@ public sealed class IndexUpdater : IIndexUpdater
             ReplaceAll(buffer, progress);
     }
 
-    // ── Single entry operations ──
-
     /// <inheritdoc />
     public void AddEntry(int id, string text)
     {
@@ -197,8 +187,6 @@ public sealed class IndexUpdater : IIndexUpdater
         ArgumentNullException.ThrowIfNull(entry);
         return Apply([new(id, _tokenization.FoldEntry(entry))])[0].Previous is not null;
     }
-
-    // ── Batch operations (one publish) ──
 
     /// <inheritdoc />
     public void AddOrUpdateEntries(IEnumerable<KeyValuePair<int, string>> entries)
@@ -249,7 +237,7 @@ public sealed class IndexUpdater : IIndexUpdater
         _published = snapshot;
     }
 
-    // Full rebuild: the new entries become the source of truth only after their snapshot was built.
+    // RebuildFrom: the new entries become the source of truth only after their snapshot was built.
     private void ReplaceAll(Dictionary<int, StoredEntry> next, IProgress<float>? progress = null)
     {
         var snapshot = BuildBase(next, progress);

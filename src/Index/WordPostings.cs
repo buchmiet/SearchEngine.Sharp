@@ -1,8 +1,6 @@
 namespace SearchEngine.Index;
 
-/// <summary>
-/// Location of a posting list in the flattened indices array.
-/// </summary>
+// Offset and count of a token's postings in IndexSegment.PostingDocIds.
 internal readonly struct WordPostings(int offset, int count)
 {
     public int Offset { get; } = offset;

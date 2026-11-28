@@ -5,19 +5,21 @@ using System.Runtime.InteropServices;
 namespace SearchEngine.Tokenizer;
 
 /// <summary>
-/// Splits text into tokens at separator characters and lowercases them (invariant culture, character by
-/// character) the way the index builder does.
+/// Splits text into tokens at separator characters and lowercases them character by character with
+/// <see cref="ToLowerInvariantFast(char)"/>, the way the index builder does.
 /// </summary>
 /// <remarks>
 /// The overloads without a separator set use the index separators of <see cref="SearchTokenization.Default"/>; for
 /// another preset pass <c>SearchValues.Create(tokenization.IndexSeparators)</c>. The Unicode options of a preset are
-/// not applied here. All members are thread-safe.
+/// not applied here. All members are safe to call from several threads at once.
 /// </remarks>
 public static class TextNormalizer
 {
-    /// <summary>Receives one distinct lowercase token from <c>ForEachUniqueWord</c>.</summary>
+    /// <summary>Receives one distinct lowercase token from
+    /// <see cref="ForEachUniqueWord{TState}(string, HashSet{string}, ref TState, UniqueWordAction{TState})"/>.
+    /// </summary>
     /// <typeparam name="TState">The type of the caller's state.</typeparam>
-    /// <param name="state">The state passed to <c>ForEachUniqueWord</c>, by reference.</param>
+    /// <param name="state">The caller's state, by reference.</param>
     /// <param name="word">The lowercase token.</param>
     public delegate void UniqueWordAction<TState>(ref TState state, string word);
 
@@ -206,8 +208,9 @@ public static class TextNormalizer
         return string.Create(source.Length, source, static (destination, state) => ToLowerInvariantFast(state, destination));
     }
 
-    // Per UTF-16 code unit, like ToLowerInvariantFast(char). MemoryExtensions.ToLowerInvariant and ToLowerOrdinal are not
-    // equivalent: both also lowercase supplementary-plane letters, which only UnicodeMatching.CaseFold does here.
+    // Per UTF-16 code unit, like ToLowerInvariantFast(char). MemoryExtensions.ToLowerInvariant is not equivalent: it
+    // follows the casing data of the runtime and also lowercases supplementary-plane letters, which only
+    // UnicodeMatching.CaseFold does here.
     internal static void ToLowerInvariantFast(ReadOnlySpan<char> source, Span<char> destination)
     {
         for (int i = 0; i < source.Length; i++)

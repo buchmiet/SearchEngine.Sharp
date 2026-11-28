@@ -4,21 +4,32 @@ using SearchEngine.Snapshots;
 namespace SearchEngine.DependencyInjection;
 
 /// <summary>
-/// Extension methods for registering SearchEngine.Sharp services with DI.
+/// Registers an index (provider, updater and engine) with a service collection.
 /// </summary>
+/// <remarks>
+/// Every method registers <see cref="IIndexSnapshotProvider"/> and <see cref="IIndexUpdater"/> as singletons and
+/// <see cref="ISearchEngine"/> as scoped, except <see cref="AddSearchEngineTransient(IServiceCollection)"/> and its
+/// overload, which register it as transient. The engine keeps no state, so its lifetime decides only how many
+/// instances are created.
+/// </remarks>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers SearchEngine.Sharp with recommended lifetimes:
-    /// IIndexSnapshotProvider and IIndexUpdater as singletons; ISearchEngine as scoped.
+    /// Registers an index that uses <see cref="SearchTokenization.Default"/>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngine(this IServiceCollection services)
         => AddSearchEngine(services, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers SearchEngine.Sharp with a tokenization preset for all index rebuilds.
+    /// Registers an index with a tokenization preset for every snapshot of the index. The provider starts with an
+    /// empty snapshot that uses <paramref name="tokenization"/>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="tokenization"/> is
     /// <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngine(this IServiceCollection services, SearchTokenization tokenization)
@@ -29,15 +40,22 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Same as AddSearchEngine, but registers ISearchEngine as transient.
+    /// Same as <see cref="AddSearchEngine(IServiceCollection)"/>, but registers <see cref="ISearchEngine"/> as
+    /// transient.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngineTransient(this IServiceCollection services)
         => AddSearchEngineTransient(services, SearchTokenization.Default);
 
     /// <summary>
-    /// Same as AddSearchEngine with a tokenization preset, but registers ISearchEngine as transient.
+    /// Same as <see cref="AddSearchEngine(IServiceCollection, SearchTokenization)"/>, but registers
+    /// <see cref="ISearchEngine"/> as transient.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="tokenization"/> is
     /// <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngineTransient(this IServiceCollection services, SearchTokenization tokenization)
@@ -48,31 +66,43 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers services and publishes a first snapshot built from <paramref name="initialEntries"/>.
+    /// Registers an index that uses <see cref="SearchTokenization.Default"/> and whose first snapshot is built from
+    /// <paramref name="initialEntries"/>.
     /// </summary>
-    /// <remarks>
-    /// The entries are copied when this method is called. The registered <see cref="IIndexUpdater"/> holds the same
-    /// entries, so its mutations extend or change them.
-    /// </remarks>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="initialEntries">The content of the first snapshot, keyed by the id that queries return.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="initialEntries"/> is
     /// <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is
+    /// <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The entries are copied and checked when this method is called; the snapshot is built when the provider, the
+    /// updater or the engine is first resolved. The registered <see cref="IIndexUpdater"/> holds the same entries, so
+    /// its changes extend or change them.
+    /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         IDictionary<int, string> initialEntries)
         => AddSearchEngine(services, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers services with a tokenization preset and publishes a first snapshot built from
+    /// Registers an index with a tokenization preset and a first snapshot built from
     /// <paramref name="initialEntries"/>.
     /// </summary>
-    /// <remarks>
-    /// The entries are copied when this method is called. The registered <see cref="IIndexUpdater"/> holds the same
-    /// entries and uses the same tokenization, so its mutations extend or change them.
-    /// </remarks>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="initialEntries">The content of the first snapshot, keyed by the id that queries return.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="initialEntries"/> or
     /// <paramref name="tokenization"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is
+    /// <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The entries are copied and checked when this method is called; the snapshot is built when the provider, the
+    /// updater or the engine is first resolved. The registered <see cref="IIndexUpdater"/> holds the same entries and
+    /// uses the same tokenization, so its changes extend or change them.
+    /// </remarks>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         IDictionary<int, string> initialEntries,
@@ -85,36 +115,47 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers services and publishes a first snapshot built from the entries returned by
-    /// <paramref name="entriesFactory"/>.
+    /// Registers an index that uses <see cref="SearchTokenization.Default"/> and whose first snapshot is built from
+    /// the entries that <paramref name="entriesFactory"/> returns.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="entriesFactory">Returns the content of the first snapshot, keyed by the id that queries
+    /// return.</param>
+    /// <returns><paramref name="services"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="entriesFactory"/> is
+    /// <see langword="null"/>.</exception>
     /// <remarks>
-    /// <para>The factory runs once, when the index or its <see cref="IIndexUpdater"/> is first resolved. The updater
-    /// holds the same entries, so its mutations extend or change them.</para>
+    /// <para>The factory runs once per container, when the provider, the updater or the engine is first resolved,
+    /// and the snapshot is built then. The registered <see cref="IIndexUpdater"/> holds the same entries, so its
+    /// changes extend or change them.</para>
     /// <para>When the factory returns <see langword="null"/>, resolving the index throws
     /// <see cref="InvalidOperationException"/>; a <see langword="null"/> text in what it returns throws
     /// <see cref="ArgumentException"/>.</para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="entriesFactory"/> is
-    /// <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         Func<IServiceProvider, IDictionary<int, string>> entriesFactory)
         => AddSearchEngine(services, entriesFactory, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers services with a tokenization preset and publishes a first snapshot built from the entries
-    /// returned by <paramref name="entriesFactory"/>.
+    /// Registers an index with a tokenization preset and a first snapshot built from the entries that
+    /// <paramref name="entriesFactory"/> returns.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="entriesFactory">Returns the content of the first snapshot, keyed by the id that queries
+    /// return.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="entriesFactory"/> or
+    /// <paramref name="tokenization"/> is <see langword="null"/>.</exception>
     /// <remarks>
-    /// <para>The factory runs once, when the index or its <see cref="IIndexUpdater"/> is first resolved. The updater
-    /// holds the same entries and uses the same tokenization, so its mutations extend or change them.</para>
+    /// <para>The factory runs once per container, when the provider, the updater or the engine is first resolved,
+    /// and the snapshot is built then. The registered <see cref="IIndexUpdater"/> holds the same entries and uses the
+    /// same tokenization, so its changes extend or change them.</para>
     /// <para>When the factory returns <see langword="null"/>, resolving the index throws
     /// <see cref="InvalidOperationException"/>; a <see langword="null"/> text in what it returns throws
     /// <see cref="ArgumentException"/>.</para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="entriesFactory"/> or
-    /// <paramref name="tokenization"/> is <see langword="null"/>.</exception>
     public static IServiceCollection AddSearchEngine(
         this IServiceCollection services,
         Func<IServiceProvider, IDictionary<int, string>> entriesFactory,
@@ -136,18 +177,27 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers keyed services for multiple independent indexes.
-    /// Use [FromKeyedServices("key")] to inject.
+    /// Registers an index under a service key that uses <see cref="SearchTokenization.Default"/>, so several
+    /// independent indexes can live in one container. Inject its services with
+    /// <c>[FromKeyedServices("key")]</c>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="key">The service key of the index's provider, updater and engine.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> or <paramref name="key"/> is
     /// <see langword="null"/>.</exception>
     public static IServiceCollection AddKeyedSearchEngine(this IServiceCollection services, string key)
         => AddKeyedSearchEngine(services, key, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers keyed services for multiple independent indexes with a tokenization preset.
-    /// Use [FromKeyedServices("key")] to inject.
+    /// Registers an index under a service key with a tokenization preset, so several independent indexes can live
+    /// in one container. Inject its services with <c>[FromKeyedServices("key")]</c>. The provider starts with an
+    /// empty snapshot that uses <paramref name="tokenization"/>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="key">The service key of the index's provider, updater and engine.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="key"/> or
     /// <paramref name="tokenization"/> is <see langword="null"/>.</exception>
     public static IServiceCollection AddKeyedSearchEngine(
@@ -162,13 +212,18 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers keyed services and publishes a first snapshot built from <paramref name="initialEntries"/>.
-    /// The keyed <see cref="IIndexUpdater"/> holds the same entries (see
-    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>).
+    /// Registers an index under a service key that uses <see cref="SearchTokenization.Default"/> and whose first
+    /// snapshot is built from <paramref name="initialEntries"/>. Otherwise it behaves like
+    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string})"/>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="key">The service key of the index's provider, updater and engine.</param>
+    /// <param name="initialEntries">The content of the first snapshot, keyed by the id that queries return.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="key"/> or
     /// <paramref name="initialEntries"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is
+    /// <see langword="null"/>.</exception>
     public static IServiceCollection AddKeyedSearchEngine(
         this IServiceCollection services,
         string key,
@@ -176,13 +231,19 @@ public static class ServiceCollectionExtensions
         => AddKeyedSearchEngine(services, key, initialEntries, SearchTokenization.Default);
 
     /// <summary>
-    /// Registers keyed services with a tokenization preset and publishes a first snapshot built from
-    /// <paramref name="initialEntries"/>. The keyed <see cref="IIndexUpdater"/> holds the same entries and uses the
-    /// same tokenization (see <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string}, SearchTokenization)"/>).
+    /// Registers an index under a service key with a tokenization preset and a first snapshot built from
+    /// <paramref name="initialEntries"/>. Otherwise it behaves like
+    /// <see cref="AddSearchEngine(IServiceCollection, IDictionary{int, string}, SearchTokenization)"/>.
     /// </summary>
+    /// <param name="services">The service collection to add the index to.</param>
+    /// <param name="key">The service key of the index's provider, updater and engine.</param>
+    /// <param name="initialEntries">The content of the first snapshot, keyed by the id that queries return.</param>
+    /// <param name="tokenization">The preset of every snapshot of the index.</param>
+    /// <returns><paramref name="services"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/>, <paramref name="key"/>,
     /// <paramref name="initialEntries"/> or <paramref name="tokenization"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A text in <paramref name="initialEntries"/> is
+    /// <see langword="null"/>.</exception>
     public static IServiceCollection AddKeyedSearchEngine(
         this IServiceCollection services,
         string key,
