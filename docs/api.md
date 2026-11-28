@@ -40,10 +40,9 @@ int UniqueWordCount { get; }
 - An empty or whitespace `expression` matches nothing, unless a non-empty `filter` is given; then every document
   that passes the filter matches. A `null` expression throws `ArgumentNullException`.
 - `enableOperators` turns on `AND`, `OR`, `NOT` and parentheses. It is ignored for `WordMatchMethod.Regex`.
-- Throws `ArgumentException` when `filter` names a facet that no indexed document carries (see
-  [Facet filters](query-semantics.md#facet-filters) for when this is checked).
-- Pass no filter, rather than `FacetFilter.None`, when there are no facet criteria; see
-  [performance.md](performance.md#per-query).
+- A facet that no document carries reads as 0 and does not throw; see
+  [Facet filters](query-semantics.md#facet-filters).
+- `null` and an empty filter (`FacetFilter.None`) give the same results at the same cost.
 
 ### `NameMatcher`
 
@@ -96,7 +95,8 @@ grapheme-cluster boundaries. Exact effects and caveats: [Unicode matching](query
 
 ### `IIndexUpdater`, `IndexUpdater`
 
-Changes the index. Calls are serialized, and every successful call publishes a new snapshot through the provider.
+Changes the index. Calls are serialized, and every call that changes an entry publishes a new snapshot through the
+provider.
 A call that throws leaves the stored entries and the published snapshot unchanged. A change keeps the bulk of the
 previous snapshot and builds again only the entries changed since the whole index was last built; once those
 changes pass about `2 × √(entry count)` (at least 256, at most 4,096), the change builds the whole index again.
@@ -231,8 +231,9 @@ static FacetFilter Combine(params FacetFilter[] filters);
 ### `IndexSnapshot`
 
 An index whose content never changes. Any number of threads may query one snapshot at once. The lookup structures
-for `Within` and for `NaturalSortAscending` are built on the first query that needs them, once per snapshot;
-concurrent first callers wait for that build.
+for `Within` and for `NaturalSortAscending` are built on the first query that needs them, and concurrent first
+callers wait for that build. They belong to the snapshot's base, so the snapshots that `IndexUpdater` publishes
+after small changes share them; only the small delta part is built again after each change.
 
 ```csharp
 static readonly IndexSnapshot Empty;    // empty snapshot with SearchTokenization.Default
@@ -304,7 +305,8 @@ Task<IngestionResult> IngestAsync(
 - Cancellation stops the scan. With `FlushOnCancellation` (default) every accepted entry that is not yet published,
   including entries still in the channel, is published before the task completes; otherwise they are discarded.
   The entries that have arrived are published at once, without waiting for the scanner to stop; entries it hands
-  over before it stops follow in one more publish. Entries already published stay in the index. The task then completes with `WasCancelled = true`.
+  over before it stops follow in one more publish. Entries already published stay in the index. The task then
+  completes with `WasCancelled = true`.
 - When the updater, a `Published` or `onPublished` handler, or `progress` throws, the publisher stops, the scan is
   cancelled through the token passed to its enumerator, the enumerator is disposed, and the task faults with that
   exception (with the scanner's exception if both failed). Entries already published stay; buffered ones are not

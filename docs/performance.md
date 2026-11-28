@@ -139,7 +139,8 @@ permutation are extra and exist only after their first use (see below).
 
 Two structures are built on first use. Concurrent first callers wait for one build; every later query reuses it.
 They belong to the base of a snapshot, so a change that keeps the base keeps them too: their cost comes back only
-after a full build (`RebuildFrom` or a merge). The delta has its own, small ones, built again for every change.
+after a full build (`RebuildFrom` or a merge). The delta has its own small ones, built again after every change by
+the first query that needs them; a natural sort also places each delta document in the base permutation then.
 
 | Structure | Built by | Measured at 10^5 | Measured at 10^6 |
 |---|---|---:|---:|
@@ -152,10 +153,8 @@ corpora. `Exact`, glob and regex queries never build the bigram index.
 ### Per query
 
 - An exact term that is the whole expression (also with `enableOperators: true`), with `SnapshotOrder`, reads the
-  term's posting list directly. A non-empty facet filter is then checked only on those postings; an empty filter
-  (`FacetFilter.None`) passed to a filter overload turns this shortcut off, so call the overload without a
-  filter when there are no facet criteria. Any other query
-  evaluates into a bitset with one bit per document, so it pays at least a pass over N/64 words.
+  term's posting list directly, and a facet filter is checked only on those postings. Any other query evaluates
+  into a bitset with one bit per document, so it pays at least a pass over N/64 words.
 - `Within` looks up candidate tokens by the first two characters of the term and searches each candidate with a
   vectorized `IndexOf`. A one-character term scans the vocabulary.
 - A glob term scans the vocabulary; tokens shorter than the pattern's minimum length are skipped. Patterns of the
@@ -183,17 +182,18 @@ synthetic tree on disk (ext4, warm cache) for `*.pdf` (one process per run, one 
 
 Both variants read each directory entry once with `FileSystemEnumerable`, as in the recipes of the
 [file search guide](file-search-guide.md#index-or-plain-scan). A kept index answers a query over 1 million names
-in 0.1 to 17 ms (a regex up to 230 ms) instead of a 1.15 s rescan. Building it from disk costs about as much as 5 to 9 rescans, so it pays
-off after about 5 to 9 queries on a tree that does not change in between. A change to the kept index builds
-only the entries changed since the last full build, and the whole index (about 2 s at 10^6) is built again once
-every 1,000 to 2,000 changes at 10^6.
+in 0.1 to 17 ms (a regex up to 230 ms) instead of a 1.15 s rescan. Building it from disk costs about as much as
+5 to 9 rescans, so it pays off after about 5 to 9 queries on a tree that does not change in between. A change to
+the kept index builds only the entries changed since the last full build, and the whole index (about 2 s at 10^6)
+is built again once every 1,000 to 2,000 changes at 10^6.
 
 ## Tuning progressive ingestion
 
 `ProgressiveIndexIngestion` buffers the entries of a scan and publishes them through
 `IIndexUpdater.AddOrUpdateEntries`. A publish whose batch is larger than the merge limit of the updater (see
-[Keeping an index current](#keeping-an-index-current)) is a full rebuild, and the batches of a fast scan are, so
-the number of publishes decides the total cost, and the time between publishes decides how stale the index is.
+[Keeping an index current](#keeping-an-index-current)) is a full rebuild. The batches of a fast scan are that
+large, so the number of publishes decides the total cost, and the time between publishes decides how stale the
+index is.
 
 ### Policies
 
@@ -230,7 +230,7 @@ These are the settings of `Adaptive`, except where noted.
 - `PublishMultiplier` (`k`, default 2) spaces timer publishes by `k` times the duration of the last publish, so
   while the timer drives the publishes about `1 / (1 + k)` of the time goes into publishing. Raise it to spend less
   CPU on publishing; lower it for fresher results.
-- `MinTimerPublishBatch` (default 200) keeps a slow scan from rebuilding for a handful of new entries. Staleness
+- `MinTimerPublishBatch` (default 200) keeps a slow scan from publishing for a handful of new entries. Staleness
   overrides it.
 - `IngestPublishOptions.ChannelCapacity` (default 10,000, any policy) bounds the queue between scanner and
   publisher. When it is full the scanner waits.
@@ -254,15 +254,15 @@ starts therefore waits for that publish and the gap after it:
 worst staleness = max(MaxStaleness, (1 + k) × R)
 ```
 
-While `R < MaxStaleness / (1 + k)` (333 ms with the defaults, roughly 150,000 to 200,000 names on the test machine)
-the bound is `MaxStaleness`. Beyond that it grows with the index: a 400 ms rebuild gives 1.2 s, a 2 s rebuild at 1
-million names gives 6 s. In exchange the number of publishes grows slowly with the scan size: 14 publishes for 1 million files in the
-table above.
+While `R < MaxStaleness / (1 + k)` (333 ms with the defaults, roughly 150,000 to 200,000 names on the test
+machine) the bound is `MaxStaleness`. Beyond that it grows with the index: a 400 ms publish gives 1.2 s, a 2 s
+publish at 1 million names gives 6 s. In exchange the number of publishes grows slowly with the scan size:
+14 publishes for 1 million files in the table above.
 
 `StrictMaxStaleness = true` publishes as soon as the oldest entry exceeds `MaxStaleness`, even right after a
-rebuild. The bound is then `max(MaxStaleness, R)`, but once a rebuild takes longer than `MaxStaleness`
-every batch is already stale when the previous rebuild ends, the publisher rebuilds back to back, and the total
-work grows with the square of the scan size: a 1 million file scan then takes 57 to 74 rebuilds, about 2 minutes
+publish. The bound is then `max(MaxStaleness, R)`. But once a publish takes longer than `MaxStaleness`, every
+batch is already stale when the previous publish ends, the publisher rebuilds back to back, and the total work
+grows with the square of the scan size: a 1 million file scan then takes 57 to 74 full rebuilds, about 2 minutes
 of CPU and 30 GB of allocations. Use it only for small indexes that need a hard staleness bound.
 
 Debounce user keystrokes separately (150 to 300 ms) from ingestion; the two delays are independent.

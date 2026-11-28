@@ -22,6 +22,7 @@ dotnet add package SearchEngine.Sharp
 | How fast is it, how much memory does it take, and how do I tune progressive ingestion? | [docs/performance.md](docs/performance.md) |
 | What changed between versions? | [CHANGELOG.md](CHANGELOG.md) |
 | How do I run the benchmarks? | [benchmarks/README.md](benchmarks/README.md) |
+| How should comments and documentation be written? | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## Quick start
 
@@ -107,9 +108,11 @@ List<int> ids = engine.Find("*.txt", WordMatchMethod.Exact); // [1]
 
 ### Indexing a long scan
 
-Every `IndexUpdater` call publishes a new snapshot, and the whole index is built again every few hundred to few
-thousand changes, so calling `AddEntry` once per file makes a long scan cost many full builds. Stream the scan through `ProgressiveIndexIngestion`, which publishes growing batches and keeps the index
-queryable meanwhile:
+Every `IndexUpdater` call that changes an entry publishes a new snapshot, and the whole index is built again every
+few hundred to few thousand changes. Calling `AddEntry` once per file therefore turns a long scan into many full
+builds. Stream the
+scan through `ProgressiveIndexIngestion` instead: it publishes growing batches, and the index answers queries
+while the scan runs:
 
 ```csharp
 using SearchEngine.Ingestion;
@@ -128,13 +131,15 @@ language to one name at a time.
 ## How it works
 
 - `IndexSnapshot` is an immutable index: the distinct tokens packed in one array sorted by length, a posting list
-  per token, the sort texts and one column per facet. Any number of threads can query it.
+  per token, the sort texts and one column per facet. Any number of threads can query it. A snapshot published by
+  `IndexUpdater` after a small change holds that data twice over: a large base and a small delta, plus the list of
+  base documents removed since the base was built.
 - `IndexSnapshotProvider` holds the current snapshot. Readers take it with a volatile read and never lock; a new
   snapshot replaces the reference atomically, and a query that already started finishes on the old one.
 - `IndexUpdater` keeps the entries, serializes changes and publishes a new snapshot for every change. A change
-  keeps the bulk of the previous snapshot (its base) and builds only the entries changed since the base was built;
-  once those pass a limit, it builds the whole index again. A change that fails leaves the published snapshot as
-  it was.
+  reuses the base of the previous snapshot and builds only a new delta from the entries changed since the base was
+  built. Once the delta and the removed documents pass a limit that grows with the index, the change builds the
+  whole index again. A change that fails leaves the published snapshot as it was.
 - `SearchEngineSharp` parses the expression, resolves each term to a set of documents (a bitset), combines the
   sets with the boolean operators, applies the facet filter and turns the result into ids in the requested order.
   The bigram index for `Within` and the natural sort permutation are built on the first query that needs them.
@@ -177,7 +182,7 @@ long-lived API keys.
    it).
 3. On GitHub, under Secrets, Actions, set `NUGET_USER` to the nuget.org profile user name of the policy creator
    (as in the profile URL, not the display name).
-4. Push a version tag, for example `git tag v0.6.0 && git push origin v0.6.0`.
+4. Push a version tag, for example `git tag v0.6.1 && git push origin v0.6.1`.
 
 The workflow builds, tests and packs, exchanges an OIDC token for a short-lived push key, and publishes.
 

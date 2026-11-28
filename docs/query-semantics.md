@@ -10,8 +10,9 @@ applied to each token, if any → lowercase → unique tokens per document → i
 (token → posting list of documents).
 
 Querying: expression → split on the snapshot's query-side separators → Unicode options
-applied to each term, if any → lowercase → each term resolves to a document set → sets combined with boolean algebra → optional facet filter
-intersected → results materialized in the requested sort order.
+applied to each term, if any → lowercase → each term resolves to a document set → sets
+combined with boolean algebra → optional facet filter intersected → results materialized
+in the requested sort order.
 
 Both separator sets are stored in each `IndexSnapshot` as a `SearchTokenization` preset
 so queries always match the index that built them.
@@ -25,7 +26,7 @@ read it from `snapshot.Tokenization`.
 | Preset | Index separators | Query separators | Use case |
 |---|---|---|---|
 | `SearchTokenization.Default` | ` .,;:/\` + CR LF TAB + `\|-#[]{}()~£$€` | same as index | token-level search |
-| `SearchTokenization.FileMask` | **none** (whole `SearchText` = one token) | space, CR, LF (not TAB) | classic file-manager masks on whole names |
+| `SearchTokenization.FileMask` | none (whole `SearchText` = one token) | space, CR, LF (not TAB) | classic file-manager masks on whole names |
 | `SearchTokenization.Create(...)` | caller-defined | caller-defined | custom rules |
 
 Factory:
@@ -66,10 +67,9 @@ Worked examples, given an index of names `report-final.pdf`, `System`,
 
 Limits of FileMask:
 
-1. Parentheses are not query separators in FileMask, so parenthesis grouping is
-   unavailable. Unbalanced-paren degradation in the evaluator does not apply because `(`
-   and `)` are ordinary name characters, not separators. A literal `(` or `)` in a name
-   can be matched (`report(1).pdf` matches the mask `report(1).pdf`).
+1. Parentheses are not query separators in FileMask, so they cannot group terms. They are
+   ordinary name characters instead, and a mask matches them literally (`report(1).pdf`
+   matches the mask `report(1).pdf`).
 2. A space in a file name cannot be typed literally in a mask expression. Use `?`
    or `*` wildcards instead.
 3. `*.*` means "name contains a dot", not "match everything". Applications wanting DOS
@@ -80,8 +80,9 @@ Limits of FileMask:
    matches longer names, so prefer disabling operators). This collision exists in every
    preset; it is more visible when whole names are single terms.
 
-Switching presets requires a full `RebuildFrom` from the application's file table; the
-preset is fixed per snapshot.
+An `IndexUpdater` keeps the preset it was created with, and every snapshot stores the
+preset that built it. To switch presets, create a new `IndexUpdater` with the new preset
+and fill it with `RebuildFrom` from the application's file table.
 
 ### Unicode matching
 
@@ -99,7 +100,7 @@ in the query as typed, before folding, so under `RemoveDiacritics` the words `n�
 |------|--------|
 | `Compose` | NFC composition: composed and decomposed forms (and Hangul jamo/syllables) match |
 | `CaseFold` | Unicode 17.0.0 full case folding (`CaseFolding.txt`, statuses C and F) of the lowercase, from tables built into the library, the same on every platform and in globalization-invariant mode: `ς`=`σ`, `µ`=`μ`, `ϐ`=`β`, `ᲀ`=`в`, `ſ`=`s`, Deseret `𐐀`=`𐐨` and other supplementary-plane letters, `ß`/`ẞ`→`ss`, ligatures (`ﬁ`→`fi`, `ﬓ`→`մն`), `ŉ`→`ʼn`, Greek letters with ypogegrammeni → letter + `ι`. The Turkic foldings are not applied. A few foldings produce a combining mark (`ǰ` → `j` + U+030C, `ΐ` → `ι` + U+0308 + U+0301); combine `CaseFold` with `Compose` to compose them back |
-| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+FE20–FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
+| `RemoveDiacritics` | drops the accents of Latin, Greek and Cyrillic letters after decomposition (`é`→`e`, `ά`→`α`, `й`→`и`: the non-spacing marks of U+0300 to U+036F, U+1AB0 to U+1AFF, U+1DC0 to U+1DFF and U+FE20 to U+FE2F), plus `ł ø đ ħ ı` → `l o d h i`; marks of other scripts stay (`バ` ≠ `ハ`, Thai tone marks, Indic vowel signs); implies `Compose`. The folding does not know the language: `й` and `ў` become `и` and `у`, which are different letters in Russian and Belarusian, so words that differ only by them match each other; leave the option off for such texts |
 | `GraphemeBoundaries` | matches must not split an extended grapheme cluster (UAX #29): a `Within` match starts and ends on cluster boundaries, and so does every place where a glob `*` or `?` meets literal text (`cafe*` does not match a decomposed `café`); a glob `?` matches one cluster (`caf?` matches a decomposed `café`) |
 
 Indexed text and queries are folded the same way. Both are split at their separators as written, and each token
@@ -239,13 +240,14 @@ tokens, not the original `SearchText`. A pattern that spans index separators (e.
 `pdf`. Use `SearchTokenization.FileMask` when the indexed token is the full file
 name, or combine regex hits with boolean/glob terms on Default.
 
-Examples on Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`):
+Examples on a Default index of `report-final.pdf` (tokens `report`, `final`, `pdf`) and
+`reporting.log` (tokens `reporting`, `log`):
 
 | Expression | Matches tokens | Documents |
 |---|---|---|
 | `report` | `report`, `reporting` (substring) | union of posting lists |
 | `^report$` | `report` only | docs with token `report` |
-| `report.*` | tokens containing `report` prefix | e.g. `report`, `reporting` |
+| `report.*` | `report`, `reporting`: unanchored, so any token containing `report` | union of posting lists |
 | `pdf` | `pdf` | docs with token `pdf` |
 | `final\|pdf` | `final`, `pdf` | union of posting lists |
 
@@ -421,7 +423,7 @@ Queries with `WordMatchMethod.Within`, `enableOperators: true`:
 | `report pdf` | 1, 2 | implicit AND |
 | `report AND NOT draft` | 1, 4 | boolean operators |
 | `rep*` | 1, 2, 4 | glob, prefix-anchored on whole tokens |
-| `*.pdf` | 1, 2 | splits into `*` AND `pdf` → "has token pdf" |
+| `*.pdf` | 1, 2 | splits into `*` AND `pdf`; under `Within`, `pdf` matches any token containing it |
 | `fin?l` | 1 | `?` = exactly one character |
 | `(draft OR final) pdf` | 1, 2 | grouping plus implicit AND |
 | `""` + `Range("size", 10_240, long.MaxValue)` | size-dependent | filter-only query |

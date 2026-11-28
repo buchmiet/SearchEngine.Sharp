@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>SearchEngine.CompetitorBenchmarks</RootNamespace>
     <SharpSourceRoot Condition="'$(SharpSourceRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..</SharpSourceRoot>
-    <!-- The library is src/SearchEngine.Sharp.csproj from 0.6.0 on, src/SearchEngine.Sharp/SearchEngine.Sharp.csproj before. -->
+    <!-- The library is src/SearchEngine.Sharp.csproj from 0.6.1 on, src/SearchEngine.Sharp/SearchEngine.Sharp.csproj before. -->
     <SharpProjectDir>$(SharpSourceRoot)\src\SearchEngine.Sharp</SharpProjectDir>
     <SharpProjectDir Condition="Exists('$(SharpSourceRoot)\src\SearchEngine.Sharp.csproj')">$(SharpSourceRoot)\src</SharpProjectDir>
   </PropertyGroup>

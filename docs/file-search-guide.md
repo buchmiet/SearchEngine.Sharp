@@ -30,9 +30,9 @@ A search mode is the triple:
 2. `WordMatchMethod`: `Exact` (whole token) or `Within` (substring inside token/name)
 3. `enableOperators`: boolean `AND` / `OR` / `NOT`
 
-Configure the preset on `IndexUpdater` at construction; every snapshot it publishes
-carries the same preset. Switching between modes (e.g. token search and classic file mask)
-requires one `RebuildFrom` from your file table. You cannot mix presets in one snapshot.
+Pass the preset to the `IndexUpdater` constructor; every snapshot it publishes carries
+that preset, and one snapshot never mixes two. Switching from token search to file masks
+at runtime takes a new updater, described after the example.
 
 ```csharp
 // Classic file mask — whole-name semantics; *.pdf is end-anchored
@@ -128,14 +128,16 @@ static IEnumerable<string> FindFiles(string root, string query, long minSize, Ca
   and time 1601-01-01, i.e. `DateTimeOffset.FromFileTime(0)`; on macOS the values read with the listing). Skip such
   entries if it matters; the `FileInfo` pattern instead throws from `Length` and, outside a `try`, ends the scan.
 - For many cores, run one non-recursive `FileSystemEnumerable` per directory on a few workers (measured 1.8× on
-  4 x64 cores, 2.5–4× on an 8-core Mac; slower on a single core).
-- On macOS file names may be decomposed (NFD); use `SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose)`
-  for the matcher (and the index) so a composed query finds them.
+  4 x64 cores, 2.5 to 4× on an 8-core Mac; slower on a single core).
+- On macOS file names may be decomposed (NFD). Use
+  `SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose)` for the matcher (and the index) so a
+  composed query finds them.
 
 ## Scanning into a persistent index
 
-Do not call `AddEntry` per file: each call publishes a snapshot and the whole index is built again
-every few hundred to few thousand calls, so a long scan costs many full builds. Stream the scan through `ProgressiveIndexIngestion`. The scanner owns the id → path table and hands
+Do not call `AddEntry` per file: each call publishes a snapshot, and the whole index is built again every few
+hundred to few thousand calls, so a long scan costs many full builds. Stream the scan through
+`ProgressiveIndexIngestion` instead. The scanner owns the id → path table and hands
 each path to the consumer through a thread-safe map; do not share a plain `List<string>` between the scanner
 (which runs on the ingestion's producer task) and the code that reads results:
 
@@ -206,7 +208,7 @@ ingest. Ids must be unique within one scope, and reusing an id replaces the entr
 
 ## Live requery loop
 
-Re-run the query whenever the user edits the criteria (debounce 100–200 ms) and whenever
+Re-run the query whenever the user edits the criteria (debounce 150 to 300 ms) and whenever
 a publish lands (`onPublished` above). Both events converge on the same code path:
 
 ```csharp
@@ -254,14 +256,8 @@ static FacetFilter BuildFilter(SearchCriteria c)
 
 static List<int> Search(ISearchEngine engine, SearchCriteria c)
 {
-    FacetFilter filter = BuildFilter(c);
-
-    // Without facet criteria call the overload without a filter (see performance.md).
-    return filter.IsEmpty
-        ? engine.Find(c.NameQuery, WordMatchMethod.Within,
-            enableOperators: true, SearchSortMode.NaturalSortAscending)
-        : engine.Find(c.NameQuery, WordMatchMethod.Within,
-            enableOperators: true, SearchSortMode.NaturalSortAscending, filter);
+    return engine.Find(c.NameQuery, WordMatchMethod.Within,
+        enableOperators: true, SearchSortMode.NaturalSortAscending, BuildFilter(c));
 }
 ```
 
@@ -325,20 +321,19 @@ of passing it through as a text expression.
 Name queries other than regexes take less than 2 ms at 100,000 names and less than 20 ms at 1 million
 ([Query latency](performance.md#query-latency)). Two costs show up in a live result list:
 
-- Every publish creates a new snapshot. The first `Within` query on it builds the bigram index, and a natural sort
-  of a result that holds more than 80% of the names builds the sort permutation
+- After a full build, the first `Within` query builds the bigram index, and the first natural sort of a result
+  that holds more than 80% of the names builds the sort permutation. Publishes of small changes keep both
   ([Work deferred to the first query](performance.md#work-deferred-to-the-first-query)).
-- `NaturalSortAscending` sorts the hits on every query: about 4 ms for 10,000 hits and 65 ms for 100,000 hits.
-  For large result lists, show them in snapshot order first or page them.
+- Until the permutation exists, `NaturalSortAscending` sorts the hits of every query: about 4 ms for 10,000 hits
+  and 65 ms for 100,000 hits. Once it exists, a result of more than 0.5% of the names walks it instead. For large
+  result lists before that, show them in snapshot order first or page them.
 
 ## Pitfalls checklist
 
 - Missing facet values read as `0`; attach every facet to every document.
 - Facet names are case-sensitive; pick one spelling (`size`, not `Size`) and stick to it.
-- Filtering on a facet name that no document carries throws `ArgumentException`. Build
-  filters only from facets your scanner writes.
-- Don't pass an empty filter to the filter overloads; call the filter-less overload when
-  no facet criteria apply.
+- A facet name that no document carries also reads as `0`, without an exception, so a
+  misspelled name filters silently. Build filters only from facets your scanner writes.
 - Keep all timestamp facets in UTC; mixing kinds shifts range boundaries.
 - `*.txt` has token semantics under Default, not end-anchored semantics. Use
   FileMask or an `ext` facet; see [File extensions](#file-extensions).
