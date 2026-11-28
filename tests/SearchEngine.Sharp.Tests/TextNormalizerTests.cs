@@ -3,10 +3,14 @@ using SearchEngine.Tokenizer;
 
 namespace SearchEngine.Sharp.Tests;
 
+// TextNormalizer splits indexed text into tokens and lowercases each one with the Unicode 17 lowercase mapping
+// (src/Tokenizer/TextNormalizer.cs). Tokens are kept once, compared ordinally after lowercasing: two spellings that
+// lowercase alike are one token, and characters that only case folding would join stay apart, so every token posts
+// its document once and is found by Exact, Within, natural sort and NameMatcher alike.
 public sealed class TextNormalizerTests
 {
     [Test]
-    public async Task GetWordsFromString_NormalizesCaseWithoutDuplicates()
+    public async Task GetWordsFromString_lowercases_and_keeps_each_token_once()
     {
         var words = TextNormalizer.GetWordsFromString("Alpha alpha ALPHA beta");
 
@@ -14,7 +18,7 @@ public sealed class TextNormalizerTests
     }
 
     [Test]
-    public async Task GetWordsFromString_SplitsByConfiguredSeparators()
+    public async Task GetWordsFromString_splits_at_the_default_separators()
     {
         var words = TextNormalizer.GetWordsFromString("GA-100.B/C,D|E");
 
@@ -53,7 +57,7 @@ public sealed class TextNormalizerTests
 
     [Test]
     [MethodDataSource(nameof(CaseVariants))]
-    public async Task GetWordsFromString_KeepsEveryLowercaseTokenOnce(string text, string[] expectedWords, string[] queries)
+    public async Task GetWordsFromString_keeps_every_distinct_lowercase_token(string text, string[] expectedWords, string[] queries)
     {
         _ = queries;
         var words = TextNormalizer.GetWordsFromString(text);
@@ -63,12 +67,11 @@ public sealed class TextNormalizerTests
 
     [Test]
     [MethodDataSource(nameof(CaseVariants))]
-    public async Task Index_PostsTheDocumentOncePerToken(string text, string[] expectedWords, string[] queries)
+    public async Task The_index_posts_the_document_once_per_token(string text, string[] expectedWords, string[] queries)
     {
         _ = expectedWords;
-        var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(new Dictionary<int, string> { [1] = text });
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = text });
 
         foreach (var query in queries)
         {
@@ -80,7 +83,7 @@ public sealed class TextNormalizerTests
     }
 
     [Test]
-    public async Task ForEachUniqueWord_RejectsASetThatIgnoresCase()
+    public async Task ForEachUniqueWord_rejects_a_set_that_ignores_case()
     {
         int count = 0;
         await Assert.That(() => TextNormalizer.ForEachUniqueWord(

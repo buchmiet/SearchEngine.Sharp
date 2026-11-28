@@ -4,8 +4,10 @@ namespace SearchEngine.Sharp.Tests;
 
 // A glob '?' matches one unit of user text: one code point (a surrogate pair is one, a lone surrogate is one), or one
 // extended grapheme cluster with UnicodeMatching.GraphemeBoundaries. '*' covers whole units, and every place where a
-// wildcard meets literal text is a unit boundary.
-public class GlobUnitTests
+// wildcard meets literal text is a unit boundary (docs/query-semantics.md, globs). A user who types ? for one character
+// must not split an emoji or an accented letter in two. GlobMatcher and NameMatcher apply the rule; a brute-force
+// matcher over the same boundaries is the reference.
+public class GlobTextUnitTests
 {
     private const string Grin = "\uD83D\uDE00";
     private const string CafeDecomposed = "cafe\u0301";
@@ -35,7 +37,7 @@ public class GlobUnitTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task QuestionMark_MatchesOneUnitOfText(bool graphemeBoundaries, string pattern, string name, bool expected)
+    public async Task A_question_mark_matches_one_unit_of_text(bool graphemeBoundaries, string pattern, string name, bool expected)
     {
         var tokenization = graphemeBoundaries
             ? SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries)
@@ -59,7 +61,7 @@ public class GlobUnitTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Glob_AgreesWithABruteForceMatcher(bool graphemeBoundaries)
+    public async Task Index_and_NameMatcher_agree_with_a_brute_force_glob_matcher(bool graphemeBoundaries)
     {
         var random = new Random(graphemeBoundaries ? 8 : 9);
         var names = new Dictionary<int, string>();

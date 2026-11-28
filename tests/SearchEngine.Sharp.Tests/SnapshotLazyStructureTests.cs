@@ -1,18 +1,18 @@
-using SearchEngine;
 using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.Tests;
 
-/// <summary>
-/// The bigram index and the natural-sort permutation are built on first use. Concurrent first
-/// callers on a fresh snapshot must share one build instead of each building its own copy.
-/// </summary>
+// The bigram index (Within) and the natural sort permutation (NaturalSortAscending) of a segment are built on first use
+// (IndexSegment, LazyInitializer). Concurrent first callers on a new snapshot must share one build instead of each
+// building its own copy: a server that gets a burst of queries right after a publish would otherwise build and allocate
+// the structure once per request. That the structures carry over to the next snapshot after a small change is tested in
+// IndexUpdaterSegmentTests.
 public class SnapshotLazyStructureTests
 {
     private const int Callers = 8;
 
     [Test]
-    public async Task BigramIndex_ConcurrentFirstWithinQueries_BuildItOnce()
+    public async Task Concurrent_first_Within_queries_build_the_bigram_index_once()
     {
         var (provider, engine) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
@@ -25,7 +25,7 @@ public class SnapshotLazyStructureTests
     }
 
     [Test]
-    public async Task SortedPermutation_ConcurrentFirstNaturalSortQueries_BuildItOnce()
+    public async Task Concurrent_first_natural_sort_queries_build_the_permutation_once()
     {
         var (provider, engine) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
@@ -39,7 +39,7 @@ public class SnapshotLazyStructureTests
     }
 
     [Test]
-    public async Task LazyStructures_RepeatedReads_ReturnTheSameInstance()
+    public async Task Later_reads_return_the_structure_already_built()
     {
         var (provider, _) = CreateIndex();
         IndexSnapshot snapshot = provider.Current;
@@ -58,9 +58,9 @@ public class SnapshotLazyStructureTests
         for (int id = 0; id < 30_000; id++)
             entries[id] = $"report-{id * 7919 % 30_000}-ab{id % 97}.pdf";
 
-        var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider, SearchTokenization.FileMask).RebuildFrom(entries);
-        return (provider, new SearchEngineSharp(provider));
+        var (engine, updater, provider) = TestIndex.Create(SearchTokenization.FileMask);
+        updater.RebuildFrom(entries);
+        return (provider, engine);
     }
 
     // Each caller gets its own thread (LongRunning), so all of them reach the barrier even when

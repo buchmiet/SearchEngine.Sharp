@@ -2,11 +2,10 @@ using SearchEngine.Index;
 
 namespace SearchEngine.Sharp.Tests;
 
-/// <summary>
-/// Compares every FastBitSet operation with a bool[] reference over lengths around the word and vector boundaries
-/// and over several densities. Each case runs twice: on a set that owns its words, and on a set that wraps a longer
-/// pooled buffer whose extra words must stay untouched (the shape QueryContext uses).
-/// </summary>
+// FastBitSet (src/Index/FastBitSet.cs) holds the hits of every query, so a wrong bit is a wrong result. Every
+// operation is compared with a bool[] reference over lengths around the word and vector boundaries and over several
+// densities. Each case runs twice: on a set that owns its words, and on a set that wraps a longer pooled buffer whose
+// extra words must stay untouched (the shape QueryContext uses).
 public class FastBitSetDifferentialTests
 {
     private const ulong Sentinel = 0xA5A5_5A5A_DEAD_BEEF;
@@ -37,7 +36,7 @@ public class FastBitSetDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task AddAll_Get_Count_And_Ordinals_MatchTheReference(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task AddAll_Get_Count_and_the_ordinals_match_the_reference(int length, double leftDensity, double rightDensity, bool pooled)
     {
         var expected = RandomBits(length, leftDensity, Seed(length, leftDensity, 1));
         var (bitSet, buffer) = Build(expected, pooled);
@@ -47,22 +46,22 @@ public class FastBitSetDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task IntersectWith_MatchesTheReference(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task IntersectWith_matches_the_reference(int length, double leftDensity, double rightDensity, bool pooled)
         => await CheckBinary(length, leftDensity, rightDensity, pooled, static (a, b) => a & b, static (s, o) => s.IntersectWith(o));
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task UnionWith_MatchesTheReference(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task UnionWith_matches_the_reference(int length, double leftDensity, double rightDensity, bool pooled)
         => await CheckBinary(length, leftDensity, rightDensity, pooled, static (a, b) => a | b, static (s, o) => s.UnionWith(o));
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task ExceptWith_MatchesTheReference(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task ExceptWith_matches_the_reference(int length, double leftDensity, double rightDensity, bool pooled)
         => await CheckBinary(length, leftDensity, rightDensity, pooled, static (a, b) => a & !b, static (s, o) => s.ExceptWith(o));
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task FillAllTrue_SetsExactlyTheFirstLengthBits(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task FillAllTrue_sets_exactly_the_first_length_bits(int length, double leftDensity, double rightDensity, bool pooled)
     {
         var (bitSet, buffer) = Build(RandomBits(length, leftDensity, Seed(length, leftDensity, 2)), pooled);
         bitSet.FillAllTrue();
@@ -72,7 +71,7 @@ public class FastBitSetDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task Clear_RemovesEveryBit(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task Clear_removes_every_bit(int length, double leftDensity, double rightDensity, bool pooled)
     {
         var (bitSet, buffer) = Build(RandomBits(length, leftDensity, Seed(length, leftDensity, 3)), pooled);
         bitSet.Clear();
@@ -82,7 +81,7 @@ public class FastBitSetDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task CopyFrom_ReplacesTheContent(int length, double leftDensity, double rightDensity, bool pooled)
+    public async Task CopyFrom_replaces_the_content(int length, double leftDensity, double rightDensity, bool pooled)
     {
         var (target, buffer) = Build(RandomBits(length, leftDensity, Seed(length, leftDensity, 4)), pooled);
         var source = RandomBits(length, rightDensity, Seed(length, rightDensity, 5));
@@ -98,18 +97,35 @@ public class FastBitSetDifferentialTests
     [Arguments(64)]
     [Arguments(65)]
     [Arguments(4097)]
-    public async Task CreateAllTrue_SetsExactlyTheFirstLengthBits(int length)
+    public async Task CreateAllTrue_sets_exactly_the_first_length_bits(int length)
         => await Assert.That(Describe(FastBitSet.CreateAllTrue(length), Filled(length, true), buffer: null)).IsNull();
 
     [Test]
     [Arguments(1)]
     [Arguments(65)]
     [Arguments(4097)]
-    public async Task CopySetBitOrdinals_RefusesADestinationOneShort(int length)
+    public async Task CopySetBitOrdinals_refuses_a_destination_one_short(int length)
     {
         var bitSet = FastBitSet.CreateAllTrue(length);
 
         await Assert.That(() => bitSet.CopySetBitOrdinals(new int[length - 1])).ThrowsExactly<InvalidOperationException>();
+    }
+
+    // Add sets single bits; the result buffer of a query is usually longer than its hit count.
+    [Test]
+    public async Task CopySetBitOrdinals_fills_a_longer_destination_and_returns_the_count()
+    {
+        var bitSet = new FastBitSet(100);
+        bitSet.Add(0);
+        bitSet.Add(7);
+        bitSet.Add(64);
+        Span<int> buffer = stackalloc int[8];
+
+        int count = bitSet.CopySetBitOrdinals(buffer);
+        int[] ordinals = buffer[..count].ToArray();
+
+        await Assert.That(count).IsEqualTo(3);
+        await Assert.That(ordinals).IsEquivalentTo([0, 7, 64], CollectionOrdering.Matching);
     }
 
     private static async Task CheckBinary(

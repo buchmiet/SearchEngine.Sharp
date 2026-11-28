@@ -1,5 +1,10 @@
 namespace SearchEngine.Sharp.Tests;
 
+// NameMatcher answers for one name what an index holding only that name would answer (src/NameMatcher.cs,
+// docs/api.md): same preset, operators, globs, regex and Unicode options. An application filters names with it, a
+// file watcher event say, without building an index, and must get the result a search would give. Both checks
+// compare it with Find; the regex timeout and the allocation of a matcher that folds nothing are the cases that
+// differ from a plain token loop.
 public class NameMatcherTests
 {
     private static readonly string[] Names = BuildNames();
@@ -45,7 +50,7 @@ public class NameMatcherTests
 
     [Test]
     [MethodDataSource(nameof(Queries))]
-    public async Task IsMatch_AgreesWithFindOnAnIndex_ForBothPresetsAndUnicodeOptions(string query, WordMatchMethod method, bool operators)
+    public async Task IsMatch_agrees_with_Find_on_an_index_for_every_preset_and_Unicode_option(string query, WordMatchMethod method, bool operators)
     {
         SearchTokenization[] presets =
         [
@@ -63,9 +68,9 @@ public class NameMatcherTests
 
         foreach (var preset in presets)
         {
-            var provider = new IndexSnapshotProvider();
-            new IndexUpdater(provider, preset).RebuildFrom(Names.Select((n, i) => (n, i)).ToDictionary(x => x.i, x => x.n));
-            var expected = new SearchEngineSharp(provider).Find(query, method, operators).Order().ToList();
+            var (engine, updater, _) = TestIndex.Create(preset);
+            updater.RebuildFrom(Names.Select((n, i) => (n, i)).ToDictionary(x => x.i, x => x.n));
+            var expected = engine.Find(query, method, operators).Order().ToList();
 
             var matcher = NameMatcher.Create(query, method, operators, preset);
             var actual = Enumerable.Range(0, Names.Length).Where(i => matcher.IsMatch(Names[i])).ToList();
@@ -89,7 +94,7 @@ public class NameMatcherTests
 
     private static readonly string[] ParityQueries =
     [
-        "*", "?", "NOT foo", "foo", "a", "x", "b", "alpha", "alpha beta", "alpha OR gamma", "NOT alpha",
+        "*", "**", "?", "NOT foo", "foo", "a", "x", "b", "alpha", "alpha beta", "alpha OR gamma", "NOT alpha",
         "alpha NOT AND beta", "(AND alpha)", "gamma OR (alpha NOT AND beta)", "()", "(alpha OR gamma) AND NOT beta",
         "rep*", "*.pdf", "*x*", "a*b", "a?b", "notes", "and", "not", "stra\u00DFe", "k", "\u03C3", "\u03C2",
         "\u03BF\u03B4\u03C5\u03C3\u03C3\u03B5\u03C5\u03C3", "\u03BC", "\u03D0", "caf", "\u00E9",
@@ -120,7 +125,7 @@ public class NameMatcherTests
     ];
 
     [Test]
-    public async Task IsMatch_AgreesWithFindOnAOneEntryIndex()
+    public async Task IsMatch_agrees_with_Find_on_a_one_entry_index()
     {
         var mismatches = new List<string>();
         int checkedCount = 0;
@@ -128,9 +133,8 @@ public class NameMatcherTests
         {
             foreach (var text in ParityTexts)
             {
-                var provider = new IndexSnapshotProvider();
-                new IndexUpdater(provider, tokenization).RebuildFrom(new Dictionary<int, string> { [1] = text });
-                var engine = new SearchEngineSharp(provider);
+                var (engine, updater, _) = TestIndex.Create(tokenization);
+                updater.RebuildFrom(new Dictionary<int, string> { [1] = text });
 
                 void Check(string query, WordMatchMethod method, bool operators)
                 {
@@ -164,24 +168,24 @@ public class NameMatcherTests
     }
 
     [Test]
-    public async Task IsMatch_RegexTimeoutOnAnyToken_IsNoMatch_LikeTheIndex()
+    public async Task A_regex_that_times_out_on_any_token_is_no_match_as_on_the_index()
     {
         // The lookahead forces the backtracking engine (1 s timeout). "b" matches at once; the second token makes
         // the nested quantifier backtrack exponentially and time out. The index then returns nothing for the
         // whole query, so the matcher must not report the earlier hit.
         const string pattern = "(?=b)|^(a+)+$";
         string text = "b " + new string('a', 40) + "!";
-        var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(new Dictionary<int, string> { [1] = text });
+        var (engine, updater, _) = TestIndex.Create();
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = text });
 
-        await Assert.That(new SearchEngineSharp(provider).Find(pattern, WordMatchMethod.Regex)).IsEmpty();
+        await Assert.That(engine.Find(pattern, WordMatchMethod.Regex)).IsEmpty();
         await Assert.That(NameMatcher.Create(pattern, WordMatchMethod.Regex).IsMatch(text)).IsFalse();
     }
 
     // GraphemeBoundaries alone folds nothing, so a non-ASCII text is matched without a folded copy.
     [Test]
     [SkipUnlessOptimized]
-    public async Task IsMatch_WithGraphemeBoundariesOnly_DoesNotCopyTheText()
+    public async Task IsMatch_with_GraphemeBoundaries_only_does_not_copy_the_text()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
         var matcher = NameMatcher.Create("caf*", WordMatchMethod.Exact, tokenization: tokenization);

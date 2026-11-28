@@ -2,6 +2,15 @@ using System.Globalization;
 
 namespace SearchEngine.Sharp.Tests;
 
+// The UnicodeMatching options of a preset (src/UnicodeMatching.cs, TextFolder) fold indexed text and every query term
+// the same way, so a name is found however its text was typed or stored: Compose matches NFC and NFD, CaseFold folds
+// what lowercasing keeps apart (ss, final sigma), RemoveDiacritics strips Latin, Greek and Cyrillic accents only, and
+// GraphemeBoundaries keeps Within and glob matches from splitting a grapheme cluster. Lowercasing itself follows the
+// Unicode 17 tables in every mode (U+0130 to i). Folding never throws on ill-formed text or noncharacters, a regex
+// pattern gets the casing of the index but is never normalized, and the normalizing options throw instead of doing
+// nothing in globalization-invariant mode. Each check also asks NameMatcher, which must agree with the index for the
+// same preset.
+//
 // Decomposed (NFD) strings are written with explicit escapes: a helper that calls string.Normalize would return its
 // input unchanged under globalization-invariant mode and make the tests vacuous there.
 public class UnicodeMatchingTests
@@ -12,20 +21,20 @@ public class UnicodeMatchingTests
     private const string Woman = "\uD83D\uDC69";
     private const string Family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67";
 
+    // Indexes the names under ids 1, 2, 3 and so on.
     private static SearchEngineSharp Index(SearchTokenization tokenization, params string[] names)
     {
-        var provider = new IndexSnapshotProvider();
-        var updater = new IndexUpdater(provider, tokenization);
+        var (engine, updater, _) = TestIndex.Create(tokenization);
         var entries = new Dictionary<int, string>();
         for (int i = 0; i < names.Length; i++) entries[i + 1] = names[i];
         updater.RebuildFrom(entries);
-        return new SearchEngineSharp(provider);
+        return engine;
     }
 
     [Test]
     [Arguments("\u0130stanbul.txt", "istanbul*")]
     [Arguments("ISTANBUL.txt", "\u0130stanbul*")]
-    public async Task Default_DottedCapitalILowercasesToI(string name, string query)
+    public async Task Dotted_capital_I_lowercases_to_i(string name, string query)
     {
         // UnicodeData.txt lowercases U+0130 to i; char.ToLowerInvariant kept U+0130.
         var engine = Index(SearchTokenization.FileMask, name);
@@ -34,7 +43,7 @@ public class UnicodeMatchingTests
     }
 
     [Test]
-    public async Task Default_DecomposedNameIsNotFoundByComposedQuery()
+    public async Task Without_Compose_a_decomposed_name_is_not_found_by_a_composed_query()
     {
         var engine = Index(SearchTokenization.FileMask, ZazolcNfd + ".txt");
 
@@ -45,7 +54,7 @@ public class UnicodeMatchingTests
     [SkipUnlessNormalization]
     [Arguments(true)]
     [Arguments(false)]
-    public async Task Compose_MatchesAcrossNfcAndNfd(bool nameDecomposed)
+    public async Task Compose_matches_across_NFC_and_NFD(bool nameDecomposed)
     {
         string name = (nameDecomposed ? ZazolcNfd : ZazolcNfc) + ".txt";
         string query = (nameDecomposed ? ZazolcNfc : ZazolcNfd) + "*";
@@ -63,7 +72,7 @@ public class UnicodeMatchingTests
     [Arguments(UnicodeMatching.Compose)]
     [Arguments(UnicodeMatching.RemoveDiacritics)]
     [Arguments(UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.GraphemeBoundaries)]
-    public async Task NormalizingOptions_WorkWithICU_AndThrowInInvariantGlobalizationMode(UnicodeMatching options)
+    public async Task Normalizing_options_work_with_ICU_and_throw_in_invariant_globalization_mode(UnicodeMatching options)
     {
         if (IsInvariantGlobalizationMode())
         {
@@ -78,7 +87,7 @@ public class UnicodeMatchingTests
     [Test]
     [Arguments(UnicodeMatching.CaseFold)]
     [Arguments(UnicodeMatching.GraphemeBoundaries)]
-    public async Task OptionsWithoutNormalization_WorkInEveryGlobalizationMode(UnicodeMatching options)
+    public async Task Options_without_normalization_work_in_every_globalization_mode(UnicodeMatching options)
     {
         var engine = Index(SearchTokenization.Default.WithUnicodeMatching(options), "Stra\u00DFe", "cafe\u0301");
         int[] strasse = options == UnicodeMatching.CaseFold ? [1] : [];
@@ -115,7 +124,7 @@ public class UnicodeMatchingTests
     [Arguments("\uD83A\uDD00.txt", "\uD83A\uDD22*")]
     [Arguments("\uFB13.txt", "\u0574\u0576*")]
     [Arguments("\u0149.txt", "\u02BCn*")]
-    public async Task CaseFold_FoldsCharactersThatLowercaseDoesNot(string name, string query)
+    public async Task CaseFold_folds_characters_that_lowercasing_keeps_apart(string name, string query)
     {
         var plain = Index(SearchTokenization.FileMask, name);
         var folded = Index(SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold), name);
@@ -131,7 +140,7 @@ public class UnicodeMatchingTests
     [Arguments("cafe\u0301 cre\u0300me.txt", "creme")]
     [Arguments("caf\u00E9 cr\u00E8me.txt", "cafe")]
     [Arguments("\u00C6r\u00F8 \u00D8resund.txt", "oresund")]
-    public async Task RemoveDiacritics_MatchesUnaccentedQuery_DefaultPreset(string name, string query)
+    public async Task RemoveDiacritics_lets_an_unaccented_query_find_an_accented_name(string name, string query)
     {
         var engine = Index(SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics), name);
 
@@ -145,7 +154,7 @@ public class UnicodeMatchingTests
     [Arguments("\u0395\u03BB\u03BB\u03AC\u03B4\u03B1", "\u03B5\u03BB\u03BB\u03B1\u03B4\u03B1")]
     [Arguments("\u0419\u043E\u0434", "\u0438\u043E\u0434")]
     [Arguments("\u1F84\u03C1\u03B1", "\u03B1\u03C1\u03B1")]
-    public async Task RemoveDiacritics_StripsLatinGreekAndCyrillicAccents(string name, string query)
+    public async Task RemoveDiacritics_strips_Latin_Greek_and_Cyrillic_accents(string name, string query)
     {
         var engine = Index(SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics), name);
 
@@ -161,7 +170,7 @@ public class UnicodeMatchingTests
     [Arguments("\u304C\u3063\u3053\u3046", "\u304B\u3099\u3063\u3053\u3046", "\u304B\u3063\u3053\u3046")]
     [Arguments("\u0E02\u0E48\u0E32\u0E27", "\u0E02\u0E48\u0E32\u0E27", "\u0E02\u0E32\u0E27")]
     [Arguments("\u0915\u0941\u0932", "\u0915\u0941\u0932", "\u0915\u0932")]
-    public async Task RemoveDiacritics_KeepsMarksOfOtherScripts(string marked, string markedDecomposed, string bare)
+    public async Task RemoveDiacritics_keeps_the_marks_of_other_scripts(string marked, string markedDecomposed, string bare)
     {
         var engine = Index(SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics), marked, bare);
 
@@ -172,7 +181,7 @@ public class UnicodeMatchingTests
 
     [Test]
     [SkipUnlessNormalization]
-    public async Task RemoveDiacritics_StripsOnlyNonSpacingMarksOfTheCombiningDiacriticalMarkBlocks()
+    public async Task RemoveDiacritics_strips_only_the_nonspacing_marks_of_the_combining_diacritical_mark_blocks()
     {
         // U+0301 (Combining Diacritical Marks), U+1AB0 (Extended), U+1DC4 (Supplement) and U+FE20 (Half Marks) go;
         // U+1ABE is an enclosing mark, U+20D7 and the keycap U+20E3 are marks for symbols, U+05B8 is a Hebrew point
@@ -184,7 +193,7 @@ public class UnicodeMatchingTests
     // Where a glob wildcard meets literal text, the name must have a grapheme cluster boundary, as at both ends of a
     // Within match: cafe* does not match a decomposed café, one emoji followed by * does not match a ZWJ family.
     [Test]
-    public async Task GraphemeBoundaries_GlobWildcardsDoNotSplitAGraphemeCluster()
+    public async Task GraphemeBoundaries_glob_wildcards_do_not_split_a_grapheme_cluster()
     {
         var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
         string[] names = ["cafe\u0301", "cafe", Family, Man + " solo", "cafe\u0301s"];
@@ -210,7 +219,7 @@ public class UnicodeMatchingTests
     }
 
     [Test]
-    public async Task GraphemeBoundaries_FileMaskPrefixQueryDoesNotSplitAGraphemeCluster()
+    public async Task GraphemeBoundaries_a_FileMask_prefix_query_does_not_split_a_grapheme_cluster()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.GraphemeBoundaries);
         string[] names = ["cafe\u0301.txt", "cafe.txt", "Cafe\u0301 Noir.txt"];
@@ -223,7 +232,7 @@ public class UnicodeMatchingTests
     }
 
     [Test]
-    public async Task GraphemeBoundaries_WithinDoesNotMatchInsideAGraphemeCluster()
+    public async Task GraphemeBoundaries_Within_does_not_match_inside_a_grapheme_cluster()
     {
         string[] names = ["cafe\u0301", Family, Man + " solo", "cafe"];
         var plain = Index(SearchTokenization.Default, names);
@@ -242,7 +251,7 @@ public class UnicodeMatchingTests
     [Arguments(UnicodeMatching.Compose)]
     [Arguments(UnicodeMatching.RemoveDiacritics)]
     [Arguments(UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.GraphemeBoundaries)]
-    public async Task IllFormedText_IsIndexedAndMatchesItself(UnicodeMatching options)
+    public async Task Ill_formed_text_is_indexed_and_matches_itself(UnicodeMatching options)
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(options);
         string[] names = ["ok.txt", "report\uD800.txt", "\uDC00cafe\u0301.txt", "a\uFFFEb.txt", "zdj\uD83D\uDE00.jpg"];
@@ -264,7 +273,7 @@ public class UnicodeMatchingTests
 
     [Test]
     [SkipUnlessNormalization]
-    public async Task IllFormedText_FoldsTheWellFormedRunsAndKeepsTheRest()
+    public async Task Folding_ill_formed_text_folds_the_well_formed_runs_and_keeps_the_rest()
     {
         const UnicodeMatching all = UnicodeMatching.Compose | UnicodeMatching.CaseFold | UnicodeMatching.RemoveDiacritics;
 
@@ -279,7 +288,7 @@ public class UnicodeMatchingTests
     [SkipUnlessNormalization]
     [Arguments(UnicodeMatching.Compose | UnicodeMatching.CaseFold)]
     [Arguments(UnicodeMatching.RemoveDiacritics)]
-    public async Task Noncharacters_AreKeptAndTheTextAroundThemIsFolded(UnicodeMatching options)
+    public async Task Noncharacters_are_kept_and_the_text_around_them_is_folded(UnicodeMatching options)
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(options);
         string[] names = ["Cafe\u0301\uFFFF.txt", "x\uFDD0e\u0301", "\uFDEF\uD83F\uDFFFe\u0301\uDBFF\uDFFE", "other"];
@@ -301,7 +310,7 @@ public class UnicodeMatchingTests
     // composed to [é], [b-å] stripped to the invalid range [b-a]). Only its casing follows the index.
     [Test]
     [SkipUnlessNormalization]
-    public async Task RegexPattern_IsNotNormalized_Compose()
+    public async Task RegexPattern_is_not_normalized_under_Compose()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.Compose | UnicodeMatching.CaseFold);
         string[] names = ["e.txt", "Re\u0301sume\u0301.pdf", "Stra\u00DFe.pdf"];
@@ -316,7 +325,7 @@ public class UnicodeMatchingTests
 
     [Test]
     [SkipUnlessNormalization]
-    public async Task RegexPattern_IsNotNormalized_RemoveDiacritics()
+    public async Task RegexPattern_is_not_normalized_under_RemoveDiacritics()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics);
         string[] names = ["report.pdf", "\u00E9cole.txt", "\u00C5l.txt", "bar"];
@@ -331,7 +340,7 @@ public class UnicodeMatchingTests
     // runs case-sensitively: the casing of .NET (RegexOptions.IgnoreCase) would keep U+0130 apart from the i the index
     // holds, and would not fold the pattern under CaseFold.
     [Test]
-    public async Task RegexPattern_HasTheCasingOfTheIndex_Default()
+    public async Task RegexPattern_gets_the_casing_of_the_index()
     {
         var tokenization = SearchTokenization.Default;
         string[] names = ["\u0130stanbul.txt", "Report.pdf"];
@@ -345,7 +354,7 @@ public class UnicodeMatchingTests
     }
 
     [Test]
-    public async Task RegexPattern_HasTheCasingOfTheIndex_CaseFold()
+    public async Task RegexPattern_gets_the_case_folding_of_the_index_under_CaseFold()
     {
         var tokenization = SearchTokenization.FileMask.WithUnicodeMatching(UnicodeMatching.CaseFold);
         string[] names = ["Stra\u00DFe.pdf", "\u03A3\u0391\u03A3.txt", "\uFB03x.txt", "\u017Fun.txt"];
@@ -364,7 +373,7 @@ public class UnicodeMatchingTests
     // a term.
     [Test]
     [SkipUnlessNormalization]
-    public async Task RemoveDiacritics_WordsThatFoldToOperatorsStayTerms()
+    public async Task RemoveDiacritics_words_that_fold_to_operators_stay_terms()
     {
         var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.RemoveDiacritics);
         string[] names = ["n\u00F6t", "\u00E5nd", "\u0151r", "other", "recept", "n\u00F6t recept"];
@@ -384,7 +393,7 @@ public class UnicodeMatchingTests
     // canonically ';') splits into terms the same way the folded index text splits into tokens.
     [Test]
     [SkipUnlessNormalization]
-    public async Task Compose_TermThatFoldsToASeparatorSplitsLikeTheIndexText()
+    public async Task Compose_a_term_that_folds_to_a_separator_splits_like_the_index_text()
     {
         var tokenization = SearchTokenization.Default.WithUnicodeMatching(UnicodeMatching.Compose);
         string[] names = ["alpha\u037Ebeta", "alpha gamma"];
@@ -404,7 +413,7 @@ public class UnicodeMatchingTests
     [Arguments("J\u030CAN", "j\u030Can")]
     [Arguments("J\u030CAN", "\u01F0an")]
     [Arguments("sala\u1E97", "SALAT\u0308")]
-    public async Task Compose_NameMatchesItsLowercaseAndComposedForms(string name, string query)
+    public async Task Compose_a_name_matches_its_lowercase_and_composed_forms(string name, string query)
     {
         foreach (var options in new[] { UnicodeMatching.Compose, UnicodeMatching.Compose | UnicodeMatching.CaseFold })
         {
@@ -422,7 +431,7 @@ public class UnicodeMatchingTests
     // token with U+2260 NOT EQUAL TO, on both sides.
     [Test]
     [SkipUnlessNormalization]
-    public async Task Compose_ASeparatorFollowedByACombiningMarkSplitsTextAndQueryAlike()
+    public async Task Compose_a_separator_followed_by_a_combining_mark_splits_text_and_query_alike()
     {
         var tokenization = SearchTokenization.Create(" =", " =").WithUnicodeMatching(UnicodeMatching.Compose);
         string[] names = ["x=\u0338y", "x\u2260y", "other"];
@@ -441,7 +450,7 @@ public class UnicodeMatchingTests
     // mark of a lower combining class follows (U+0130 + U+0323 composes to U+1ECA + U+0307).
     [Test]
     [SkipUnlessNormalization]
-    public async Task GeneratedNames_AreFoundByThemselvesAndTheirLowercaseForm()
+    public async Task Generated_names_are_found_by_themselves_and_their_lowercase_form()
     {
         string[] pool =
         [

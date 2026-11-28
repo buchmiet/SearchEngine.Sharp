@@ -2,6 +2,10 @@ using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
 
+// SyntheticPathFeed is public so applications and benchmarks can generate a reproducible scan
+// (src/Ingestion/SyntheticPathFeed.cs). Its arguments are checked like those of the rest of the public API: a
+// negative count throws at the call, naming count, and zero yields nothing. What it generates is used, and so
+// checked, by ProgressiveIndexIngestionTests.
 public class SyntheticPathFeedTests
 {
     [Test]

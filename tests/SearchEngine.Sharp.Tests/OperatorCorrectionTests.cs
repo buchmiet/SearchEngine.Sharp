@@ -1,16 +1,15 @@
 namespace SearchEngine.Sharp.Tests;
 
-/// <summary>
-/// Malformed operator sequences are corrected, not rejected (docs/query-semantics.md, query parsing rule 5).
-/// Expected ids follow from the documented rules, applied at the start and end of the expression and of every
-/// parenthesised group: leading AND/OR and trailing operators are dropped, NOT NOT counts as one NOT, any other
-/// pair of adjacent operators (other than a binary operator followed by NOT) collapses to AND, and an empty group
-/// is dropped.
-/// </summary>
+// Malformed operator sequences are corrected, not rejected (docs/query-semantics.md, query parsing rule 5), so a user
+// typing a query live never gets an exception or an empty result for a half-typed expression. Expected ids follow from
+// the documented rules, applied at the start and end of the expression and of every parenthesized group: leading AND/OR
+// and trailing operators are dropped, NOT NOT counts as one NOT, any other pair of adjacent operators (other than a
+// binary operator followed by NOT) collapses to AND, and an empty group is dropped. The correction is in
+// QueryExpressionEvaluator. A leading NOT AND or NOT OR is corrected like the rest and must not throw.
 public class OperatorCorrectionTests
 {
     // 1: alpha beta, 2: alpha, 3: beta, 4: gamma
-    internal static readonly Dictionary<int, string> Documents = new()
+    private static readonly Dictionary<int, string> Documents = new()
     {
         [1] = "alpha beta",
         [2] = "alpha",
@@ -40,6 +39,7 @@ public class OperatorCorrectionTests
         () => ("OR alpha", [1, 2]),
         () => ("NOT AND alpha", [1, 2]),
         () => ("NOT OR alpha", [1, 2]),
+        () => ("NOT AND NOT OR alpha", [1, 2]),
         () => ("AND NOT alpha", [3, 4]),
         () => ("NOT NOT alpha", [3, 4]),
         () => ("NOT NOT NOT alpha", [3, 4]),
@@ -95,11 +95,10 @@ public class OperatorCorrectionTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task MalformedOperatorSequence_IsCorrected(string expression, int[] expected)
+    public async Task A_malformed_operator_sequence_is_corrected_by_the_documented_rules(string expression, int[] expected)
     {
-        var provider = new IndexSnapshotProvider();
-        new IndexUpdater(provider).RebuildFrom(Documents);
-        var engine = new SearchEngineSharp(provider);
+        var (engine, updater, _) = TestIndex.Create();
+        updater.RebuildFrom(Documents);
 
         foreach (var method in new[] { WordMatchMethod.Exact, WordMatchMethod.Within })
         {
@@ -125,7 +124,7 @@ public class OperatorCorrectionTests
 
     [Test]
     [MethodDataSource(nameof(OneParenthesisCases))]
-    public async Task OneParenthesisAsQuerySeparator_IsAPlainSeparator(string querySeparators, string expression, int[] expected)
+    public async Task A_lone_parenthesis_that_is_a_query_separator_splits_like_a_space(string querySeparators, string expression, int[] expected)
     {
         var tokenization = SearchTokenization.Create(" ", querySeparators);
         var documents = new Dictionary<int, string> { [1] = "(a b", [2] = "a b)", [3] = "zzz", [4] = "b)" };
@@ -141,5 +140,17 @@ public class OperatorCorrectionTests
             int[] matched = [.. documents.Where(d => matcher.IsMatch(d.Value)).Select(d => d.Key).Order()];
             await Assert.That(matched).IsEquivalentTo(expected, CollectionOrdering.Matching);
         }
+    }
+
+    // The FileMask preset parses a glob term after the corrected operators.
+    [Test]
+    public async Task A_leading_NOT_AND_is_corrected_under_the_FileMask_preset()
+    {
+        var (engine, updater, _) = TestIndex.Create(SearchTokenization.FileMask);
+        updater.RebuildFrom(new Dictionary<int, string> { [1] = "report.pdf", [2] = "notes.txt" });
+
+        var results = engine.Find("NOT AND *.pdf", WordMatchMethod.Exact, enableOperators: true);
+
+        await Assert.That(results).IsEquivalentTo([1], CollectionOrdering.Matching);
     }
 }

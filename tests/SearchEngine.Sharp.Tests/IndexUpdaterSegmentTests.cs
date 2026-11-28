@@ -4,8 +4,8 @@ using SearchEngine.Snapshots;
 
 namespace SearchEngine.Sharp.Tests;
 
-// How IndexUpdater lays out the snapshots it publishes: a small change keeps the base of the previous snapshot, and
-// the base is rebuilt (a merge) once the delta and the dead ordinals pass IndexUpdater.MergeThreshold. The answers
+// How IndexUpdater lays out the snapshots it publishes: a small change keeps the base of the previous snapshot, and the
+// base is merged into a new one once the delta and the dead ordinals pass IndexUpdater.MergeThreshold. The answers
 // themselves are checked against full builds by IndexUpdaterDifferentialTests.
 public class IndexUpdaterSegmentTests
 {

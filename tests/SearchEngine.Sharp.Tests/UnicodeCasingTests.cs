@@ -1,8 +1,9 @@
 namespace SearchEngine.Sharp.Tests;
 
-/// <summary>
-/// The generated Unicode 17.0.0 casing tables that lowercasing and CaseFold use instead of the casing of the platform.
-/// </summary>
+// The generated Unicode 17.0.0 casing tables (src/Tokenizer/UnicodeCasing.g.cs) that lowercasing and CaseFold use
+// instead of the casing of the platform, so an index built on Windows NLS, ICU or in globalization-invariant mode
+// holds the same tokens. The counts pin the table to one Unicode version; lowercasing works per UTF-16 code unit,
+// so no letter of the basic plane may lowercase outside it.
 public sealed class UnicodeCasingTests
 {
     [Test]
@@ -20,7 +21,7 @@ public sealed class UnicodeCasingTests
     [Arguments(0x00DF, 0x00DF)] // sharp s has only a full folding (ss)
     [Arguments(-1, -1)]
     [Arguments(0x110000, 0x110000)]
-    public async Task Fold_ReturnsSimpleCaseFolding(int codePoint, int expected)
+    public async Task Fold_returns_the_simple_case_folding(int codePoint, int expected)
     {
         await Assert.That(UnicodeCasing.Fold(codePoint)).IsEqualTo(expected);
     }
@@ -37,7 +38,7 @@ public sealed class UnicodeCasingTests
     [Arguments(0x1E900, 0x1E922)] // Adlam capital alif -> small alif
     [Arguments(-1, -1)]
     [Arguments(0x110000, 0x110000)]
-    public async Task ToLower_ReturnsSimpleLowercaseMapping(int codePoint, int expected)
+    public async Task ToLower_returns_the_simple_lowercase_mapping(int codePoint, int expected)
     {
         await Assert.That(UnicodeCasing.ToLower(codePoint)).IsEqualTo(expected);
     }
@@ -52,7 +53,7 @@ public sealed class UnicodeCasingTests
     [Arguments(0x0041, new[] { 0x61 })] // status C
     [Arguments(0x0061, new[] { 0x61 })] // no folding
     [Arguments(0x110000, new[] { 0x110000 })]
-    public async Task FullFold_ReturnsFullCaseFolding(int codePoint, int[] expected)
+    public async Task FullFold_returns_the_full_case_folding(int codePoint, int[] expected)
     {
         await Assert.That(FullFold(codePoint)).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
@@ -64,7 +65,7 @@ public sealed class UnicodeCasingTests
     }
 
     [Test]
-    public async Task Tables_HoldEveryMappingOfUnicode17()
+    public async Task The_tables_hold_every_mapping_of_Unicode_17()
     {
         int folding = 0, full = 0, lowercase = 0;
         for (var codePoint = 0; codePoint <= 0x10FFFF; codePoint++)
@@ -83,7 +84,7 @@ public sealed class UnicodeCasingTests
     }
 
     [Test]
-    public async Task ToLowerInvariantFast_StaysInTheBasicPlane()
+    public async Task ToLowerInvariantFast_stays_in_the_basic_plane()
     {
         // Lowercase works per UTF-16 code unit, so a BMP letter must lowercase to a BMP letter.
         var leaves = new List<int>();

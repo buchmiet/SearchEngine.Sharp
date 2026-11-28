@@ -3,10 +3,10 @@ using SearchEngine.Query;
 
 namespace SearchEngine.Sharp.Tests;
 
-/// <summary>
-/// A regex pattern gets the casing of indexed tokens from the Unicode tables (lowercase, and case folding under CaseFold):
-/// only the characters that stand for themselves change, never the syntax around them.
-/// </summary>
+// A regex pattern gets the casing of indexed tokens from the Unicode tables (lowercase, and case folding under
+// CaseFold) before it runs case-sensitively (src/Query/RegexCaseFolding.cs, docs/query-semantics.md, Regular
+// expressions): only the characters that stand for themselves change, never the syntax around them, so a valid
+// pattern stays valid and means the same, and an invalid one stays invalid and matches nothing.
 public sealed class RegexCaseFoldingTests
 {
     [Test]
@@ -29,7 +29,7 @@ public sealed class RegexCaseFoldingTests
     [Arguments("σΣς", true, "σσσ")]
     [Arguments(@"ﬃ", true, @"(?:ffi)")]
     [Arguments("ſ", true, "s")]
-    public async Task Apply_FoldsLiteralCharactersOnly(string pattern, bool caseFold, string expected)
+    public async Task Apply_changes_only_the_characters_that_stand_for_themselves(string pattern, bool caseFold, string expected)
     {
         string folded = RegexCaseFolding.Apply(pattern, caseFold);
 
@@ -42,7 +42,7 @@ public sealed class RegexCaseFoldingTests
     [Arguments("[Abc")]
     [Arguments(@"[Z-A]")]
     [Arguments("ABC\\")]
-    public async Task Apply_LeavesAnInvalidPatternInvalid(string pattern)
+    public async Task Apply_leaves_an_invalid_pattern_invalid(string pattern)
     {
         string folded = RegexCaseFolding.Apply(pattern, caseFold: true);
 

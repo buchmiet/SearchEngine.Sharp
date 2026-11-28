@@ -2,6 +2,10 @@ using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
 
+// The publish settings check each value when it is set, in the init accessor, and throw an exception naming the
+// property (src/Ingestion/IngestPublishPolicy.cs, IngestPublishOptions.cs), so a bad setting fails where it is written
+// and not later inside a running ingestion; a `with` copy is checked the same way. The defaults are the ones the
+// documentation promises.
 public class IngestPublishPolicyTests
 {
     [Test]
@@ -12,13 +16,13 @@ public class IngestPublishPolicyTests
     [Arguments(-1.0)]
     [Arguments(1_000.001)]
     [Arguments(double.MaxValue)]
-    public async Task Adaptive_PublishMultiplier_RejectsValuesOutsideZeroToTheLimit(double multiplier)
+    public async Task PublishMultiplier_rejects_values_outside_zero_to_the_limit(double multiplier)
     {
         await AssertOutOfRange("PublishMultiplier", () => _ = new IngestPublishPolicy.Adaptive { PublishMultiplier = multiplier });
     }
 
     [Test]
-    public async Task Adaptive_PublishMultiplier_AcceptsTheLimit()
+    public async Task PublishMultiplier_accepts_the_limit()
     {
         var policy = new IngestPublishPolicy.Adaptive { PublishMultiplier = IngestPublishPolicy.Adaptive.MaxPublishMultiplier };
 
@@ -26,7 +30,7 @@ public class IngestPublishPolicyTests
     }
 
     [Test]
-    public async Task EverySetting_IsCheckedWhenItIsSet()
+    public async Task Every_setting_is_checked_when_it_is_set()
     {
         await AssertOutOfRange("BatchCap", () => _ = new IngestPublishPolicy.Adaptive { BatchCap = 0 });
         await AssertOutOfRange("MinTimerPublishBatch", () => _ = new IngestPublishPolicy.Adaptive { MinTimerPublishBatch = 0 });
@@ -43,7 +47,7 @@ public class IngestPublishPolicyTests
     }
 
     [Test]
-    public async Task With_ChecksTheNewValueAndKeepsTheOthers()
+    public async Task A_with_copy_checks_the_new_value_and_keeps_the_others()
     {
         var policy = new IngestPublishPolicy.Adaptive { BatchCap = 500, StrictMaxStaleness = true };
 
@@ -57,7 +61,7 @@ public class IngestPublishPolicyTests
     }
 
     [Test]
-    public async Task Defaults_AreTheDocumentedOnes()
+    public async Task The_defaults_are_the_documented_ones()
     {
         var options = new IngestPublishOptions();
         var adaptive = (IngestPublishPolicy.Adaptive)options.Policy;

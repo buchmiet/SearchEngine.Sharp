@@ -6,7 +6,12 @@ using SearchEngine.Sorting;
 
 namespace SearchEngine.Sharp.Tests;
 
-// Entries with equal natural sort keys come in ascending id order on every materialization path.
+// Entries with equal natural sort keys come in ascending id order (SearchSortMode.NaturalSortAscending), so the same
+// query on the same entries always returns the same order, whichever way ResultMaterializer sorts: sort-K over the
+// hits, the cached sort permutation of the base, a filter-only or text-and-filter query, or the permutation with the
+// delta documents of an IndexUpdater snapshot placed into it (IndexSnapshot.DeltaOrder). The tie rule is what makes
+// the paths interchangeable, so the tests of which path a query takes (SelectivityThresholds.UseSortKPath) are here
+// too: a cheap query must not build the permutation, a built one must replace sorting large hit sets.
 public class NaturalSortTieBreakTests
 {
     private const int DocumentCount = 200;
@@ -163,16 +168,86 @@ public class NaturalSortTieBreakTests
         await Assert.That(warmResults).IsEquivalentTo(coldResults, CollectionOrdering.Matching);
     }
 
+    // Delta documents of an IndexUpdater snapshot are placed into the built permutation of the base. Half the sort
+    // texts are longer than NaturalSortKeyBuilder builds on the stack (341 characters), and base and delta documents
+    // share keys in forms that compare equal, so the placement breaks those ties by id.
     [Test]
-    public async Task Few_hits_on_a_cold_snapshot_do_not_build_the_permutation()
+    public async Task Delta_documents_take_their_place_in_the_base_permutation()
+    {
+        string longText = new('x', 400);
+        IndexedEntry Entry(int id) => new("all", (id % 4) switch
+        {
+            0 => $"Item {id % 13}",
+            1 => $"item_0{id % 13}",
+            2 => $"{longText} {id % 7}",
+            _ => $"{longText.ToUpperInvariant()}-0{id % 7}",
+        });
+
+        var (engine, updater, provider) = TestIndex.Create();
+        var entries = new Dictionary<int, IndexedEntry>();
+        for (int id = 2; id <= 400; id += 2)
+            entries[id] = Entry(id);
+        updater.RebuildFrom(entries);
+        _ = provider.Current.Base.GetSortedPermutation();
+
+        // New odd ids fall between base ids of equal keys; replaced even ids leave a dead base document behind.
+        var changes = new Dictionary<int, IndexedEntry>();
+        for (int id = 1; id <= 401; id += 6)
+            changes[id] = Entry(id);
+        for (int id = 4; id <= 400; id += 20)
+            changes[id] = Entry(id + 1);
+        updater.AddOrUpdateEntries(changes);
+        foreach (var (id, entry) in changes)
+            entries[id] = entry;
+
+        var snapshot = provider.Current;
+        await Assert.That(snapshot.Delta).IsNotNull();
+        await Assert.That(snapshot.DeadOrdinals.Length).IsGreaterThan(0);
+
+        var results = engine.Find("all", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
+
+        var expected = entries
+            .OrderBy(entry => NaturalSortKeyBuilder.Build(entry.Value.SortText), StringComparer.Ordinal)
+            .ThenBy(entry => entry.Key)
+            .Select(entry => entry.Key)
+            .ToList();
+        await Assert.That(ResultMaterializer.UsesSortKPath(snapshot, results.Count)).IsFalse();
+        await Assert.That(results).IsEquivalentTo(expected, CollectionOrdering.Matching);
+    }
+
+    // A text query and a filter-only query with 10% of the documents as hits; the filter-only query takes its own path
+    // through SearchEngineSharp but must choose its sort strategy the same way.
+    [Test]
+    [Arguments("p10", false)]
+    [Arguments("", true)]
+    public async Task Few_hits_on_a_cold_snapshot_do_not_build_the_permutation(string query, bool filterOnly)
     {
         var snapshot = BuildStrategySnapshot();
         var engine = new SearchEngineSharp(new FixedSnapshotProvider(snapshot));
+        FacetFilter? filter = filterOnly ? FacetFilter.Range("n", 1, StrategyDocumentCount / 10) : null;
 
-        _ = engine.Find("p10", WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending);
+        var results = engine.Find(query, WordMatchMethod.Exact, false, SearchSortMode.NaturalSortAscending, filter);
 
+        var expected = Expected(snapshot, filterOnly ? id => id <= StrategyDocumentCount / 10 : id => id % 10 == 0);
+        await Assert.That(results).IsEquivalentTo(expected, CollectionOrdering.Matching);
         await Assert.That(snapshot.Base.IsSortedPermutationBuilt).IsFalse();
         await Assert.That(snapshot.Base.SortedPermutationBuildCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task No_hits_return_nothing_without_building_the_permutation()
+    {
+        var (engine, updater, provider) = TestIndex.Create();
+        updater.RebuildFrom(new Dictionary<int, IndexedEntry>
+        {
+            [1] = new("alpha", "alpha"),
+            [2] = new("beta", "beta"),
+        });
+
+        var results = engine.Find("zzzznotfound", WordMatchMethod.Within, enableOperators: true, SearchSortMode.NaturalSortAscending);
+
+        await Assert.That(results).IsEmpty();
+        await Assert.That(provider.Current.Base.IsSortedPermutationBuilt).IsFalse();
     }
 
     [Test]

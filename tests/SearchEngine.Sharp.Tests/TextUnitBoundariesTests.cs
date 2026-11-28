@@ -2,8 +2,9 @@ using System.Globalization;
 
 namespace SearchEngine.Sharp.Tests;
 
-// TextUnitBoundaries walks a word once for its grapheme clusters and answers every boundary test from that walk. It must answer exactly like
-// the implementation it replaced, which walked the word from its start for every test (kept below as the reference).
+// TextUnitBoundaries (src/UnicodeMatching.cs) walks a token once for its grapheme clusters and answers every
+// boundary test from that walk; GraphemeBoundaries matching for Within and globs relies on it. It must answer exactly
+// like the reference below, which walks the token from its start with StringInfo for every test.
 public class TextUnitBoundariesTests
 {
     private static readonly string[] Pool =
@@ -55,7 +56,7 @@ public class TextUnitBoundariesTests
     [Test]
     [Arguments(2_000, 12)]
     [Arguments(60, 400)]
-    public async Task IsBoundary_AnswersLikeTheWalkFromTheStart(int count, int maxParts)
+    public async Task IsBoundary_answers_like_the_walk_from_the_start(int count, int maxParts)
     {
         var mismatches = new List<string>();
         foreach (string word in GenerateWords(count, maxParts, seed: count))
@@ -91,7 +92,7 @@ public class TextUnitBoundariesTests
     }
 
     [Test]
-    public async Task IndexOf_WithClusters_FindsTheSameOccurrenceAsTheWalkFromTheStart()
+    public async Task IndexOf_with_clusters_finds_the_same_occurrence_as_the_walk_from_the_start()
     {
         var random = new Random(11);
         var mismatches = new List<string>();

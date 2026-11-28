@@ -55,7 +55,7 @@ public class IndexUpdaterDifferentialTests
 
     [Test]
     [MethodDataSource(nameof(Cases))]
-    public async Task EveryPublishedSnapshot_AnswersLikeAFullBuild(string presetName, int seed)
+    public async Task Every_published_snapshot_answers_like_a_full_build(string presetName, int seed)
     {
         var tokenization = Preset(presetName);
         var random = new Random(seed);

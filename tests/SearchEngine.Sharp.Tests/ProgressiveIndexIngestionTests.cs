@@ -5,10 +5,16 @@ using SearchEngine.Ingestion;
 
 namespace SearchEngine.Sharp.Tests;
 
-// Several tests here measure wall-clock time: gaps between publishes, cancellation after a fixed delay, and the
-// rebuild time of two batch policies compared with each other. They run one at a time and with no other test
-// beside them: TUnit runs every other test in parallel, and that load was enough to reverse the rebuild time
-// comparison of Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale.
+// ProgressiveIndexIngestion runs a scanner and a publisher joined by a bounded channel and publishes batches to an
+// IIndexUpdater while the scan runs (src/Ingestion). A user sees results grow during a long scan, and must get every
+// accepted entry published, a fault with the original exception instead of a hang, and the buffered entries published
+// on cancellation unless FlushOnCancellation is off. The scheduling rules themselves are unit tested on a manual clock
+// in PublishLoopTests; the tests here run the whole pipeline.
+//
+// Several tests here measure wall-clock time: gaps between publishes, cancellation after a fixed delay, and the publish
+// durations of two batch policies compared with each other. They run one at a time and with no other test beside them:
+// TUnit runs every other test in parallel, and that load was enough to reverse the comparison of publish durations in
+// the growth-aware batch cap test.
 [NotInParallel]
 public class ProgressiveIndexIngestionTests
 {
@@ -19,7 +25,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_CompletesWithExactEntrySet()
+    public async Task An_ingestion_publishes_exactly_the_entries_of_the_scan()
     {
         var (engine, updater, ingestion) = Create();
         const int count = 5_000;
@@ -42,16 +48,12 @@ public class ProgressiveIndexIngestionTests
         await Assert.That(updater.EntryCount).IsEqualTo(count);
         await Assert.That(engine.DocumentCount).IsEqualTo(count);
 
-        var expected = SyntheticPathFeed.CreateDictionary(count, seed: 11);
-        foreach (var (id, text) in expected)
-        {
-            await Assert.That(updater.ContainsEntry(id)).IsTrue();
-            _ = text;
-        }
+        var missing = SyntheticPathFeed.CreateDictionary(count, seed: 11).Keys.Where(id => !updater.ContainsEntry(id)).ToList();
+        await Assert.That(missing).IsEmpty();
     }
 
     [Test]
-    public async Task Ingest_PublishesProgressivelyDuringScan()
+    public async Task Snapshots_are_published_while_the_scan_runs()
     {
         var (engine, _, ingestion) = Create();
         const int count = 8_000;
@@ -78,7 +80,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_CancellationFlushesBufferByDefault()
+    public async Task Cancellation_publishes_the_buffered_entries_by_default()
     {
         var (_, updater, ingestion) = Create();
         using var cts = new CancellationTokenSource();
@@ -99,12 +101,13 @@ public class ProgressiveIndexIngestionTests
 
         await Assert.That(result.WasCancelled).IsTrue();
         await Assert.That(result.CompletedSuccessfully).IsFalse();
-        await Assert.That(result.EntriesPublished).IsBetween(1, result.EntriesAccepted);
+        await Assert.That(result.EntriesAccepted).IsGreaterThan(0);
+        await Assert.That(result.EntriesPublished).IsEqualTo(result.EntriesAccepted);
         await Assert.That(updater.EntryCount).IsEqualTo(result.EntriesPublished);
     }
 
     [Test]
-    public async Task Ingest_CancellationWithoutFlush_DiscardsBuffer()
+    public async Task Cancellation_without_flush_discards_the_buffered_entries()
     {
         var (_, updater, ingestion) = Create();
         using var cts = new CancellationTokenSource();
@@ -130,7 +133,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_ReadWhileWriteStress_NeverThrowsOrReturnsUnknownIds()
+    public async Task Queries_during_an_ingestion_never_throw_or_return_unknown_ids()
     {
         var (engine, _, ingestion) = Create();
         const int count = 15_000;
@@ -149,8 +152,9 @@ public class ProgressiveIndexIngestionTests
                     var hits = engine.Find("file", WordMatchMethod.Within);
                     foreach (int id in hits)
                     {
-                        if (!observedIds.TryAdd(id, 0) && !finalIds.Contains(id))
+                        if (!finalIds.Contains(id))
                             exceptions.Enqueue(new InvalidOperationException($"Unknown id {id}"));
+                        observedIds.TryAdd(id, 0);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -181,16 +185,22 @@ public class ProgressiveIndexIngestionTests
                 },
             });
 
+        // The queries keep running until one has seen hits, so the id check above is never vacuous.
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (observedIds.IsEmpty && exceptions.IsEmpty && waited.Elapsed < TestTimeout)
+            await Task.Delay(1);
+
         queryCts.Cancel();
         await Task.WhenAll(queryTasks);
 
         await Assert.That(ingestResult.CompletedSuccessfully).IsTrue();
         await Assert.That(exceptions).IsEmpty();
+        await Assert.That(observedIds).IsNotEmpty();
         await Assert.That(engine.DocumentCount).IsEqualTo(count);
     }
 
     [Test]
-    public async Task Ingest_WithFacets_SupportsFilterQueriesDuringAndAfterScan()
+    public async Task Facet_filters_work_on_every_published_snapshot()
     {
         var (engine, _, ingestion) = Create();
         const int count = 3_000;
@@ -217,7 +227,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_GrowthAwareBatchCap_ReducesPublishCountAtScale()
+    public async Task The_growth_aware_batch_cap_publishes_less_often_at_scale()
     {
         var (_, _, ingestion) = Create();
         const int count = 20_000;
@@ -261,7 +271,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_TotalPublishDuration_IsTheSumOfThePublishDurationsOfAllPublishes()
+    public async Task TotalPublishDuration_is_the_sum_of_the_publish_durations()
     {
         var (_, _, ingestion) = Create();
         var publishDurations = new ConcurrentQueue<TimeSpan>();
@@ -276,7 +286,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_RejectsConcurrentRuns()
+    public async Task A_second_concurrent_ingestion_is_rejected()
     {
         var (_, _, ingestion) = Create();
         using var gate = new ManualResetEventSlim(false);
@@ -330,7 +340,7 @@ public class ProgressiveIndexIngestionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Adaptive_WhenRebuildExceedsMaxStaleness_BacksOffUnlessStrict(bool strict)
+    public async Task Adaptive_backs_off_when_a_publish_takes_longer_than_MaxStaleness_unless_strict(bool strict)
     {
         // Every rebuild takes 120 ms, longer than MaxStaleness (30 ms): each new batch is stale
         // as soon as the previous rebuild ends.
@@ -376,7 +386,7 @@ public class ProgressiveIndexIngestionTests
     [Arguments(PublishFault.Updater)]
     [Arguments(PublishFault.OnPublishedCallback)]
     [Arguments(PublishFault.PublishedEvent)]
-    public async Task Ingest_PublisherFaultsWhileScannerIsBlockedOnFullChannel_FaultsWithOriginalException(PublishFault where)
+    public async Task A_publisher_fault_while_the_scanner_waits_on_a_full_channel_faults_with_that_exception(PublishFault where)
     {
         // 30,000 entries, channel capacity 10,000: by the time the publisher fails on its first batch the
         // scanner has filled the channel and is blocked writing the next entry.
@@ -411,7 +421,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_ScannerFaultsWhilePublisherWaits_FlushesBufferThenFaultsWithScannerException()
+    public async Task A_scan_error_publishes_the_buffer_and_then_faults_with_the_scan_exception()
     {
         var updater = new IndexUpdater(new IndexSnapshotProvider());
         var ingestion = new ProgressiveIndexIngestion(updater);
@@ -437,7 +447,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_ScannerAndPublisherBothFault_ScannerExceptionSurfaces()
+    public async Task When_scanner_and_publisher_both_fault_the_scan_exception_surfaces()
     {
         var scanFault = new IOException("scan failed");
         var publishFault = new InvalidOperationException("final flush failed");
@@ -465,7 +475,7 @@ public class ProgressiveIndexIngestionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Ingest_ScannerFaultsRightAfterItsEntries_AlwaysPublishesThemBeforeFaulting(bool callerCancelsRightAfter)
+    public async Task Entries_read_right_before_a_scan_error_are_published_before_the_fault(bool callerCancelsRightAfter)
     {
         // The scan hands over 3 entries and fails at once; in one variant the caller cancels at the same moment.
         // Each run races the scanner's failure against the publisher's wait, so the loop covers many orderings.
@@ -523,50 +533,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    [Arguments(false)]
-    [Arguments(true)]
-    public async Task WaitForEntry_ReportsEndOfInputWhenTheScannerFailed(bool callerCancelled)
-    {
-        // A failed channel throws the scanner's exception from WaitToReadAsync. That can happen before the
-        // channel's Completion task is complete, and after the caller cancelled; neither may skip the final flush.
-        using var cts = new CancellationTokenSource();
-        if (callerCancelled)
-            cts.Cancel();
-        var completion = callerCancelled ? Task.FromException(new IOException("scan failed")) : new TaskCompletionSource().Task;
-        var reader = new FailedChannelReader(new IOException("scan failed"), completion);
-
-        bool entriesAvailable = await PublishLoop.WaitForEntryAsync(reader, cts.Token);
-
-        await Assert.That(entriesAvailable).IsFalse();
-    }
-
-    [Test]
-    public async Task WaitForEntry_PropagatesTheCallersCancellation()
-    {
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-        var reader = new FailedChannelReader(new OperationCanceledException(cts.Token), new TaskCompletionSource().Task);
-
-        await Assert.That(() => PublishLoop.WaitForEntryAsync(reader, cts.Token)).ThrowsExactly<OperationCanceledException>();
-    }
-
-    /// <summary>A channel reader whose wait fails with <c>error</c>, as a channel completed with an error does.</summary>
-    private sealed class FailedChannelReader(Exception error, Task completion) : System.Threading.Channels.ChannelReader<int>
-    {
-        public override Task Completion => completion;
-
-        public override bool TryRead(out int item)
-        {
-            item = 0;
-            return false;
-        }
-
-        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
-            => ValueTask.FromException<bool>(error);
-    }
-
-    [Test]
-    public async Task Ingest_HandlerThrowsCancellationAfterAPublish_PublishesEachEntryOnce()
+    public async Task A_handler_that_throws_cancellation_after_a_publish_leaves_each_entry_published_once()
     {
         // The caller cancels inside the second onPublished, and the handler then observes the token. The batch it
         // reports is already in the index: the flush on cancellation must not publish it again.
@@ -597,7 +564,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_Cancelled_PublishesTheBufferWithoutWaitingForTheScannerToStop()
+    public async Task Cancellation_publishes_the_buffer_without_waiting_for_the_scanner_to_stop()
     {
         // The scanner ignores the token and stays silent after 5 entries. Cancelling must publish them at once,
         // not when the scanner stops. The entry it yields after the cancellation is not accepted.
@@ -638,7 +605,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_ProgressNeverReportsMorePublishedThanAcceptedEntries()
+    public async Task Progress_never_reports_more_published_than_accepted_entries()
     {
         // A channel of one entry and a publish per entry: the publisher takes each entry the moment the scanner
         // hands it over. An entry must be counted as accepted before the publisher can publish it.
@@ -669,7 +636,7 @@ public class ProgressiveIndexIngestionTests
     }
 
     [Test]
-    public async Task Ingest_CancelledWhileScannerIsBlockedOnFullChannel_PublishesEverythingItAccepted()
+    public async Task Cancellation_while_the_scanner_waits_on_a_full_channel_publishes_everything_accepted()
     {
         // Capacity 50, batch 10. The first rebuild blocks; the scanner fills the channel and then
         // blocks on entry 61. Cancelling must publish the 50 accepted entries still queued in the channel.
@@ -704,7 +671,7 @@ public class ProgressiveIndexIngestionTests
         await Assert.That(feed.Disposed).IsTrue();
     }
 
-    /// <summary>A scanner that yields <c>count</c> entries as fast as it is allowed to and records how far it got.</summary>
+    // A scanner that yields count entries as fast as it is allowed to and records how far it got.
     private sealed class CountingFeed(int count)
     {
         private int _yielded;
@@ -750,7 +717,7 @@ public class ProgressiveIndexIngestionTests
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     [Test]
-    public async Task Adaptive_TimerWakingEarly_RearmsInsteadOfWaitingForNextEntry()
+    public async Task Adaptive_rearms_a_timer_that_wakes_early_instead_of_waiting_for_the_next_entry()
     {
         // Task.Delay truncates to whole milliseconds, so a timer may fire just before the publish
         // gate opens. The publisher must re-arm for the remaining time, not wait for the next entry.
@@ -797,7 +764,7 @@ public class ProgressiveIndexIngestionTests
     [Test]
     [Arguments(false, 1200)] // gated: an entry buffered when a rebuild starts waits (1 + k) x rebuild
     [Arguments(true, 1000)]  // strict: MaxStaleness
-    public async Task Adaptive_StaleEntriesPublishWithoutFurtherScannerActivity(bool strict, int expectedStalenessMs)
+    public async Task Adaptive_publishes_stale_entries_without_further_scanner_activity(bool strict, int expectedStalenessMs)
     {
         // Rebuild 400 ms, k = 2, MaxStaleness 1 s. Five entries arrive while the first rebuild runs.
         // The gate opens at lastPublishEnd + k x rebuild = 1200 ms, when they are 1200 ms old.
@@ -865,7 +832,7 @@ public class ProgressiveIndexIngestionTests
         }
     }
 
-    /// <summary>Forwards to <paramref name="inner"/> and runs <paramref name="beforeAddOrUpdate"/> before every batch publish.</summary>
+    // Forwards to inner and runs beforeAddOrUpdate before every batch publish.
     private sealed class HookedUpdater(IndexUpdater inner, Action beforeAddOrUpdate) : IIndexUpdater
     {
         public int EntryCount => inner.EntryCount;
@@ -885,7 +852,7 @@ public class ProgressiveIndexIngestionTests
         public void Clear() => inner.Clear();
     }
 
-    /// <summary>An updater that only records the ids it receives, for tests that publish very often.</summary>
+    // An updater that only records the ids it receives, for tests that publish very often.
     private sealed class IdOnlyUpdater : IIndexUpdater
     {
         private readonly HashSet<int> _ids = [];
@@ -912,7 +879,7 @@ public class ProgressiveIndexIngestionTests
         public void Clear() => throw new NotSupportedException();
     }
 
-    /// <summary>Receives progress reports on the publisher task, without posting them anywhere.</summary>
+    // Receives progress reports on the publisher task, without posting them anywhere.
     private sealed class InlineProgress(Action<IngestionProgress> report) : IProgress<IngestionProgress>
     {
         public void Report(IngestionProgress value) => report(value);
