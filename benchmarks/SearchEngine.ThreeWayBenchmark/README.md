@@ -44,3 +44,20 @@ python3 scripts/aggregate.py results > results/report.md
   writer buffer, so read them as rough.
 - Sharp's `Count` for a plain term reads the posting-list length (O(1)), so that row measures a lookup, not a scan.
 - Tantivy's index is reached through a native boundary; every search crosses it, and results travel as JSON.
+
+## Sustained incremental indexing
+
+`--mode sustained` measures what the table above cannot: the latency of every call while an index of 1,000,000 documents keeps
+receiving documents, with the same visibility guarantee in all three engines (the call returns when a query sees the new
+documents), ids validated, and the cost of durability measured apart.
+
+```bash
+scripts/run-sustained.sh results/sustained     # every engine and scenario, one process each
+scripts/repeat-sustained.sh results/sustained 2 # two more runs of the single-document scenario
+python3 scripts/report_sustained.py results/sustained   # report.md and the plots (needs matplotlib)
+```
+
+Scenarios: 20,000 single-document additions (without and with a concurrent reader), batches of 10, 100, 1,000 and 10,000, and a
+durable disk-index run for the engines that have one. `PREV_DLL=<dll>` adds SearchEngine.Sharp built from another commit, as
+the report does for the layout before segments. The report is [results/sustained/report.md](results/sustained/report.md);
+`*.json` hold every call's latency, `*.log` the console output. The method and its caveats are in the report.

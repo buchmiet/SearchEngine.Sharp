@@ -10,7 +10,7 @@ are in [docs/performance.md](../docs/performance.md).
 | `SearchEngine.Sharp.MicroBenchmarks` | Single operations with BenchmarkDotNet | yes |
 | [`SearchEngine.Sharp.Profiling`](SearchEngine.Sharp.Profiling/README.md) | File search end to end on a generated tree, latency of every query path, build cost and memory | no |
 | [`SearchEngine.CompetitorBenchmarks`](SearchEngine.CompetitorBenchmarks/README.md) | The same file-name workloads in Tantivy, MiniSearch and Bleve | no |
-| [`SearchEngine.ThreeWayBenchmark`](SearchEngine.ThreeWayBenchmark/README.md) | The same file-name workloads in SearchEngine.Sharp, Lucene.NET and TantivyDotNet, with matching hit counts | no |
+| [`SearchEngine.ThreeWayBenchmark`](SearchEngine.ThreeWayBenchmark/README.md) | The same file-name workloads in SearchEngine.Sharp, Lucene.NET and TantivyDotNet, with matching hit counts and ids; sustained incremental indexing | no |
 | `SearchEngine.WriteLatencyBenchmark` | Latency of every `IndexUpdater` call while an index of 10^6 names changes, merges and garbage collections | no |
 
 ## SearchEngine.Sharp.Benchmarks

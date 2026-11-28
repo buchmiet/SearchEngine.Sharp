@@ -3,6 +3,8 @@ using System.Text.Json;
 using SearchEngine.Profiling;
 using ThreeWay;
 
+if (args.Contains("sustained")) return ThreeWay.Sustained.Run(args);
+
 string engineName = "sharp"; int n = 100_000; int seed = 2026; int builds = 3; string? outPath = null; string tmp = Path.Combine(Path.GetTempPath(), "threeway");
 for (int i = 0; i < args.Length; i++)
 {
@@ -104,3 +106,4 @@ RunQueries("merged");
 }
 
 if (outPath is not null) File.WriteAllText(outPath, JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
+return 0;
